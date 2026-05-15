@@ -60,7 +60,7 @@ from openpyxl.formatting.rule import CellIsRule
 # ==========================================================
 # 0) 全域參數（B：折衷，目標訊號數 20–60 / 9–12 個月）
 # ==========================================================
-TOP_N_FOR_TECH = 30
+TOP_N_FOR_TECH = 60 #30
 TECH_MONTHS = 12
 OUT_FILE_PREFIX = "選股報表"
 
@@ -74,7 +74,7 @@ TWSE_BACKOFF_BASE = 0.8           # 重試退避基底秒數（會乘以 attempt
 TWSE_SLEEP_SECONDS = 0.12         # 每次請求後睡一下（降低被限流風險）
 
 # 三段式買點（B折衷）
-RSI_OVERSOLD = 38
+RSI_OVERSOLD = 40 #38
 OVERSOLD_LOOKBACK = 10
 RSI_RECOVER = 40
 RSI_AGGRESSIVE = 45
@@ -82,7 +82,7 @@ USE_AGGRESSIVE_SIGNAL = True
 
 REQUIRE_TREND_FILTER = True
 MA_SLOPE_DAYS = 3
-MA20_TOLERANCE = 0.005
+MA20_TOLERANCE = 0.01 #0.005
 
 REQUIRE_VOLUME_FILTER = False     # B版：不強制（訊號較多）
 
