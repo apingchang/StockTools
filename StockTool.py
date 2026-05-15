@@ -924,5 +924,6 @@ def main():
         print("⚠️ 注意：mopsfin 憑證過期期間，本程式暫用 verify=False（短期救急用）。")
 
 
+
 if __name__ == "__main__":
     main()
