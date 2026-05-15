@@ -24,8 +24,9 @@ warnings.filterwarnings("ignore")
 
 session = requests.Session()
 session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/6.1"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/6.3"
 })
+
 
 # =========================
 # 小工具
@@ -38,6 +39,7 @@ def find_col(cols, keywords):
                 return c
     return None
 
+
 def to_num_series(s):
     return pd.to_numeric(
         s.astype(str)
@@ -48,7 +50,12 @@ def to_num_series(s):
         errors="coerce"
     )
 
+
 def fetch_csv_requests(url, encodings=("utf-8-sig", "utf-8")):
+    """
+    用 requests 下載 CSV，再交給 pandas parse（容錯較高）。
+    mopsfin 憑證過期期間用 verify=False（短期救急）。
+    """
     r = session.get(url, timeout=TIMEOUT, verify=VERIFY_SSL)
     r.raise_for_status()
 
@@ -66,7 +73,9 @@ def fetch_csv_requests(url, encodings=("utf-8-sig", "utf-8")):
 
     raise RuntimeError(f"讀取失敗：{url}，最後錯誤：{last_err}")
 
+
 def month_starts_back(n_months: int):
+    """回傳近 n 個月的 YYYYMM01（含本月）"""
     today = date.today()
     y, m = today.year, today.month
     out = []
@@ -79,7 +88,9 @@ def month_starts_back(n_months: int):
         out.append(f"{yy}{mm:02d}01")
     return out
 
+
 def roc_to_ad(roc_str: str):
+    """把 '113/09/02' 民國日期轉 datetime.date"""
     parts = str(roc_str).strip().split("/")
     if len(parts) != 3:
         return None
@@ -87,6 +98,7 @@ def roc_to_ad(roc_str: str):
     mm = int(parts[1])
     dd = int(parts[2])
     return date(yy, mm, dd)
+
 
 # =========================
 # 1) 今日股價：TWSE + TPEX（基本面用）
@@ -144,6 +156,7 @@ def fetch_prices():
     price = price.drop_duplicates(subset=["股票代號"], keep="first").reset_index(drop=True)
     return price
 
+
 # =========================
 # 2) 月營收：mopsfin L + O（暫時 verify=False）
 # =========================
@@ -189,6 +202,7 @@ def fetch_revenue_latest():
     out = rev[["股票代號", "年月", "當月營收(億元)", "營收YoY(%)"]].drop_duplicates("股票代號")
     return out.reset_index(drop=True)
 
+
 # =========================
 # 3) EPS：mopsfin L + O（暫時 verify=False）
 # =========================
@@ -228,13 +242,16 @@ def fetch_eps_latest():
     out["EPS季別"] = f"{int(latest_year)}Q{int(latest_q)}"
     out = out.drop_duplicates(subset=["股票代號"], keep="first").reset_index(drop=True)
 
-    # ✅✅✅ 這裡是你剛剛 SyntaxError 的修正點（補上 ] ）
     return out[["股票代號", "EPS季別", "EPS本期", "EPSYoY"]]
+
 
 # =========================
 # 4) 技術面（TWSE STOCK_DAY）
 # =========================
 def fetch_twse_stock_day_month(stock_no: str, yyyymm01: str):
+    # TWSE 月內日成交資訊（JSON）
+    # 形式：/exchangeReport/STOCK_DAY?response=json&date=YYYYMMDD&stockNo=2330
+    # date 用每月 01 日代表該月 [1](https://www.techpowerup.com/334295/nvidia-announces-blackwell-ultra-platform-for-next-gen-ai)
     url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY"
     params = {"response": "json", "date": yyyymm01, "stockNo": stock_no}
     r = session.get(url, params=params, timeout=TIMEOUT)
@@ -279,6 +296,7 @@ def fetch_twse_stock_day_month(stock_no: str, yyyymm01: str):
     dfm = dfm.dropna(subset=["Date", "Close"]).copy()
     return dfm[["Date", "股票代號", "Open", "High", "Low", "Close"]].copy()
 
+
 def fetch_twse_history(codes, months=TECH_MONTHS):
     month_keys = month_starts_back(months)
     all_frames = []
@@ -305,6 +323,7 @@ def fetch_twse_history(codes, months=TECH_MONTHS):
     hist = pd.concat(all_frames, ignore_index=True)
     hist = hist.sort_values(["股票代號", "Date"]).reset_index(drop=True)
     return hist
+
 
 def calc_tech_indicators(df_hist):
     df_hist = df_hist.sort_values("Date").copy()
@@ -337,13 +356,18 @@ def calc_tech_indicators(df_hist):
     df_hist["R_5D"] = df_hist["Close"].shift(-5) / df_hist["Close"] - 1
     return df_hist
 
+
 def run_tech_and_backtest(codes):
     hist = fetch_twse_history(codes, months=TECH_MONTHS)
     if hist.empty:
         tech_today = pd.DataFrame()
         buy_today = pd.DataFrame()
         backtest_summary = pd.DataFrame([{
-            "訊號數": 0, "1日平均報酬(%)": None, "5日平均報酬(%)": None, "5日勝率(%)": None, "5日中位數報酬(%)": None
+            "訊號數": 0,
+            "1日平均報酬(%)": None,
+            "5日平均報酬(%)": None,
+            "5日勝率(%)": None,
+            "5日中位數報酬(%)": None
         }])
         return tech_today, buy_today, backtest_summary
 
@@ -370,7 +394,9 @@ def run_tech_and_backtest(codes):
         "5日勝率(%)": round((r5 > 0).mean() * 100, 2) if len(r5) else None,
         "5日中位數報酬(%)": round(r5.median() * 100, 2) if len(r5) else None
     }])
+
     return tech_today, buy_today, backtest_summary
+
 
 # =========================
 # 主流程
@@ -378,6 +404,10 @@ def run_tech_and_backtest(codes):
 def main():
     print("1) 下載股價（TWSE+TPEX）...")
     price = fetch_prices()
+
+    # 公司名稱對照表（用於技術面工作表）
+    name_map = price[["股票代號", "公司名稱_來源"]].dropna().drop_duplicates("股票代號").copy()
+    name_map = name_map.rename(columns={"公司名稱_來源": "公司名稱"})
 
     print("2) 下載最新月營收（mopsfin L+O；暫時跳過 SSL 驗證）...")
     rev_latest = fetch_revenue_latest()
@@ -406,11 +436,25 @@ def main():
         (df["PE"] < 30) &
         (df["股價"] > 10)
     ].copy()
+
     top10 = df.head(10).copy()
 
     print(f"5) 抓歷史日K（TWSE STOCK_DAY）Top{TOP_N_FOR_TECH}（不使用Yahoo）...")
     tech_codes = df.head(TOP_N_FOR_TECH)["股票代號"].dropna().astype(str).tolist()
     tech_today, buy_today, backtest_summary = run_tech_and_backtest(tech_codes)
+
+    # ✅ 技術面加公司名稱（你要的）
+    if not tech_today.empty:
+        tech_today = tech_today.merge(name_map, on="股票代號", how="left")
+        front = ["股票代號", "公司名稱", "Date"]
+        cols = [c for c in front if c in tech_today.columns] + [c for c in tech_today.columns if c not in front]
+        tech_today = tech_today[cols]
+
+    if not buy_today.empty:
+        buy_today = buy_today.merge(name_map, on="股票代號", how="left")
+        front = ["股票代號", "公司名稱", "Date"]
+        cols = [c for c in front if c in buy_today.columns] + [c for c in buy_today.columns if c not in front]
+        buy_today = buy_today[cols]
 
     print("✅ 技術回測摘要：")
     print(backtest_summary.to_string(index=False))
@@ -427,6 +471,7 @@ def main():
     print(f"✅ 完成 → {out_file}")
     if not VERIFY_SSL:
         print("⚠️ 注意：mopsfin 憑證過期期間，本程式暫用 verify=False 下載公開資料（短期救急用）。")
+
 
 if __name__ == "__main__":
     main()
