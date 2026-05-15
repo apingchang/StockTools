@@ -153,4 +153,42 @@ with pd.ExcelWriter(file, engine="openpyxl") as writer:
     strong.to_excel(writer, index=False, sheet_name="強勢股")
     top10.to_excel(writer, index=False, sheet_name="Top10")
 
+# ===== 技術面（簡化日資料）=====
+df["MA5"] = df["股價"].rolling(5).mean()
+df["MA20"] = df["股價"].rolling(20).mean()
+
+# RSI（簡化版）
+delta = df["股價"].diff()
+gain = delta.clip(lower=0)
+loss = -delta.clip(upper=0)
+
+rs = gain.rolling(14).mean() / loss.rolling(14).mean()
+df["RSI"] = 100 - (100 / (1 + rs))
+
+# MACD（簡化）
+df["EMA12"] = df["股價"].ewm(span=12).mean()
+df["EMA26"] = df["股價"].ewm(span=26).mean()
+df["MACD"] = df["EMA12"] - df["EMA26"]
+
+df["買點"] = (
+    (df["RSI"] < 35) &
+    (df["MACD"] > 0)
+)
+
+df["多頭"] = df["MA5"] > df["MA20"]
+df["強勢股"] = df["買點"] & df["多頭"]
+
+df["明日報酬"] = df["股價"].shift(-1) / df["股價"] - 1
+
+# 只看買點
+buy = df[df["買點"] == True]
+
+avg_return = buy["明日報酬"].mean()
+
+print("✅ 策略平均報酬:", round(avg_return*100, 2), "%")
+print("✅ 訊號數量:", len(buy))
+
+buy.to_excel(writer, index=False, sheet_name="買點清單")
+
+
 print("✅ 完成 →", file)
