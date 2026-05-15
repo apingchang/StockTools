@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="17f26410-9c4a-4bd9-a498-e3b9500f2f3e" name="Changes" comment="V0.6.1">
+    <list default="true" id="17f26410-9c4a-4bd9-a498-e3b9500f2f3e" name="Changes" comment="V0.6.1 &#10;TOP_N_FOR_TECH = 60&#10;RSI_OVERSOLD = 40&#10;MA20_TOLERANCE = 0.01">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/StockTool.py" beforeDir="false" afterPath="$PROJECT_DIR$/StockTool.py" afterDir="false" />
     </list>
@@ -114,7 +114,15 @@
       <option name="project" value="LOCAL" />
       <updated>1778842932698</updated>
     </task>
-    <option name="localTasksCounter" value="7" />
+    <task id="LOCAL-00007" summary="V0.6.1 &#10;TOP_N_FOR_TECH = 60&#10;RSI_OVERSOLD = 40&#10;MA20_TOLERANCE = 0.01">
+      <option name="closed" value="true" />
+      <created>1778849106802</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1778849106802</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -135,6 +143,7 @@
     <MESSAGE value="V0.3" />
     <MESSAGE value="V0.4" />
     <MESSAGE value="V0.6.1" />
-    <option name="LAST_COMMIT_MESSAGE" value="V0.6.1" />
+    <MESSAGE value="V0.6.1 &#10;TOP_N_FOR_TECH = 60&#10;RSI_OVERSOLD = 40&#10;MA20_TOLERANCE = 0.01" />
+    <option name="LAST_COMMIT_MESSAGE" value="V0.6.1 &#10;TOP_N_FOR_TECH = 60&#10;RSI_OVERSOLD = 40&#10;MA20_TOLERANCE = 0.01" />
   </component>
 </project>

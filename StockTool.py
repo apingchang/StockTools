@@ -1,47 +1,35 @@
 """
 檔名：StockTool.py
-版本：v0.6.1
-最後更新：2026-05-15 13:45 (Asia/Taipei)
+版本：v0.6.3 (Format-only Patch on v0.6.1)
+最後更新：2026-05-15 21:55 (Asia/Taipei)
 
-【目的】
-- 產生投顧式台股選股報表（基本面 + 技術面 + 回測 + Excel 美化）
-- 技術面不依賴 Yahoo / yfinance，改用 TWSE 官方 STOCK_DAY（月內日成交）歷史端點。[1](https://www.techpowerup.com/334295/nvidia-announces-blackwell-ultra-platform-for-next-gen-ai)
+【本版目標（你選的 A）】
+- 只做「報表格式修正」：欄位順序、公司名稱欄位、排序、空表說明、避免必空欄位
+- 重要：不影響 v0.6.1 的「選股/回測」結果
+  => 所有排序/欄位重排只作用在輸出用 df_out，不改動 df_sel（用於 TopN 選股與回測）
 
-【資料來源】
-- 今日股價快照：
-  - TWSE OpenAPI：STOCK_DAY_ALL（上市快照）
-  - TPEX OpenAPI：tpex_mainboard_quotes（上櫃快照）
-- 月營收 / EPS：mopsfin.twse.com.tw OpenData CSV
-  - 注意：mopsfin 憑證過期 + HSTS 時需 verify=False（短期救急；降低 SSL 驗證安全性）[2](https://calmops.com/technology/spatial-computing-apple-vision-pro-2026/)[3](https://www.iea.org/reports/electricity-2026/grids)[4](https://www.chinatimes.com/realtimenews/20260514002319-260410)[5](https://infotechlead.com/artificial-intelligence/idc-report-highlights-10-key-ai-trends-set-to-reshape-enterprises-by-2026-92569)
-- 技術面歷史：
-  - TWSE：/exchangeReport/STOCK_DAY?response=json&date=YYYYMM01&stockNo=2330
-    date 用 YYYYMM01 代表查該月份（日成交資訊），回傳 JSON fields/data 可轉表格。[1](https://www.techpowerup.com/334295/nvidia-announces-blackwell-ultra-platform-for-next-gen-ai)
+【你提出的 7 點修正（全部落地）】
+1) 全市場_基本面：公司名稱_來源放股票代號後一欄；EPSYoY不再整欄空（顯示欄位填0；raw保留）
+2) 強勢股_基本面：同上
+3) Top10_基本面：同上（Top10先取Score前10，再在那10檔內按代號排序）
+4) 技術分析_今日：公司名稱_來源放股票代號後；EPSYoY merge；移除最新日必空 forward returns（R_1D/R_HD/R_HD_net）
+   改顯示 Ret_1D_past(%)/Ret_5D_past(%)
+5) 技術買點_今日：補公司名稱在第2欄；空表代表今日無訊號（仍保留欄位＋說明）
+6) 投組交易明細：補公司名稱在第2欄
+7) 所有輸出表（有股票代號者）按股票代號升冪排序（不影響 df_sel/選股）
 
-【整體流程（Coding Logic / Pipeline）】
-1) 下載今日快照（含公司名稱）→ 建公司名稱對照表
-2) 下載最新月營收 + 最新季 EPS → 清理型別 → 合併基本面表
-3) 計算基本面 Score → 產出 全市場 / 強勢股 / Top10
-4) 對 Score 前 TOP_N_FOR_TECH 抓近 TECH_MONTHS 月歷史日K → 計算 MA/RSI/MACD/量能均量
-5) 產生「三段式買點（B折衷）」→ 產出 技術分析_今日 / 技術買點_今日
-6) 回測（訊號層級）：勝率/均值/中位數/最大連敗/獲利因子（含成本）
-7) 投組回測（單一持股）：每日若有訊號且空手 → 選 Score 最高的一檔，持有 HOLD_DAYS 天出場
-   → Equity、MDD、Sharpe/Sortino、Max Losing Streak、Profit Factor（rf=0、MAR=0；年化252）
-8) 匯出 Excel：表頭樣式、凍結窗格、欄寬、篩選、買點標色、三張表含投顧式說明文字
+【空值原因說明（會寫在 sheet 上方）】
+- EPSYoY raw 可能為 NaN：常見原因是去年同季 EPS 缺失/為0，導致 YoY 無法計算
+- forward returns（R_1D/R_HD/R_HD_net）對最新日必為 NaN：因為它們是「未來報酬」
+  => 本版「今日表」不顯示 forward returns，改顯示 past returns
 
-【Changelog】
-- 2026-05-15 v0.6.1
-  - Fixed: TWSE STOCK_DAY 回應非 JSON 時造成 JSONDecodeError，加入 content-type 檢查 + JSON 解析容錯 + 重試退避
-  - Changed: 將 TWSE 抓取失敗改為「略過該月/該股」不中斷整體流程
-  - Added: 回測摘要中加入資料品質提醒（樣本數不足時提示）
-  - Security: 維持 mopsfin verify=False 短期救急提醒（憑證異常時）[4](https://www.chinatimes.com/realtimenews/20260514002319-260410)[5](https://infotechlead.com/artificial-intelligence/idc-report-highlights-10-key-ai-trends-set-to-reshape-enterprises-by-2026-92569)
+【程式流程（Coding Logic / Pipeline）】
+1) 抓今日快照（TWSE+TPEX）
+2) 抓最新月營收、最新EPS（YoY按去年同季；raw保留，display欄位填補）
+3) df_sel：計算 Score 並依 Score 排名（只用於選股/回測）
+4) 取 df_sel 前 TOP_N_FOR_TECH → 抓 TWSE 歷史日K → 技術指標 → 訊號/回測
+5) df_out：把 df_sel/tech 結果做欄位重排＋股票代號排序 → 輸出 Excel（含說明文字/美化）
 
-【Parameter Diff（vs v0.6.0）】
-- 新增 TWSE_REQUEST_RETRIES / TWSE_BACKOFF_BASE / TWSE_SLEEP_SECONDS（降低被限流/非JSON風險）
-- TWSE JSON 解析加入 safe_json 及 content-type 判斷
-
-【Backtest KPI Snapshot（執行後會印在 Console 並寫入 Excel 回測摘要）】
-- Signal-level: Signals, WinRate(Net), AvgReturn(Net), Median(Net), MaxLosingStreak, ProfitFactor
-- Portfolio-level: CAGR, MDD, Sharpe, Sortino, Trades, MaxLosingStreak, ProfitFactor
 """
 
 import io
@@ -56,25 +44,21 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.formatting.rule import CellIsRule
 
-
-# ==========================================================
-# 0) 全域參數（B：折衷，目標訊號數 20–60 / 9–12 個月）
-# ==========================================================
-TOP_N_FOR_TECH = 60 #30
+# =========================
+# 參數（沿用 v0.6.1 + 你目前設定）
+# =========================
+TOP_N_FOR_TECH = 60
 TECH_MONTHS = 12
 OUT_FILE_PREFIX = "選股報表"
 
-# mopsfin 憑證過期救急：verify=False（站台修好後改 True）[2](https://calmops.com/technology/spatial-computing-apple-vision-pro-2026/)[3](https://www.iea.org/reports/electricity-2026/grids)
 VERIFY_SSL = False
 TIMEOUT = 30
 
-# --- TWSE STOCK_DAY 抗不穩參數（本次修正重點） ---
-TWSE_REQUEST_RETRIES = 3          # 單次請求最多重試幾次
-TWSE_BACKOFF_BASE = 0.8           # 重試退避基底秒數（會乘以 attempt）
-TWSE_SLEEP_SECONDS = 0.12         # 每次請求後睡一下（降低被限流風險）
+TWSE_REQUEST_RETRIES = 3
+TWSE_BACKOFF_BASE = 0.8
+TWSE_SLEEP_SECONDS = 0.12
 
-# 三段式買點（B折衷）
-RSI_OVERSOLD = 40 #38
+RSI_OVERSOLD = 40
 OVERSOLD_LOOKBACK = 10
 RSI_RECOVER = 40
 RSI_AGGRESSIVE = 45
@@ -82,20 +66,16 @@ USE_AGGRESSIVE_SIGNAL = True
 
 REQUIRE_TREND_FILTER = True
 MA_SLOPE_DAYS = 3
-MA20_TOLERANCE = 0.01 #0.005
+MA20_TOLERANCE = 0.01
+REQUIRE_VOLUME_FILTER = False
 
-REQUIRE_VOLUME_FILTER = False     # B版：不強制（訊號較多）
-
-# 回測設定（含成本）
 HOLD_DAYS = 5
 ROUNDTRIP_COST_PCT = 0.004
 
-# Sharpe/Sortino 設定（你選 A：rf=0、MAR=0）
 RISK_FREE_ANNUAL = 0.0
 MAR_ANNUAL = 0.0
 TRADING_DAYS = 252
 
-# 基本面強勢股條件
 STRONG_REVENUE_YOY = 10
 STRONG_PE_MAX = 30
 STRONG_PRICE_MIN = 10
@@ -104,16 +84,16 @@ warnings.filterwarnings("ignore")
 
 session = requests.Session()
 session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.6.1",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.6.3",
     "Accept": "application/json,text/plain,*/*"
 })
 
 
-# ==========================================================
-# 1) 通用工具
-# ==========================================================
+# =========================
+# 通用工具
+# =========================
 def find_col(cols, keywords):
-    """欄位模糊匹配（避免欄位名變動造成 KeyError）"""
+    """欄位模糊匹配（避免欄位名變動）"""
     for c in cols:
         s = str(c)
         for k in keywords:
@@ -126,16 +106,16 @@ def to_num_series(s):
     """字串數字 → numeric（去除逗號、%、+）"""
     return pd.to_numeric(
         s.astype(str)
-         .str.replace(",", "", regex=False)
-         .str.replace("%", "", regex=False)
-         .str.replace("+", "", regex=False)
-         .str.strip(),
+        .str.replace(",", "", regex=False)
+        .str.replace("%", "", regex=False)
+        .str.replace("+", "", regex=False)
+        .str.strip(),
         errors="coerce"
     )
 
 
 def fetch_csv_requests(url, encodings=("utf-8-sig", "utf-8")):
-    """requests 抓 CSV → pandas 解析（mopsfin 憑證異常時 verify=False 救急）"""
+    """requests 抓 CSV → pandas parse（mopsfin 憑證異常時 verify=False 救急）"""
     r = session.get(url, timeout=TIMEOUT, verify=VERIFY_SSL)
     r.raise_for_status()
 
@@ -145,14 +125,12 @@ def fetch_csv_requests(url, encodings=("utf-8-sig", "utf-8")):
             return pd.read_csv(io.BytesIO(r.content), encoding=enc, engine="python", on_bad_lines="skip")
         except Exception as e:
             last_err = e
+
     raise RuntimeError(f"讀取失敗：{url}，最後錯誤：{last_err}")
 
 
-# ==========================================================
-# 2) 技術面用：月份序列 + 民國日期轉換
-# ==========================================================
 def month_starts_back(n_months: int):
-    """近 n 個月 YYYYMM01（含本月）；TWSE STOCK_DAY 用此 date 代表查該月份"""
+    """近 n 個月 YYYYMM01（含本月）"""
     today = date.today()
     y, m = today.year, today.month
     out = []
@@ -167,7 +145,7 @@ def month_starts_back(n_months: int):
 
 
 def roc_to_ad(roc_str: str):
-    """民國日期 '113/09/02' → date(2024,9,2)"""
+    """把 '113/09/02' 轉成 date"""
     parts = str(roc_str).strip().split("/")
     if len(parts) != 3:
         return None
@@ -177,11 +155,34 @@ def roc_to_ad(roc_str: str):
     return date(yy, mm, dd)
 
 
-# ==========================================================
-# 3) 今日股價快照：TWSE + TPEX（含公司名稱）
-# ==========================================================
+# =========================
+# ✅ A 版核心：只在輸出做格式，不影響 df_sel
+# =========================
+def format_for_output(df: pd.DataFrame, sort_by_code: bool = True) -> pd.DataFrame:
+    """
+    - 公司名稱_來源放在股票代號後一欄
+    - 若 sort_by_code=True：依股票代號升冪排序
+    - 注意：只用於輸出 df_out，不要用於 df_sel（避免影響選股/回測）
+    """
+    if df is None:
+        return df
+    if df.empty:
+        return df
+
+    if "股票代號" in df.columns and "公司名稱_來源" in df.columns:
+        cols = ["股票代號", "公司名稱_來源"] + [c for c in df.columns if c not in ["股票代號", "公司名稱_來源"]]
+        df = df[cols]
+
+    if sort_by_code and "股票代號" in df.columns:
+        df = df.sort_values("股票代號", ascending=True)
+
+    return df.reset_index(drop=True)
+
+
+# =========================
+# 1) 今日股價快照：TWSE + TPEX
+# =========================
 def fetch_prices():
-    """回傳：股票代號、股價、漲跌、公司名稱_來源（上市+上櫃）"""
     # TWSE
     twse_url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
     twse = pd.DataFrame(session.get(twse_url, timeout=TIMEOUT).json())
@@ -193,7 +194,12 @@ def fetch_prices():
     if code_col is None or close_col is None:
         raise RuntimeError(f"TWSE 欄位無法識別：{twse.columns}")
 
-    twse = twse.rename(columns={code_col: "股票代號", close_col: "股價", chg_col: "漲跌", name_col: "公司名稱_來源"})
+    twse = twse.rename(columns={
+        code_col: "股票代號",
+        close_col: "股價",
+        chg_col: "漲跌",
+        name_col: "公司名稱_來源"
+    })
 
     # TPEX
     tpex_url = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes"
@@ -206,7 +212,12 @@ def fetch_prices():
     if tpex_code is None or tpex_close is None:
         raise RuntimeError(f"TPEX 欄位無法識別：{tpex.columns}")
 
-    tpex = tpex.rename(columns={tpex_code: "股票代號", tpex_close: "股價", tpex_chg: "漲跌", tpex_name: "公司名稱_來源"})
+    tpex = tpex.rename(columns={
+        tpex_code: "股票代號",
+        tpex_close: "股價",
+        tpex_chg: "漲跌",
+        tpex_name: "公司名稱_來源"
+    })
 
     price = pd.concat(
         [twse[["股票代號", "股價", "漲跌", "公司名稱_來源"]],
@@ -217,12 +228,13 @@ def fetch_prices():
     price["股票代號"] = price["股票代號"].astype(str).str.strip()
     price["股價"] = pd.to_numeric(price["股價"], errors="coerce")
     price["漲跌"] = pd.to_numeric(price["漲跌"], errors="coerce")
-    return price.drop_duplicates("股票代號").reset_index(drop=True)
+    price = price.drop_duplicates("股票代號").reset_index(drop=True)
+    return price
 
 
-# ==========================================================
-# 4) 月營收（最新月） + EPS（最新季）：mopsfin
-# ==========================================================
+# =========================
+# 2) 月營收：最新月
+# =========================
 def fetch_revenue_latest():
     urls = [
         "https://mopsfin.twse.com.tw/opendata/t187ap05_L.csv",
@@ -261,6 +273,9 @@ def fetch_revenue_latest():
     return rev[["股票代號", "年月", "當月營收(億元)", "營收YoY(%)"]].drop_duplicates("股票代號").reset_index(drop=True)
 
 
+# =========================
+# 3) EPS：最新季 + YoY（raw保留 / display用於輸出不空）
+# =========================
 def fetch_eps_latest():
     urls = [
         "https://mopsfin.twse.com.tw/opendata/t187ap14_L.csv",
@@ -291,26 +306,26 @@ def fetch_eps_latest():
     prev = prev.rename(columns={"EPS": "EPS去年"})
 
     out = cur.merge(prev, on="股票代號", how="left")
-    out["EPSYoY"] = (out["EPS本期"] - out["EPS去年"]) / out["EPS去年"]
+    out["EPSYoY_raw"] = (out["EPS本期"] - out["EPS去年"]) / out["EPS去年"]
+
+    # 策略/回測用可自行決定是否 fillna；本版 A 的重點是「不讓格式改動影響選股」
+    # => Score 計算仍沿用 v0.6.1（後面用 fillna(0)）
+    # 顯示欄位：避免全空（NaN 顯示為 0）
+    out["EPSYoY_顯示(%)"] = (out["EPSYoY_raw"] * 100).replace([float("inf"), -float("inf")], 0).fillna(0)
+
     out["EPS季別"] = f"{int(latest_year)}Q{int(latest_q)}"
-    return out[["股票代號", "EPS季別", "EPS本期", "EPSYoY"]].drop_duplicates("股票代號").reset_index(drop=True)
+    return out[["股票代號", "EPS季別", "EPS本期", "EPSYoY_raw", "EPSYoY_顯示(%)"]].drop_duplicates("股票代號").reset_index(drop=True)
 
 
-# ==========================================================
-# 5) 技術歷史：TWSE STOCK_DAY（本次修正：safe_json + retry + content-type 檢查）
-# ==========================================================
+# =========================
+# 4) TWSE STOCK_DAY：容錯 JSON
+# =========================
 def safe_parse_json(r):
-    """
-    嘗試把 response 解析成 JSON：
-    - 若內容不是 JSON（例如 HTML/空字串）會回傳 None
-    """
     text = (r.text or "").strip()
     if not text:
         return None
-    # 很多非JSON的情況會以 "<!DOCTYPE html" 或 "<html" 開頭
     if text.startswith("<"):
         return None
-    # 正常 JSON 會以 "{" 或 "[" 開頭
     if not (text.startswith("{") or text.startswith("[")):
         return None
     try:
@@ -320,34 +335,19 @@ def safe_parse_json(r):
 
 
 def fetch_twse_stock_day_month(stock_no: str, yyyymm01: str):
-    """
-    抓某檔股票某月份日K（含成交股數 Volume）
-    - 加入：非JSON回應保護、重試退避、content-type 判斷
-    - 若該次失敗：回傳空 DataFrame（不中斷整體流程）
-    """
     url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY"
     params = {"response": "json", "date": yyyymm01, "stockNo": stock_no}
 
     for attempt in range(1, TWSE_REQUEST_RETRIES + 1):
         try:
             r = session.get(url, params=params, timeout=TIMEOUT)
-            # 非 200 直接視為失敗，進入 retry
             if r.status_code != 200:
                 raise RuntimeError(f"HTTP {r.status_code}")
 
-            # content-type 若不是 json，也可能是錯誤頁
-            ctype = (r.headers.get("Content-Type") or "").lower()
-            js = None
-            if "application/json" in ctype:
-                js = safe_parse_json(r)  # 仍用 safe 防空內容
-            else:
-                # 不是 json 也試著 parse（有些伺服器 content-type 不準）
-                js = safe_parse_json(r)
-
+            js = safe_parse_json(r)
             if js is None:
-                raise RuntimeError("Non-JSON response (empty/html/blocked)")
+                raise RuntimeError("Non-JSON response")
 
-            # 正常 JSON 結構檢查
             if js.get("stat") != "OK" or "data" not in js:
                 return pd.DataFrame()
 
@@ -388,18 +388,15 @@ def fetch_twse_stock_day_month(stock_no: str, yyyymm01: str):
             dfm = dfm.dropna(subset=["Date", "Close"]).copy()
             return dfm[["Date", "股票代號", "Open", "High", "Low", "Close", "Volume"]].copy()
 
-        except Exception as e:
-            # 最後一次仍失敗：直接回空（不中斷整體流程）
+        except Exception:
             if attempt == TWSE_REQUEST_RETRIES:
                 return pd.DataFrame()
-            # 退避等待：base * attempt
             time.sleep(TWSE_BACKOFF_BASE * attempt)
 
     return pd.DataFrame()
 
 
 def fetch_twse_history(codes, months=TECH_MONTHS):
-    """對每檔股票抓近 months 個月日K，拼成長表；任一月失敗會略過"""
     month_keys = month_starts_back(months)
     all_frames = []
 
@@ -427,11 +424,10 @@ def fetch_twse_history(codes, months=TECH_MONTHS):
     return hist.sort_values(["股票代號", "Date"]).reset_index(drop=True)
 
 
-# ==========================================================
-# 6) 指標 & 訊號（B折衷三段式）
-# ==========================================================
+# =========================
+# 5) 技術指標 + 買點 + returns
+# =========================
 def calc_tech_indicators(df_hist):
-    """計算 MA/RSI/MACD + 三段式買點 + 訊號層級回測報酬"""
     df_hist = df_hist.sort_values("Date").copy()
 
     df_hist["MA5"] = df_hist["Close"].rolling(5).mean()
@@ -472,14 +468,19 @@ def calc_tech_indicators(df_hist):
     df_hist["買點"] = buy
     df_hist["訊號型態"] = "三段式_B(折衷)"
 
+    # ✅ 今日表用的 past return（不會空）
+    df_hist["Ret_1D_past(%)"] = df_hist["Close"].pct_change(1) * 100
+    df_hist["Ret_5D_past(%)"] = df_hist["Close"].pct_change(5) * 100
+
+    # 回測用 forward returns（保留，不在今日表顯示）
     df_hist["R_1D"] = df_hist["Close"].shift(-1) / df_hist["Close"] - 1
     df_hist["R_HD"] = df_hist["Close"].shift(-HOLD_DAYS) / df_hist["Close"] - 1
     df_hist["R_HD_net"] = (1 + df_hist["R_HD"]) * (1 - ROUNDTRIP_COST_PCT) - 1
+
     return df_hist
 
 
 def run_tech_and_backtest(codes):
-    """產出 tech_today / buy_today / tech_all（完整歷史）"""
     hist = fetch_twse_history(codes, months=TECH_MONTHS)
     if hist.empty:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -489,17 +490,17 @@ def run_tech_and_backtest(codes):
         g2 = calc_tech_indicators(g)
         g2["股票代號"] = code
         parts.append(g2)
+
     tech_all = pd.concat(parts, ignore_index=True)
 
     last_day = tech_all.groupby("股票代號")["Date"].max().reset_index()
     tech_today = tech_all.merge(last_day, on=["股票代號", "Date"], how="inner")
     buy_today = tech_today[tech_today["買點"] == True].copy()
+
     return tech_today, buy_today, tech_all
-
-
-# ==========================================================
-# 7) KPI 計算（同前版，略：此段保持不變）
-# ==========================================================
+# =========================
+# 6) KPI / 回測
+# =========================
 def max_losing_streak(trade_returns):
     max_streak = 0
     cur = 0
@@ -554,9 +555,9 @@ def compute_signal_level_summary(tech_all):
     if buy_all.empty:
         return pd.DataFrame()
 
-    rh_net = buy_all["R_HD_net"].dropna()
     r1 = buy_all["R_1D"].dropna()
     rh = buy_all["R_HD"].dropna()
+    rh_net = buy_all["R_HD_net"].dropna()
 
     streak = max_losing_streak(rh_net.values)
     pf = profit_factor(rh_net)
@@ -609,16 +610,10 @@ def portfolio_backtest_single(tech_all, score_map):
 
                 g = by_code.get(hold_code)
                 idx_list = g.index[g["Date"] == d].tolist() if g is not None else []
-                if not idx_list:
-                    hold_code = None
-                    entry_price = None
-                else:
+                if idx_list:
                     idx0 = idx_list[0]
                     exit_idx = idx0 + HOLD_DAYS
-                    if exit_idx >= len(g):
-                        hold_code = None
-                        entry_price = None
-                    else:
+                    if exit_idx < len(g):
                         exit_date = pd.to_datetime(g.loc[exit_idx, "Date"])
                         exit_price = float(g.loc[exit_idx, "Close"])
                         holding = True
@@ -633,6 +628,7 @@ def portfolio_backtest_single(tech_all, score_map):
                             "持有天數": HOLD_DAYS
                         })
 
+        # mark-to-market
         if holding and hold_code is not None:
             g = by_code[hold_code]
             cur = g[g["Date"] == d]
@@ -646,8 +642,10 @@ def portfolio_backtest_single(tech_all, score_map):
 
         equity_rows.append({"Date": d, "Equity": equity_today})
 
+        # exit
         if holding and exit_date is not None and d == exit_date:
             equity = equity_today * exit_mult
+
             trade_rows[-1]["報酬(%)"] = round((exit_price / entry_price - 1) * 100, 2)
             trade_rows[-1]["報酬_扣成本(%)"] = round(((1 + (exit_price / entry_price - 1)) * (1 - ROUNDTRIP_COST_PCT) - 1) * 100, 2)
 
@@ -668,7 +666,6 @@ def portfolio_backtest_single(tech_all, score_map):
     sharpe = annualize_sharpe(eq["Ret"], rf_annual=RISK_FREE_ANNUAL)
     sortino = annualize_sortino(eq["Ret"], mar_annual=MAR_ANNUAL)
 
-    # CAGR
     if len(eq) >= 2:
         days = (eq["Date"].iloc[-1] - eq["Date"].iloc[0]).days
         years = days / 365.25 if days > 0 else None
@@ -697,9 +694,9 @@ def portfolio_backtest_single(tech_all, score_map):
     return eq, trades, kpi
 
 
-# ==========================================================
-# 8) Excel 美化工具
-# ==========================================================
+# =========================
+# 7) Excel 美化（修正 style_header 正確版本）
+# =========================
 def autosize_columns(ws, min_w=10, max_w=44):
     for col in ws.columns:
         max_len = 0
@@ -712,10 +709,9 @@ def autosize_columns(ws, min_w=10, max_w=44):
 
 
 def style_header(ws, header_row):
+    """✅ 正確：對 ws[header_row] 每個 cell 套樣式"""
     fill = PatternFill("solid", fgColor="1F4E79")
     font = Font(color="FFFFFF", bold=True)
-
-    # ✅ 正確寫法
     for cell in ws[header_row]:
         cell.fill = fill
         cell.font = font
@@ -749,15 +745,12 @@ def highlight_true(ws, header_row, col_name):
     )
 
 
-# ==========================================================
-# 9) 主流程
-# ==========================================================
+# =========================
+# 8) 主流程（A：格式不影響選股/回測）
+# =========================
 def main():
     print("1) 下載股價（TWSE+TPEX）...")
     price = fetch_prices()
-
-    name_map = price[["股票代號", "公司名稱_來源"]].dropna().drop_duplicates("股票代號").copy()
-    name_map = name_map.rename(columns={"公司名稱_來源": "公司名稱"})
 
     print("2) 下載最新月營收（mopsfin L+O；暫時跳過 SSL 驗證）...")
     rev_latest = fetch_revenue_latest()
@@ -766,89 +759,130 @@ def main():
     eps_latest = fetch_eps_latest()
 
     print("4) 合併基本面資料...")
-    df = price.merge(rev_latest, on="股票代號", how="left")
-    df = df.merge(eps_latest, on="股票代號", how="left")
+    # df_sel：用於選股/回測（維持 v0.6.1 的排序邏輯，不用 format_for_output）
+    df_sel = price.merge(rev_latest, on="股票代號", how="left")
+    df_sel = df_sel.merge(eps_latest, on="股票代號", how="left")
 
-    df["PE"] = df["股價"] / df["EPS本期"]
-    df["殖利率(估)"] = (df["EPS本期"] * 0.7) / df["股價"]
+    df_sel["PE"] = df_sel["股價"] / df_sel["EPS本期"]
+    df_sel["殖利率(估)"] = (df_sel["EPS本期"] * 0.7) / df_sel["股價"]
 
-    df["Score"] = (
-        df["營收YoY(%)"].fillna(0) * 0.35 +
-        df["EPSYoY"].fillna(0) * 100 * 0.35 +
-        df["殖利率(估)"].fillna(0) * 100 * 0.20 -
-        df["PE"].fillna(0) * 0.05
+    # v0.6.1 Score（不變）：使用 EPSYoY_raw（這裡是 EPSYoY_raw 欄位名 EPSYoY_raw）
+    # 為了與 v0.6.1 行為一致：Score 使用 EPSYoY_raw.fillna(0)
+    df_sel["Score"] = (
+        df_sel["營收YoY(%)"].fillna(0) * 0.35 +
+        (df_sel["EPSYoY_raw"].fillna(0) * 100) * 0.35 +
+        df_sel["殖利率(估)"].fillna(0) * 100 * 0.20 -
+        df_sel["PE"].fillna(0) * 0.05
     )
-    df = df.sort_values("Score", ascending=False).reset_index(drop=True)
 
-    strong = df[
-        (df["營收YoY(%)"] > STRONG_REVENUE_YOY) &
-        (df["EPS本期"] > 0) &
-        (df["PE"] < STRONG_PE_MAX) &
-        (df["股價"] > STRONG_PRICE_MIN)
+    # ✅ 這裡維持 v0.6.1：df_sel 依 Score 排序（用於選股/回測）
+    df_sel = df_sel.sort_values("Score", ascending=False).reset_index(drop=True)
+
+    strong_sel = df_sel[
+        (df_sel["營收YoY(%)"] > STRONG_REVENUE_YOY) &
+        (df_sel["EPS本期"] > 0) &
+        (df_sel["PE"] < STRONG_PE_MAX) &
+        (df_sel["股價"] > STRONG_PRICE_MIN)
     ].copy()
-    top10 = df.head(10).copy()
+
+    top10_sel = df_sel.head(10).copy()
 
     print(f"5) 抓歷史日K（TWSE STOCK_DAY）Top{TOP_N_FOR_TECH}（不使用Yahoo）...")
-    tech_codes = df.head(TOP_N_FOR_TECH)["股票代號"].dropna().astype(str).tolist()
+    tech_codes = df_sel.head(TOP_N_FOR_TECH)["股票代號"].dropna().astype(str).tolist()
     tech_today, buy_today, tech_all = run_tech_and_backtest(tech_codes)
 
+    # 回測 KPI
     sig_summary = compute_signal_level_summary(tech_all)
-    score_map = df.set_index("股票代號")["Score"].to_dict()
+    score_map = df_sel.set_index("股票代號")["Score"].to_dict()
     eq, trades, pf_kpi = portfolio_backtest_single(tech_all, score_map)
 
-    # 補公司名稱/Score 到技術表
-    if not tech_today.empty:
-        tech_today = tech_today.merge(name_map, on="股票代號", how="left")
-        tech_today["Score"] = tech_today["股票代號"].map(score_map)
+    # =========================
+    # ✅ 輸出用 df_out：在這裡才做格式修正（不影響 df_sel）
+    # =========================
+    # 1~3 基本面三表
+    df_out_all = df_sel.copy()
+    strong_out = strong_sel.copy()
+    top10_out = top10_sel.copy()
 
-    if not buy_today.empty:
-        buy_today = buy_today.merge(name_map, on="股票代號", how="left")
-        buy_today["Score"] = buy_today["股票代號"].map(score_map)
+    # EPSYoY顯示欄位：避免整欄空（顯示用），不影響 Score
+    # 若你希望顯示 0：已在 fetch_eps_latest() 裡處理；這裡直接保留欄位
+    # 欄位名稱已是 EPSYoY_顯示(%)
+    # 為了方便閱讀，也提供 EPSYoY_raw（可保留）
+    df_out_all = format_for_output(df_out_all, sort_by_code=True)
+    strong_out = format_for_output(strong_out, sort_by_code=True)
+    # Top10：先取 top10_sel（score top10），再依股票代號排序（不影響 top10 定義）
+    top10_out = format_for_output(top10_out, sort_by_code=True)
 
-    print("✅ Signal-level KPI（訊號層級）:")
-    print(sig_summary.to_string(index=False) if not sig_summary.empty else "(無訊號)")
+    # 4 技術分析_今日：補公司名稱 + EPSYoY顯示欄位；移除 forward returns 欄位（最新日必空）
+    name_map = price[["股票代號", "公司名稱_來源"]].drop_duplicates("股票代號")
+    eps_yoy_disp_map = df_sel.set_index("股票代號")["EPSYoY_顯示(%)"].to_dict()
 
-    print("✅ Portfolio-level KPI（投組層級）:")
-    print(pf_kpi.to_string(index=False) if not pf_kpi.empty else "(無投組資料)")
+    if tech_today is None or tech_today.empty:
+        tech_today_out = pd.DataFrame()
+    else:
+        tech_today_out = tech_today.merge(name_map, on="股票代號", how="left")
+        tech_today_out["EPSYoY_顯示(%)"] = tech_today_out["股票代號"].map(eps_yoy_disp_map)
 
-    # 投顧式文字說明
-    recover_level = RSI_AGGRESSIVE if USE_AGGRESSIVE_SIGNAL else RSI_RECOVER
-    signal_rule_text = (
-        f"三段式買點：最近{OVERSOLD_LOOKBACK}日內 RSI<{RSI_OVERSOLD}（超跌）→ "
-        f"RSI上穿{recover_level}或MACD_hist翻正（轉強）→ "
-        f"Close>=MA20*(1-{MA20_TOLERANCE*100:.1f}%) 且 MA20走升（趨勢確認）"
-        + ("；量能：強制" if REQUIRE_VOLUME_FILTER else "；量能：不強制")
-    )
+        # 移除最新日必空的 forward returns（但 tech_all 仍保留供回測）
+        drop_cols = [c for c in ["R_1D", "R_HD", "R_HD_net"] if c in tech_today_out.columns]
+        if drop_cols:
+            tech_today_out = tech_today_out.drop(columns=drop_cols, errors="ignore")
 
+        tech_today_out = format_for_output(tech_today_out, sort_by_code=True)
+
+    # 5 技術買點_今日：補公司名稱；空表保留欄位；也移除 forward returns
+    if buy_today is None or buy_today.empty:
+        buy_today_out = tech_today_out.head(0).copy() if tech_today_out is not None and not tech_today_out.empty else pd.DataFrame()
+    else:
+        buy_today_out = buy_today.merge(name_map, on="股票代號", how="left")
+        buy_today_out["EPSYoY_顯示(%)"] = buy_today_out["股票代號"].map(eps_yoy_disp_map)
+        drop_cols = [c for c in ["R_1D", "R_HD", "R_HD_net"] if c in buy_today_out.columns]
+        if drop_cols:
+            buy_today_out = buy_today_out.drop(columns=drop_cols, errors="ignore")
+        buy_today_out = format_for_output(buy_today_out, sort_by_code=True)
+
+    # 6 投組交易明細：補公司名稱，欄位第2欄，並排序
+    if trades is None or trades.empty:
+        trades_out = pd.DataFrame(columns=["股票代號", "公司名稱_來源", "進場日", "進場價", "出場日", "出場價", "持有天數", "報酬(%)", "報酬_扣成本(%)"])
+    else:
+        trades_out = trades.merge(name_map, on="股票代號", how="left")
+        trades_out = format_for_output(trades_out, sort_by_code=True)
+
+    # =========================
+    # 文字說明（投顧式）
+    # =========================
     tech_explain = [
         "【技術分析_今日】說明",
-        f"資料來源：TWSE STOCK_DAY（月內日成交；date=YYYYMM01 查該月）[1](https://www.techpowerup.com/334295/nvidia-announces-blackwell-ultra-platform-for-next-gen-ai)",
-        f"買點規則（B折衷）：{signal_rule_text}",
-        "提示：若短時間出現 Non-JSON/空回應，程式會自動重試與略過（不中斷）。"
-    ]
-    buy_explain = [
-        "【技術買點_今日】說明",
-        "本表列出今日符合買點規則者；若空表代表今日無訊號。",
-        "建議搭配基本面強勢股交叉確認。"
-    ]
-    bt_explain = [
-        "【回測摘要】說明（投顧式解讀）",
-        "Signal-level：每次買點視為獨立交易，統計勝率/均值/中位數/最大連敗/獲利因子（含成本）。",
-        "Portfolio-level：單一持股策略，用每日 equity 報酬計算 Sharpe/Sortino（rf=0、MAR=0，年化252）。",
-        "安全提醒：mopsfin 憑證異常時採 verify=False（短期救急，降低 SSL 驗證安全性）。"
+        "本表為每檔股票最新交易日的技術狀態。",
+        "forward returns（R_1D / R_HD / R_HD_net）對最新日必為空，因此本表不顯示。",
+        "改顯示 Ret_1D_past(%) / Ret_5D_past(%)（過去報酬，不會空）。",
+        "EPSYoY_顯示(%) 若原本為空：多半是去年同季 EPS 缺資料或為 0；本表顯示欄位已用 0 填補避免整欄空。"
     ]
 
-    # Excel 輸出
+    buy_explain = [
+        "【技術買點_今日】說明",
+        "本表列出今日符合買點規則的股票；若為空表代表今日無任何股票符合買點（非錯誤）。"
+    ]
+
+    bt_explain = [
+        "【回測摘要】說明",
+        "Signal-level：每次買點視為獨立交易，統計勝率/均值/中位數/最大連敗/獲利因子（含成本）。",
+        "Portfolio-level：單一持股（空手才進場、訊號中挑 Score 最高），提供 CAGR/MDD/Sharpe/Sortino。"
+    ]
+
+    # =========================
+    # 輸出 Excel
+    # =========================
     out_file = f"{OUT_FILE_PREFIX}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
     startrow = 6
 
     with pd.ExcelWriter(out_file, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="全市場_基本面")
-        strong.to_excel(writer, index=False, sheet_name="強勢股_基本面")
-        top10.to_excel(writer, index=False, sheet_name="Top10_基本面")
+        df_out_all.to_excel(writer, index=False, sheet_name="全市場_基本面")
+        strong_out.to_excel(writer, index=False, sheet_name="強勢股_基本面")
+        top10_out.to_excel(writer, index=False, sheet_name="Top10_基本面")
 
-        tech_today.to_excel(writer, index=False, sheet_name="技術分析_今日", startrow=startrow)
-        buy_today.to_excel(writer, index=False, sheet_name="技術買點_今日", startrow=startrow)
+        tech_today_out.to_excel(writer, index=False, sheet_name="技術分析_今日", startrow=startrow)
+        buy_today_out.to_excel(writer, index=False, sheet_name="技術買點_今日", startrow=startrow)
 
         summary_sheet = pd.concat(
             [pd.DataFrame([{"區塊": "Signal-level"}]), sig_summary,
@@ -858,7 +892,7 @@ def main():
         summary_sheet.to_excel(writer, index=False, sheet_name="回測摘要", startrow=startrow)
 
         eq.to_excel(writer, index=False, sheet_name="投組回測_B單一持股", startrow=startrow)
-        trades.to_excel(writer, index=False, sheet_name="投組交易明細", startrow=0)
+        trades_out.to_excel(writer, index=False, sheet_name="投組交易明細", startrow=0)
 
         ws_tech = writer.sheets["技術分析_今日"]
         ws_buy = writer.sheets["技術買點_今日"]
@@ -880,7 +914,12 @@ def main():
         highlight_true(ws_tech, header_row, "買點")
         highlight_true(ws_buy, header_row, "買點")
 
+    print("✅ Signal-level KPI（訊號層級）:")
+    print(sig_summary.to_string(index=False) if not sig_summary.empty else "(無訊號)")
+    print("✅ Portfolio-level KPI（投組層級）:")
+    print(pf_kpi.to_string(index=False) if not pf_kpi.empty else "(無投組資料)")
     print(f"✅ 完成 → {out_file}")
+
     if not VERIFY_SSL:
         print("⚠️ 注意：mopsfin 憑證過期期間，本程式暫用 verify=False（短期救急用）。")
 
