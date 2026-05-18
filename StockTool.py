@@ -1,35 +1,46 @@
 """
 檔名：StockTool.py
-版本：v0.7.1-B2（完整乾淨可執行，分2段貼上）
+版本：v0.7.2-C（TopK=3 等權投組，完整可執行，分2段貼上）
 最後更新：2026-05-16 (Asia/Taipei)
 
+============================================================
 【目的】
-- 從 v0.6.x（固定持有期、PF<1、MDD較大）升級到 v0.7 事件型出場策略（降低回撤、提升期望值）
-- 保留你要求的報表格式（公司名稱欄位位置、股票代號排序、空表處理、交易明細補公司名）
-- 修正你遇到的重點問題：
-  1) USE_FUNDAMENTAL_GATE 只有宣告但沒用到 → 本版已確實引用於投組進場候選篩選
-  2) Trades=0 → 修正 score_map 映射失敗、避免 dropna(score) 清空候選
-  3) style_header 語法錯誤（wscell）→ 本版完全不含 wscell，使用 ws[header_row]
+- 在 v0.7.1（事件型出場 B2）基礎上，依你選擇的 C：
+  => 將 Portfolio-level 改為「TopK（預設 K=3）等權投組」回測
+  => 目標：降低風險集中、改善 MDD、提升 Sharpe，通常也能讓 PF 往上走
 
-【B2 出場參數】
-- STOP_LOSS = -4%
-- TAKE_PROFIT = +4%
-- EXIT_RSI = 60
-- TIME_EXIT = HOLD_DAYS = 5
+============================================================
+【v0.7.2-C 策略重點】
+1) 進場（投組層級）：
+   - 僅在「空手」時進場（保持你原本投顧式直覺：一次建倉）
+   - 當天若有買點，挑 Score 前 K 檔（K=3）等權投入
+2) 出場（每個持倉各自事件型出場，先觸發先出）：
+   - 停損 ret <= STOP_LOSS
+   - 停利 ret >= TAKE_PROFIT
+   - RSI 出場 RSI >= EXIT_RSI
+   - 最長持有 <= HOLD_DAYS（時間出場）
+3) Gate（可開關 USE_FUNDAMENTAL_GATE，且避免全滅）：
+   - 營收YoY(%) > MIN_REV_YOY
+   - EPSYoY_raw > MIN_EPS_YOY 或 EPSYoY_raw is NaN（缺值先放行）
+4) 報表格式（你7點）：
+   - 公司名稱_來源固定在股票代號後一欄
+   - 所有含股票代號表格輸出時依股票代號升冪排序（僅輸出用，不影響選股/回測）
+   - 技術分析_今日不顯示 forward returns（最新日必空），改顯示 Ret_1D_past/Ret_5D_past
+   - 技術買點_今日空表仍保留欄位＋說明
+   - 投組交易明細補公司名稱_來源
 
-【Gate（基本面過濾，避免全滅）】
-- 營收YoY(%) > 0
-- EPSYoY_raw > 0 或 EPSYoY_raw 缺值（NaN）先放行
-  （因為你目前 EPSYoY_raw 大量缺值，若 NaN 不放行會 Trades=0）
+============================================================
+【重要工程設計（避免 KPI 漂移）】
+- df_sel：選股/回測使用（依 Score 排序）→ 不做輸出排序/欄位重排
+- df_out：僅輸出 Excel 使用（排序/欄位）→ 不回寫影響 df_sel
 
-【資料來源】
-- 今日快照：TWSE OpenAPI STOCK_DAY_ALL + TPEX quotes
-- 營收/EPS：mopsfin OpenData CSV（憑證異常時 verify=False 短期救急）
-- 技術歷史：TWSE /exchangeReport/STOCK_DAY（月內日成交，date=YYYYMM01）
+============================================================
+【B2 出場參數（沿用你選的 B2）】
+STOP_LOSS = -4%
+TAKE_PROFIT = +4%
+EXIT_RSI = 60
+HOLD_DAYS = 5
 
-【工程設計（避免你 KPI 漂移）】
-- df_sel：用於選股/回測（依 Score 排序）→ 不做輸出排序/欄位重排
-- df_out：只用於輸出 Excel（公司名稱在第2欄、代號升冪）→ 不回寫影響 df_sel
 """
 
 import io
@@ -46,7 +57,6 @@ from openpyxl.formatting.rule import CellIsRule
 
 warnings.filterwarnings("ignore")
 
-
 # ==========================================================
 # 0) 參數區（可調）
 # ==========================================================
@@ -61,17 +71,20 @@ TWSE_REQUEST_RETRIES = 3
 TWSE_BACKOFF_BASE = 0.8
 TWSE_SLEEP_SECONDS = 0.12
 
-# --- Gate（這次真的有用到） ---
+# ---- TopK 等權投組（v0.7.2-C）----
+TOPK = 3  # 你選 C：Top3 等權
+
+# ---- Gate（真的會用到）----
 USE_FUNDAMENTAL_GATE = True
 MIN_REV_YOY = 0.0
 MIN_EPS_YOY = 0.0
 
-# --- v0.7.1 B2 事件型出場參數 ---
+# ---- B2 事件型出場參數 ----
 STOP_LOSS = -0.04
 TAKE_PROFIT = 0.04
 EXIT_RSI = 60
 
-# --- 技術訊號參數（沿用你原設定） ---
+# ---- 技術訊號參數（沿用）----
 RSI_OVERSOLD = 40
 OVERSOLD_LOOKBACK = 10
 RSI_RECOVER = 40
@@ -83,16 +96,18 @@ MA_SLOPE_DAYS = 3
 MA20_TOLERANCE = 0.01
 REQUIRE_VOLUME_FILTER = False
 
-# --- 回測/成本 ---
+# ---- 回測/成本 ----
 HOLD_DAYS = 5
-ROUNDTRIP_COST_PCT = 0.004
+ROUNDTRIP_COST_PCT = 0.004  # round-trip total cost
+ENTRY_COST = ROUNDTRIP_COST_PCT / 2
+EXIT_COST = ROUNDTRIP_COST_PCT / 2
 
-# --- Sharpe/Sortino（年化252）---
+# ---- Sharpe/Sortino ----
 RISK_FREE_ANNUAL = 0.0
 MAR_ANNUAL = 0.0
 TRADING_DAYS = 252
 
-# --- 強勢股（表格用）---
+# ---- 強勢股（表格用）----
 STRONG_REVENUE_YOY = 10
 STRONG_PE_MAX = 30
 STRONG_PRICE_MIN = 10
@@ -103,7 +118,7 @@ STRONG_PRICE_MIN = 10
 # ==========================================================
 session = requests.Session()
 session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.7.1-B2",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.7.2-C",
     "Accept": "application/json,text/plain,*/*"
 })
 
@@ -436,7 +451,7 @@ def fetch_twse_history(codes, months=TECH_MONTHS):
 
 
 # ==========================================================
-# 8) 技術指標 + 買點（保留 v0.6.x 三段式）
+# 8) 技術指標 + 買點（三段式）
 # ==========================================================
 def calc_tech_indicators(df_hist):
     df_hist = df_hist.sort_values("Date").copy()
@@ -445,12 +460,14 @@ def calc_tech_indicators(df_hist):
     df_hist["MA20"] = df_hist["Close"].rolling(20).mean()
     df_hist["VolMA20"] = df_hist["Volume"].rolling(20).mean()
 
+    # RSI(14)
     delta = df_hist["Close"].diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
     rs = gain.rolling(14).mean() / loss.rolling(14).mean()
     df_hist["RSI"] = 100 - (100 / (1 + rs))
 
+    # MACD(12,26,9)
     ema12 = df_hist["Close"].ewm(span=12, adjust=False).mean()
     ema26 = df_hist["Close"].ewm(span=26, adjust=False).mean()
     df_hist["MACD"] = ema12 - ema26
@@ -506,7 +523,7 @@ def run_tech_and_backtest(codes):
 
 
 # ==========================================================
-# 9) 事件型出場（B2）
+# 9) 事件型出場（回傳原因）
 # ==========================================================
 def event_exit_return(path_df: pd.DataFrame, entry_idx: int):
     entry_price = float(path_df.loc[entry_idx, "Close"])
@@ -534,7 +551,7 @@ def event_exit_return(path_df: pd.DataFrame, entry_idx: int):
     net_ret = (1.0 + gross_ret) * (1.0 - ROUNDTRIP_COST_PCT) - 1.0
     return exit_idx, gross_ret, net_ret, reason
 # ==========================================================
-# 10) KPI / 回測（事件型）
+# 10) KPI 工具
 # ==========================================================
 def max_losing_streak(returns):
     max_streak = 0
@@ -586,8 +603,10 @@ def annualize_sortino(daily_returns, mar_annual=0.0):
     return float(mu / downside_dev)
 
 
+# ==========================================================
+# 11) Signal-level：事件型回測
+# ==========================================================
 def signal_level_backtest_event(tech_all: pd.DataFrame):
-    """對每次買點事件做事件型出場回測（含成本）"""
     if tech_all is None or tech_all.empty:
         return pd.DataFrame()
 
@@ -618,11 +637,16 @@ def signal_level_backtest_event(tech_all: pd.DataFrame):
     }])
 
 
-def portfolio_backtest_single_event(tech_all: pd.DataFrame, score_map: dict, gate_map: dict):
+# ==========================================================
+# 12) Portfolio-level：TopK 等權投組（v0.7.2-C）
+# ==========================================================
+def portfolio_backtest_topk_event(tech_all: pd.DataFrame, score_map: dict, gate_map: dict):
     """
-    單一持股事件型回測：
-    - 空手且當天有買點：挑 Score 最大的一檔（可套 Gate）
-    - 出場：停損/停利/RSI/時間（B2）
+    TopK 等權投組（K=TOPK）：
+    - 僅在空手時進場：當天買點候選挑 Score 前 K 檔等權進場
+    - 每個持倉獨立事件型出場（停損/停利/RSI/時間）
+    - equity = cash + sum(shares * price)
+    - entry/exit 各扣一半成本（ENTRY_COST/EXIT_COST）
     """
     if tech_all is None or tech_all.empty:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -630,103 +654,137 @@ def portfolio_backtest_single_event(tech_all: pd.DataFrame, score_map: dict, gat
     df = tech_all[["Date", "股票代號", "Close", "買點", "RSI"]].copy()
     df = df.dropna(subset=["Date", "Close"])
 
-    # ✅ Trades=0 根因修正：統一代號型別 & score_map key
+    # 代號/score_map key 統一，避免 Score 全 NaN
     df["股票代號"] = df["股票代號"].astype(str).str.strip()
     score_map = {str(k).strip(): v for k, v in score_map.items()}
     df["Score"] = df["股票代號"].map(score_map).fillna(-1e18)
 
+    # 每檔價格序列（用於當日估值/出場）
     by_code = {c: g.sort_values("Date").reset_index(drop=True) for c, g in df.groupby("股票代號")}
     all_dates = sorted(df["Date"].unique())
 
-    equity = 1.0
+    cash = 1.0
+    positions = {}  # code -> dict(shares, entry_price, entry_date, entry_idx)
     equity_rows = []
     trade_rows = []
-
-    holding = False
-    hold_code = None
-    entry_idx = None
-    entry_price = None
 
     for d in all_dates:
         d = pd.to_datetime(d)
 
-        # 進場
-        if not holding:
+        # ---------- 出場檢查（逐筆持倉） ----------
+        to_close = []
+        for code, pos in positions.items():
+            g = by_code.get(code)
+            if g is None:
+                continue
+            idx_list = g.index[g["Date"] == d].tolist()
+            if not idx_list:
+                continue
+
+            cur_idx = idx_list[0]
+            entry_idx = pos["entry_idx"]
+            entry_price = pos["entry_price"]
+
+            # 只有在持有窗內才檢查（不然就是已超過，等同 TIME_EXIT）
+            if cur_idx > min(entry_idx + HOLD_DAYS, len(g) - 1):
+                cur_idx = min(entry_idx + HOLD_DAYS, len(g) - 1)
+
+            px = float(g.loc[cur_idx, "Close"])
+            rsi = float(g.loc[cur_idx, "RSI"]) if pd.notna(g.loc[cur_idx, "RSI"]) else None
+            ret = px / entry_price - 1.0
+
+            reason = None
+            if ret <= STOP_LOSS:
+                reason = "STOP_LOSS"
+            elif ret >= TAKE_PROFIT:
+                reason = "TAKE_PROFIT"
+            elif (rsi is not None) and (rsi >= EXIT_RSI):
+                reason = "RSI_EXIT"
+            elif cur_idx == min(entry_idx + HOLD_DAYS, len(g) - 1):
+                reason = "TIME_EXIT"
+
+            if reason is not None:
+                to_close.append((code, px, ret, reason))
+
+        # 執行出場（收回現金）
+        for code, px, ret, reason in to_close:
+            pos = positions.pop(code)
+            shares = pos["shares"]
+
+            proceeds = shares * px
+            proceeds *= (1.0 - EXIT_COST)  # 出場成本
+            cash += proceeds
+
+            net_ret = (1.0 + ret) * (1.0 - ROUNDTRIP_COST_PCT) - 1.0
+            trade_rows.append({
+                "股票代號": code,
+                "進場日": pos["entry_date"].date().isoformat(),
+                "進場價": pos["entry_price"],
+                "出場日": d.date().isoformat(),
+                "出場價": px,
+                "出場原因": reason,
+                "報酬(%)": round(ret * 100, 2),
+                "報酬_扣成本(%)": round(net_ret * 100, 2)
+            })
+
+        # ---------- 進場（只有空手才建倉） ----------
+        if len(positions) == 0:
             cand = df[(df["Date"] == d) & (df["買點"] == True)].copy()
 
-            # ✅ Gate 真正生效
             if USE_FUNDAMENTAL_GATE:
                 cand["GateOK"] = cand["股票代號"].map(gate_map).fillna(False)
                 cand = cand[cand["GateOK"] == True].copy()
 
             if not cand.empty:
-                best = cand.sort_values("Score", ascending=False).iloc[0]
-                hold_code = str(best["股票代號"]).strip()
+                cand = cand.sort_values("Score", ascending=False).head(TOPK)
 
-                g = by_code.get(hold_code)
-                if g is not None:
-                    idx_list = g.index[g["Date"] == d].tolist()
-                    if idx_list:
+                # 等權投入：每檔投入 cash / K
+                k = len(cand)
+                if k > 0:
+                    alloc_each = cash / k
+                    cash = 0.0
+
+                    for _, row in cand.iterrows():
+                        code = str(row["股票代號"]).strip()
+                        g = by_code.get(code)
+                        if g is None:
+                            cash += alloc_each  # 無資料退回現金
+                            continue
+
+                        idx_list = g.index[g["Date"] == d].tolist()
+                        if not idx_list:
+                            cash += alloc_each
+                            continue
+
                         entry_idx = idx_list[0]
                         entry_price = float(g.loc[entry_idx, "Close"])
-                        holding = True
-                        trade_rows.append({
-                            "股票代號": hold_code,
-                            "進場日": d.date().isoformat(),
-                            "進場價": entry_price
-                        })
 
-        # mark-to-market
-        if holding and hold_code is not None:
-            g = by_code[hold_code]
+                        # 進場成本
+                        alloc_after_cost = alloc_each * (1.0 - ENTRY_COST)
+                        shares = alloc_after_cost / entry_price if entry_price > 0 else 0.0
+
+                        positions[code] = {
+                            "shares": shares,
+                            "entry_price": entry_price,
+                            "entry_date": d,
+                            "entry_idx": entry_idx
+                        }
+
+        # ---------- 計算每日 Equity ----------
+        equity = cash
+        for code, pos in positions.items():
+            g = by_code.get(code)
+            if g is None:
+                continue
             cur = g[g["Date"] == d]
-            if not cur.empty:
-                cur_price = float(cur.iloc[0]["Close"])
-                equity_today = equity * (cur_price / entry_price)
+            if cur.empty:
+                # 若當天無價，使用上次價（簡化：用 entry_price）
+                px = pos["entry_price"]
             else:
-                equity_today = equity
-        else:
-            equity_today = equity
+                px = float(cur.iloc[0]["Close"])
+            equity += pos["shares"] * px
 
-        equity_rows.append({"Date": d, "Equity": equity_today})
-
-        # 出場（事件型）
-        if holding and hold_code is not None:
-            g = by_code[hold_code]
-            cur_list = g.index[g["Date"] == d].tolist()
-            if cur_list:
-                cur_idx = cur_list[0]
-                if cur_idx <= min(entry_idx + HOLD_DAYS, len(g) - 1):
-                    px = float(g.loc[cur_idx, "Close"])
-                    ret = px / entry_price - 1.0
-                    rsi = float(g.loc[cur_idx, "RSI"]) if pd.notna(g.loc[cur_idx, "RSI"]) else None
-
-                    reason = None
-                    if ret <= STOP_LOSS:
-                        reason = "STOP_LOSS"
-                    elif ret >= TAKE_PROFIT:
-                        reason = "TAKE_PROFIT"
-                    elif (rsi is not None) and (rsi >= EXIT_RSI):
-                        reason = "RSI_EXIT"
-                    elif cur_idx == min(entry_idx + HOLD_DAYS, len(g) - 1):
-                        reason = "TIME_EXIT"
-
-                    if reason is not None:
-                        net_ret = (1.0 + ret) * (1.0 - ROUNDTRIP_COST_PCT) - 1.0
-                        equity = equity_today * (1.0 - ROUNDTRIP_COST_PCT)
-
-                        trade_rows[-1].update({
-                            "出場日": d.date().isoformat(),
-                            "出場價": px,
-                            "出場原因": reason,
-                            "報酬(%)": round(ret * 100, 2),
-                            "報酬_扣成本(%)": round(net_ret * 100, 2)
-                        })
-
-                        holding = False
-                        hold_code = None
-                        entry_idx = None
-                        entry_price = None
+        equity_rows.append({"Date": d, "Equity": equity})
 
     eq = pd.DataFrame(equity_rows).drop_duplicates("Date").sort_values("Date").reset_index(drop=True)
     trades = pd.DataFrame(trade_rows)
@@ -740,7 +798,6 @@ def portfolio_backtest_single_event(tech_all: pd.DataFrame, score_map: dict, gat
     sharpe = annualize_sharpe(eq["Ret"], rf_annual=RISK_FREE_ANNUAL)
     sortino = annualize_sortino(eq["Ret"], mar_annual=MAR_ANNUAL)
 
-    # CAGR
     if len(eq) >= 2:
         days = (pd.to_datetime(eq["Date"].iloc[-1]) - pd.to_datetime(eq["Date"].iloc[0])).days
         years = days / 365.25 if days > 0 else None
@@ -770,7 +827,7 @@ def portfolio_backtest_single_event(tech_all: pd.DataFrame, score_map: dict, gat
 
 
 # ==========================================================
-# 11) Excel 美化（完全正確，不含 wscell）
+# 13) Excel 美化（正確版，不含 wscell）
 # ==========================================================
 def autosize_columns(ws, min_w=10, max_w=44):
     for col in ws.columns:
@@ -784,9 +841,11 @@ def autosize_columns(ws, min_w=10, max_w=44):
 
 
 def style_header(ws, header_row):
-    """表頭深藍底白字、置中（正確：ws[header_row]）"""
+    """表頭深藍底白字、置中（正確版本）"""
     fill = PatternFill("solid", fgColor="1F4E79")
     font = Font(color="FFFFFF", bold=True)
+
+    # ws[header_row] 代表該列所有 cell（tuple）
     for cell in ws[header_row]:
         cell.fill = fill
         cell.font = font
@@ -821,7 +880,7 @@ def highlight_true(ws, header_row, col_name):
 
 
 # ==========================================================
-# 12) 主流程
+# 14) 主流程
 # ==========================================================
 def main():
     print("1) 下載股價（TWSE+TPEX）...")
@@ -852,7 +911,7 @@ def main():
     )
     df_sel = df_sel.sort_values("Score", ascending=False).reset_index(drop=True)
 
-    # Gate map（v0.7.1：EPSYoY_raw 缺值放行，避免全滅）
+    # Gate map（EPSYoY_raw 缺值放行，避免全滅）
     gate_series = (
         (df_sel["營收YoY(%)"].fillna(0) > MIN_REV_YOY) &
         (
@@ -875,10 +934,12 @@ def main():
     tech_codes = df_sel.head(TOP_N_FOR_TECH)["股票代號"].dropna().tolist()
     tech_all, tech_today, buy_today = run_tech_and_backtest(tech_codes)
 
-    # v0.7.1 事件型回測
+    # v0.7.2-C：Signal-level 仍用事件型
     sig_summary = signal_level_backtest_event(tech_all)
+
+    # v0.7.2-C：Portfolio-level 改 TopK 等權
     score_map = df_sel.set_index("股票代號")["Score"].to_dict()
-    eq, trades, pf_kpi = portfolio_backtest_single_event(tech_all, score_map, gate_map)
+    eq, trades, pf_kpi = portfolio_backtest_topk_event(tech_all, score_map, gate_map)
 
     # ========= 輸出用 df_out（格式不影響回測） =========
     name_map = price[["股票代號", "公司名稱_來源"]].drop_duplicates("股票代號")
@@ -913,19 +974,17 @@ def main():
 
     tech_explain = [
         "【技術分析_今日】說明",
-        "本表為每檔最新交易日的技術狀態。",
-        "v0.7.1 B2：事件型出場（停損-4%、停利+4%、RSI>=60、持有<=5日）。",
-        "本表顯示 Ret_1D_past(%) / Ret_5D_past(%)（過去報酬）避免最新日空欄位。"
+        f"v0.7.2-C：投組為 Top{TOPK} 等權（僅空手時進場），事件型出場（SL-4%, TP+4%, RSI>=60, <=5日）。",
+        "本表顯示 Ret_1D_past/Ret_5D_past（過去報酬），避免最新日空欄位。",
     ]
     buy_explain = [
         "【技術買點_今日】說明",
         "本表列出今日符合買點規則的股票；若為空表代表今日無訊號（非錯誤）。"
     ]
     bt_explain = [
-        "【回測摘要】說明（v0.7.1）",
-        "Signal-level：買點事件用事件型出場計算報酬（含成本）。",
-        "Portfolio-level：單一持股挑 Score 最大，事件型出場。",
-        "Gate：營收YoY>0 且 EPSYoY>0（EPSYoY缺值先放行避免 Trades=0）。"
+        "【回測摘要】說明（v0.7.2-C）",
+        f"Portfolio-level：Top{TOPK} 等權投組，事件型出場。",
+        "Gate：營收YoY>0 且 EPSYoY>0（EPSYoY缺值放行避免全滅）。"
     ]
 
     out_file = f"{OUT_FILE_PREFIX}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
@@ -940,13 +999,13 @@ def main():
         buy_today_out.to_excel(writer, index=False, sheet_name="技術買點_今日", startrow=startrow)
 
         summary_sheet = pd.concat(
-            [pd.DataFrame([{"區塊": "Signal-level(v0.7_event_exit)"}]), sig_summary,
-             pd.DataFrame([{"區塊": "Portfolio-level(v0.7_event_exit)"}]), pf_kpi],
+            [pd.DataFrame([{"區塊": "Signal-level(v0.7.2_event_exit)"}]), sig_summary,
+             pd.DataFrame([{"區塊": f"Portfolio-level(v0.7.2_Top{TOPK}_EqualWeight)"}]), pf_kpi],
             ignore_index=True
         )
         summary_sheet.to_excel(writer, index=False, sheet_name="回測摘要", startrow=startrow)
 
-        eq.to_excel(writer, index=False, sheet_name="投組回測_B單一持股", startrow=startrow)
+        eq.to_excel(writer, index=False, sheet_name="投組回測_TopK等權", startrow=startrow)
         trades_out.to_excel(writer, index=False, sheet_name="投組交易明細", startrow=0)
 
         ws_tech = writer.sheets["技術分析_今日"]
@@ -968,9 +1027,9 @@ def main():
         highlight_true(ws_tech, header_row, "買點")
         highlight_true(ws_buy, header_row, "買點")
 
-    print("✅ Signal-level KPI（v0.7.1 事件型）:")
+    print("✅ Signal-level KPI（v0.7.2 事件型）:")
     print(sig_summary.to_string(index=False) if not sig_summary.empty else "(無訊號)")
-    print("✅ Portfolio-level KPI（v0.7.1 事件型）:")
+    print(f"✅ Portfolio-level KPI（v0.7.2 Top{TOPK} 等權）:")
     print(pf_kpi.to_string(index=False) if not pf_kpi.empty else "(無投組資料)")
     print(f"✅ 完成 → {out_file}")
 

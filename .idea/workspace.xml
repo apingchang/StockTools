@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="17f26410-9c4a-4bd9-a498-e3b9500f2f3e" name="Changes" comment="V0.6.2 &#10;照代號由小到大&#10;公司名在代號後">
+    <list default="true" id="17f26410-9c4a-4bd9-a498-e3b9500f2f3e" name="Changes" comment="檔名：StockTool.py&#10;版本：v0.7.1-B2（完整乾淨可執行，分2段貼上）&#10;最後更新：2026-05-16 (Asia/Taipei)">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/StockTool.py" beforeDir="false" afterPath="$PROJECT_DIR$/StockTool.py" afterDir="false" />
     </list>
@@ -138,7 +138,15 @@
       <option name="project" value="LOCAL" />
       <updated>1778861813726</updated>
     </task>
-    <option name="localTasksCounter" value="10" />
+    <task id="LOCAL-00010" summary="檔名：StockTool.py&#10;版本：v0.7.1-B2（完整乾淨可執行，分2段貼上）&#10;最後更新：2026-05-16 (Asia/Taipei)">
+      <option name="closed" value="true" />
+      <created>1779064715803</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1779064715803</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -161,6 +169,7 @@
     <MESSAGE value="V0.6.1" />
     <MESSAGE value="V0.6.1 &#10;TOP_N_FOR_TECH = 60&#10;RSI_OVERSOLD = 40&#10;MA20_TOLERANCE = 0.01" />
     <MESSAGE value="V0.6.2 &#10;照代號由小到大&#10;公司名在代號後" />
-    <option name="LAST_COMMIT_MESSAGE" value="V0.6.2 &#10;照代號由小到大&#10;公司名在代號後" />
+    <MESSAGE value="檔名：StockTool.py&#10;版本：v0.7.1-B2（完整乾淨可執行，分2段貼上）&#10;最後更新：2026-05-16 (Asia/Taipei)" />
+    <option name="LAST_COMMIT_MESSAGE" value="檔名：StockTool.py&#10;版本：v0.7.1-B2（完整乾淨可執行，分2段貼上）&#10;最後更新：2026-05-16 (Asia/Taipei)" />
   </component>
 </project>
