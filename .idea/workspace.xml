@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="17f26410-9c4a-4bd9-a498-e3b9500f2f3e" name="Changes" comment="V0.6.1 &#10;TOP_N_FOR_TECH = 60&#10;RSI_OVERSOLD = 40&#10;MA20_TOLERANCE = 0.01">
+    <list default="true" id="17f26410-9c4a-4bd9-a498-e3b9500f2f3e" name="Changes" comment="V0.6.2 &#10;照代號由小到大&#10;公司名在代號後">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/StockTool.py" beforeDir="false" afterPath="$PROJECT_DIR$/StockTool.py" afterDir="false" />
     </list>
@@ -122,7 +122,23 @@
       <option name="project" value="LOCAL" />
       <updated>1778849106802</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="V0.6.1 &#10;TOP_N_FOR_TECH = 60&#10;RSI_OVERSOLD = 40&#10;MA20_TOLERANCE = 0.01">
+      <option name="closed" value="true" />
+      <created>1778861720728</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1778861720728</updated>
+    </task>
+    <task id="LOCAL-00009" summary="V0.6.2 &#10;照代號由小到大&#10;公司名在代號後">
+      <option name="closed" value="true" />
+      <created>1778861813726</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1778861813726</updated>
+    </task>
+    <option name="localTasksCounter" value="10" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -144,6 +160,7 @@
     <MESSAGE value="V0.4" />
     <MESSAGE value="V0.6.1" />
     <MESSAGE value="V0.6.1 &#10;TOP_N_FOR_TECH = 60&#10;RSI_OVERSOLD = 40&#10;MA20_TOLERANCE = 0.01" />
-    <option name="LAST_COMMIT_MESSAGE" value="V0.6.1 &#10;TOP_N_FOR_TECH = 60&#10;RSI_OVERSOLD = 40&#10;MA20_TOLERANCE = 0.01" />
+    <MESSAGE value="V0.6.2 &#10;照代號由小到大&#10;公司名在代號後" />
+    <option name="LAST_COMMIT_MESSAGE" value="V0.6.2 &#10;照代號由小到大&#10;公司名在代號後" />
   </component>
 </project>
