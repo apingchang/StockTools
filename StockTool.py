@@ -1,7 +1,7 @@
 """
 檔名：StockTool.py
-版本：v0.7.3-GUI (Full Engine + GUI Config + Program Console)
-最後更新：2026-05-18 (Asia/Taipei)
+版本：v0.7.4-GUI (Add Data Cache Layer)
+最後更新：2026-05-19 (Asia/Taipei)
 
 【目的】
 - 將既有策略引擎（TWSE+TPEX 快照、mopsfin 基本面、TWSE STOCK_DAY 歷史、TopK 等權投組、事件型出場回測）
@@ -21,6 +21,22 @@
 【重要工程設計】
 - df_sel（選股/回測用）不做任何輸出排序，避免 KPI 漂移
 - df_out（輸出用）才做公司名欄位位置與股票代號排序
+
+【新增功能（v0.7.4）】
+- Data Cache Layer（資料快取層）
+  - 實作 get_or_fetch 控制資料取得流程
+  - 僅在以下情況觸發下載：
+    1. cache 檔案不存在
+    2. cache 非當日資料
+  - 其餘情況直接讀取本地 cache，加速回測流程
+  - 有效避免 TWSE/TPEX API 重複請求與速率限制
+
+【效益】
+- 回測/調參速度顯著提升（避免重複下載）
+- 降低 API 請求次數（提升穩定性）
+- 支援離線回測（當日資料存在時）
+``
+
 
 【依賴套件】
 - tkinter：Python 內建（GUI）
@@ -137,6 +153,59 @@ def build_session() -> requests.Session:
 # ==========================================================
 # 3) Utility functions
 # ==========================================================
+
+# ==========================================================
+# Cache System（只下載一次資料）
+# ==========================================================
+
+COMMON_FILE = "cache/common_data.xlsx"
+
+
+def save_cache(df: pd.DataFrame):
+    """儲存公用資料 + 更新日期"""
+    os.makedirs("cache", exist_ok=True)
+    today = datetime.today().strftime("%Y-%m-%d")
+
+    with pd.ExcelWriter(COMMON_FILE, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="data", index=False)
+
+        meta = pd.DataFrame({"last_update": [today]})
+        meta.to_excel(writer, sheet_name="meta", index=False)
+
+
+def load_cache():
+    """讀取快取資料"""
+    df = pd.read_excel(COMMON_FILE, sheet_name="data", engine="openpyxl")
+    meta = pd.read_excel(COMMON_FILE, sheet_name="meta", engine="openpyxl")
+
+    return df, meta.loc[0, "last_update"]
+
+
+def get_or_fetch(fetch_func, logger: GuiLogger):
+    """
+    核心控制：是否需要下載資料
+    """
+    today = datetime.today().strftime("%Y-%m-%d")
+
+    # 沒檔案
+    if not os.path.exists(COMMON_FILE):
+        logger.log("📥 無快取 → 下載資料")
+        df = fetch_func()
+        save_cache(df)
+        return df
+
+    # 讀舊資料
+    df, last_update = load_cache()
+
+    if last_update == today:
+        logger.log("✅ 使用本地快取資料")
+        return df
+
+    logger.log("♻️ 資料過期 → 重新下載")
+    df = fetch_func()
+    save_cache(df)
+    return df
+
 def find_col(cols, keywords):
     for c in cols:
         s = str(c)
@@ -246,6 +315,13 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
     price["漲跌"] = pd.to_numeric(price["漲跌"], errors="coerce")
     price = price.drop_duplicates("股票代號").reset_index(drop=True)
     return price
+
+def fetch_prices_wrapper(session, cfg, logger):
+    """
+    包一層讓 cache 可以呼叫
+    """
+    return fetch_prices(session, cfg)
+
 
 
 def fetch_revenue_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame:
@@ -897,7 +973,8 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     """
     s = build_session()
     logger.log("1) 下載股價（TWSE+TPEX）...")
-    price = fetch_prices(s, cfg)
+    #price = fetch_prices(s, cfg)
+    price = get_or_fetch(lambda: fetch_prices_wrapper(s, cfg, logger), logger)
 
     logger.log("2) 下載最新月營收（mopsfin L+O；暫時跳過 SSL 驗證）...")
     rev_latest = fetch_revenue_latest(s, cfg)

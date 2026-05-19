@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="17f26410-9c4a-4bd9-a498-e3b9500f2f3e" name="Changes" comment="檔名：StockTool.py&#10;這版 v0.7.2-C 的成果：&#10;&#10;✅ Signal-level KPI（v0.7.2 事件型）:&#10; 訊號數  事件型平均報酬_扣成本(%)  事件型勝率_扣成本(%)  事件型中位數_扣成本(%)  MaxLosingStreak  ProfitFactor&#10;  49           -0.15         48.98          -0.04                5         0.882&#10;✅ Portfolio-level KPI（v0.7.2 Top3 等權）:&#10; CAGR(%)  MDD(%)  Sharpe  Sortino  Trades  MaxLosingStreak  ProfitFactor&#10;     9.2   -9.86   0.579    1.304      30                3         1.001&#10;✅ 策略已經「勉強有 edge」（PF≈1）+ 且風控漂亮（MDD &lt; -10%） → 這是可以開始優化，而不是重做的狀態&#10;你的 KPI 解讀（這版是「成功的」）&#10;✅ Signal-level&#10;&#10;PF = 0.882（接近 1）&#10;平均報酬 ≈ -0.15%&#10;👉 訊號已經「接近打平」，不再是明顯負策略&#10;&#10;&#10;✅ Portfolio-level（關鍵）&#10;&#10;CAGR = +9.2% ✅&#10;MDD = -9.86% ✅ 很漂亮&#10;Sharpe = 0.579 ✅&#10;ProfitFactor = 1.001 ✅（正式突破 1）&#10;Trades = 30（樣本充足）&#10;👉 這組數字很重要：策略有正期望值CAGR &gt; 0✅ 可以賺錢MDD &lt; -10%✅ 控制很好Sharpe &gt; 0.5✅ 已有穩定性">
+    <list default="true" id="17f26410-9c4a-4bd9-a498-e3b9500f2f3e" name="Changes" comment="檔名：StockTool.py&#10;v0.7.3-GUI">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/StockTool.py" beforeDir="false" afterPath="$PROJECT_DIR$/StockTool.py" afterDir="false" />
     </list>
@@ -154,7 +154,15 @@
       <option name="project" value="LOCAL" />
       <updated>1779066637356</updated>
     </task>
-    <option name="localTasksCounter" value="12" />
+    <task id="LOCAL-00012" summary="檔名：StockTool.py&#10;v0.7.3-GUI">
+      <option name="closed" value="true" />
+      <created>1779183272809</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1779183272809</updated>
+    </task>
+    <option name="localTasksCounter" value="13" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -179,6 +187,7 @@
     <MESSAGE value="V0.6.2 &#10;照代號由小到大&#10;公司名在代號後" />
     <MESSAGE value="檔名：StockTool.py&#10;版本：v0.7.1-B2（完整乾淨可執行，分2段貼上）&#10;最後更新：2026-05-16 (Asia/Taipei)" />
     <MESSAGE value="檔名：StockTool.py&#10;這版 v0.7.2-C 的成果：&#10;&#10;✅ Signal-level KPI（v0.7.2 事件型）:&#10; 訊號數  事件型平均報酬_扣成本(%)  事件型勝率_扣成本(%)  事件型中位數_扣成本(%)  MaxLosingStreak  ProfitFactor&#10;  49           -0.15         48.98          -0.04                5         0.882&#10;✅ Portfolio-level KPI（v0.7.2 Top3 等權）:&#10; CAGR(%)  MDD(%)  Sharpe  Sortino  Trades  MaxLosingStreak  ProfitFactor&#10;     9.2   -9.86   0.579    1.304      30                3         1.001&#10;✅ 策略已經「勉強有 edge」（PF≈1）+ 且風控漂亮（MDD &lt; -10%） → 這是可以開始優化，而不是重做的狀態&#10;你的 KPI 解讀（這版是「成功的」）&#10;✅ Signal-level&#10;&#10;PF = 0.882（接近 1）&#10;平均報酬 ≈ -0.15%&#10; 訊號已經「接近打平」，不再是明顯負策略&#10;&#10;&#10;✅ Portfolio-level（關鍵）&#10;&#10;CAGR = +9.2% ✅&#10;MDD = -9.86% ✅ 很漂亮&#10;Sharpe = 0.579 ✅&#10;ProfitFactor = 1.001 ✅（正式突破 1）&#10;Trades = 30（樣本充足）&#10; 這組數字很重要：策略有正期望值CAGR &gt; 0✅ 可以賺錢MDD &lt; -10%✅ 控制很好Sharpe &gt; 0.5✅ 已有穩定性" />
-    <option name="LAST_COMMIT_MESSAGE" value="檔名：StockTool.py&#10;這版 v0.7.2-C 的成果：&#10;&#10;✅ Signal-level KPI（v0.7.2 事件型）:&#10; 訊號數  事件型平均報酬_扣成本(%)  事件型勝率_扣成本(%)  事件型中位數_扣成本(%)  MaxLosingStreak  ProfitFactor&#10;  49           -0.15         48.98          -0.04                5         0.882&#10;✅ Portfolio-level KPI（v0.7.2 Top3 等權）:&#10; CAGR(%)  MDD(%)  Sharpe  Sortino  Trades  MaxLosingStreak  ProfitFactor&#10;     9.2   -9.86   0.579    1.304      30                3         1.001&#10;✅ 策略已經「勉強有 edge」（PF≈1）+ 且風控漂亮（MDD &lt; -10%） → 這是可以開始優化，而不是重做的狀態&#10;你的 KPI 解讀（這版是「成功的」）&#10;✅ Signal-level&#10;&#10;PF = 0.882（接近 1）&#10;平均報酬 ≈ -0.15%&#10; 訊號已經「接近打平」，不再是明顯負策略&#10;&#10;&#10;✅ Portfolio-level（關鍵）&#10;&#10;CAGR = +9.2% ✅&#10;MDD = -9.86% ✅ 很漂亮&#10;Sharpe = 0.579 ✅&#10;ProfitFactor = 1.001 ✅（正式突破 1）&#10;Trades = 30（樣本充足）&#10; 這組數字很重要：策略有正期望值CAGR &gt; 0✅ 可以賺錢MDD &lt; -10%✅ 控制很好Sharpe &gt; 0.5✅ 已有穩定性" />
+    <MESSAGE value="檔名：StockTool.py&#10;v0.7.3-GUI" />
+    <option name="LAST_COMMIT_MESSAGE" value="檔名：StockTool.py&#10;v0.7.3-GUI" />
   </component>
 </project>
