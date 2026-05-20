@@ -1,172 +1,53 @@
 """
 檔名：StockTool.py
 
-版本：v0.8.1-GUI (Excel Selection + History Cache + Performance Breakdown)
+版本：v0.8.3-GUI (Universe Gate + Dividend Filter)
 最後更新：2026-05-20 (Asia/Taipei)
 
 ------------------------------------------------------------
-【程式整體流程（Core Flow）】
+【v0.8.3 重大升級】
 
-1) 下載 / 讀取資料（含 cache）：
-   - 股價（TWSE + TPEX）
-   - 月營收（mopsfin）
-   - EPS（mopsfin）
-
-2) 合併基本面資料 → 建立 df_sel：
-   - 營收 YoY
-   - EPS YoY
-   - PE / 殖利率
-   - Score（排序用）
-
-3) 選股來源（v0.8.1）：
-   - 模式 A：Score 排序 → 取 TopN（原本）
-   - 模式 B：Excel 指定股票清單 ✅（新增）
-
-4) 抓歷史資料（History Cache）：
-   - 每檔股票獨立 cache（60 個月初始化）
-   - 每日只更新當月資料（增量更新）
-   - 避免重抓歷史（效能大幅提升）
-
-5) 技術分析（calc_tech_indicators）：
-   - MA5 / MA20
-   - RSI / MACD
-   - 三段式買點：
-        ① 超跌（RSI < rsi_oversold）
-        ② 轉強（RSI 或 MACD）
-        ③ 趨勢確認（MA + Volume）
-
-6) 回測（TopK 投組）：
-   - 等權配置（TopK）
-   - 僅空手時建倉
-   - 事件型出場：
-        StopLoss / TakeProfit / RSI Exit / Time Exit
-
-7) KPI 計算：
-   - Signal-level（單筆事件）
-   - Portfolio-level（投組）
-   - 年度績效（v0.8.0新增）
-
-8) Excel 輸出：
-   - 全市場
-   - 強勢股
-   - Top10
-   - 技術分析
-   - 技術買點
-   - 投組回測
-   - 年度績效 ✅
+✅ Universe Gate（前移基本面）
+✅ Dividend Filter（新增股利品質）
 
 ------------------------------------------------------------
-【策略核心（Strategy Logic）】
+【Universe Flow】
 
-✔ 進場：
-   - 三段式：回檔 → 轉強 → 趨勢
-   - 本質：Trend-following + Pullback
+Step 1：基礎資料
+- Revenue YoY（累計）
+- EPS YoY（累計）
 
-✔ 投組：
-   - TopK 等權（預設 K=3，可調整）
+Step 2：✅ Universe Gate
+- rev > min_rev_yoy
+- eps > min_eps_yoy
 
-✔ 出場：
-   - StopLoss
-   - TakeProfit
-   - RSI Exit
-   - Time Exit（HOLD天數）
+Step 3：✅ Dividend Filter
+- 最近一年股利 / 殖利率
+- 前一年股利 / 殖利率
 
-✔ Gate（可開關）：
-   - 營收YoY > min_rev_yoy
-   - EPSYoY > min_eps_yoy
-   - EPSYoY NaN 可選放行
-
-✔ 成本：
-   - round-trip cost（預設 0.4%）
+Step 4：Score 排序
+Step 5：TopN
+Step 6：技術進出場
 
 ------------------------------------------------------------
-【v0.8.1 新增功能】
+【策略本質】
 
-1. Excel 選股模式 ✅
-   - 可切換：
-        □ 使用 Score 自動選股
-        ■ 使用 Excel 指定股票清單
-   - Excel 格式：
-        股票代號 或 code
+✅ 成長（Revenue / EPS）
+✅ 收益（Dividend）
+✅ 動能（Trend）
 
-   用途：
-   - 主觀選股回測
-   - ETF 成分股測試
-   - 主題型策略（AI / 高股息 / 半導體）
+👉 Growth + Income + Momentum
 
 ------------------------------------------------------------
-【v0.8.0 新功能】
+【關鍵設計】
 
-1. History Cache：
-   - 每檔股票獨立 cache
-   - 初始化抓 60 個月
-   - 每日只更新當月
-   - merge + 去重
+✔ Gate 前移（v0.8.2）
+✔ Dividend Filter（v0.8.3）
 
-2. Performance Breakdown：
-   - 分年績效分析
-   - 觀察策略在不同市場環境表現
-
-------------------------------------------------------------
-【v0.7.5 Data Cache】
-
-- price / revenue / eps 分離 cache
-- 每日更新一次
-- 降低 API call
-
-------------------------------------------------------------
-【v0.7.4 Cache Layer】
-
-- get_or_fetch 控制下載
-- 當日資料→直接讀 cache
-- 支援離線回測
-
-------------------------------------------------------------
-【重要工程設計】
-
-✅ 分層設計
-
-- Data Layer（cache）
-- Strategy Layer（tech_months）
-- Portfolio Layer（TopK）
-
-✅ df_sel 與 df_out 分離
-- df_sel：回測用（不可動）
-- df_out：輸出用（排序 / 欄位調整）
-
-✅ 技術指標只影響策略，不影響資料層
-
-------------------------------------------------------------
-【已知特性】
-
-✔ 策略類型：
-   - Trend-following + Pullback
-   - 投組 alpha（非單筆交易 alpha）
-
-✔ 風險特性：
-   - 報酬集中於趨勢行情
-   - 震盪期可能下降
-
-------------------------------------------------------------
-【未來可擴充方向】
-
-- Excel 權重投組（portfolio allocation）
-- Equity Curve（資金曲線）
-- Drawdown 曲線
-- Walk-forward analysis
-- 參數 grid search
-
-------------------------------------------------------------
-【依賴套件】
-
-- tkinter（GUI）
-- pandas
-- requests
-- openpyxl
+→ 避免垃圾股 + 無股利股
 
 ------------------------------------------------------------
 """
-
 
 from __future__ import annotations
 
@@ -232,6 +113,21 @@ class StrategyConfig:
     min_rev_yoy: float = 2
     min_eps_yoy: float = 2
     allow_eps_yoy_nan: bool = True     # 避免 EPSYoY 缺值造成 Trades=0
+
+    # ✅ ===== v0.8.3 Dividend Filter =====
+    use_dividend_filter: bool = True
+
+    # 最近一年
+    min_dividend: float = 0.2
+    min_yield: float = 2.0
+
+    # 前一年
+    min_dividend_prev: float = 0.2
+    min_yield_prev: float = 2.0
+
+    # 開關
+    use_recent_div: bool = True
+    use_prev_div: bool = True
 
     # --- 風險指標參數（Sharpe / Sortino 用）---
     risk_free_annual: float = 0.0
@@ -982,11 +878,13 @@ def signal_level_backtest_event(cfg: StrategyConfig, tech_all: pd.DataFrame) -> 
         "ProfitFactor": round(pf, 3) if pf is not None and pf != float("inf") else pf
     }])
 
-
 def build_gate_map(cfg: StrategyConfig, df_sel: pd.DataFrame) -> Dict[str, bool]:
+    return {}
+
+
     """
     Gate：營收YoY > 0 且 EPSYoY > 0（缺值可放行）
-    """
+
     code = df_sel["股票代號"].astype(str).str.strip()
     cond_rev = df_sel["營收YoY(%)"].fillna(0) > cfg.min_rev_yoy
     if cfg.allow_eps_yoy_nan:
@@ -995,6 +893,16 @@ def build_gate_map(cfg: StrategyConfig, df_sel: pd.DataFrame) -> Dict[str, bool]
         cond_eps = (df_sel["EPSYoY_raw"].fillna(0) > cfg.min_eps_yoy)
     gate = (cond_rev & cond_eps).astype(bool)
     return dict(zip(code, gate))
+    
+
+    
+    v0.8.3：
+    Gate 已前移到 Universe（df_sel）
+    這裡不再使用
+    """
+
+
+
 
 def portfolio_backtest_topk_event(cfg: StrategyConfig, tech_all: pd.DataFrame, score_map: dict, gate_map: dict) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 #def portfolio_backtest_topk_event(cfg: StrategyConfig, tech_all: pd.DataFrame, score_map: dict, gate_map: dict) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -1328,8 +1236,56 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     )
     df_sel = df_sel.sort_values("Score", ascending=False).reset_index(drop=True)
 
+    # ✅ ===== v0.8.3 Universe Gate（含股利）=====
+
+    before_cnt = len(df_sel)
+
+    # ===== 基本面 =====
+    cond_rev = df_sel["營收YoY(%)"] > cfg.min_rev_yoy
+
+    cond_eps = (
+            (df_sel["EPSYoY_raw"] > cfg.min_eps_yoy) |
+            (df_sel["EPSYoY_raw"].isna())
+    )
+
+    base_gate = cond_rev & cond_eps
+
+    # ===== 股利資料預處理 =====
+    df_sel["股利_最新"] = df_sel.get("股利_最新", 0)
+    df_sel["股利_前年差"] = df_sel.get("股利_前年差", 0)
+    df_sel["殖利率_最新"] = df_sel.get("殖利率_最新", 0)
+    df_sel["殖利率_前年差"] = df_sel.get("殖利率_前年差", 0)
+
+    # ===== Dividend Filter =====
+    div_gate = True
+
+    if cfg.use_dividend_filter:
+
+        div_gate = True
+
+        if cfg.use_recent_div:
+            cond_recent = (
+                    (df_sel["股利_最新"] > cfg.min_dividend) &
+                    (df_sel["殖利率_最新"] > cfg.min_yield)
+            )
+            div_gate = div_gate & cond_recent
+
+        if cfg.use_prev_div:
+            cond_prev = (
+                    (df_sel["股利_前年差"] > cfg.min_dividend_prev) &
+                    (df_sel["殖利率_前年差"] > cfg.min_yield_prev)
+            )
+            div_gate = div_gate & cond_prev
+
+    # ===== 套用 Gate =====
+    df_sel = df_sel[base_gate & div_gate].copy()
+
+    after_cnt = len(df_sel)
+
+    print(f"✅ Universe Gate（含股利）：{before_cnt} → {after_cnt}")
+
     # Gate map
-    gate_map = build_gate_map(cfg, df_sel)
+    #gate_map = build_gate_map(cfg, df_sel)
 
     # 表格用
     strong_sel = df_sel[
@@ -1340,7 +1296,9 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         ].copy()
     top10_sel = df_sel.head(10).copy()
 
-    logger.log(f"5) 抓歷史日K（TWSE STOCK_DAY）Top{cfg.top_n_for_tech}（不使用Yahoo）...")
+    top_n = min(cfg.top_n_for_tech, len(df_sel))
+
+    logger.log(f"5) 抓歷史日K（TWSE STOCK_DAY）Top{top_n}（不使用Yahoo）...")
 
     # ==========================================================
     # ✅ v0.8.1 選股來源切換（最重要）
@@ -1355,13 +1313,19 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
             logger.log(f"❌ Excel 選股失敗：{e}")
             return
     else:
-        tech_codes = df_sel.head(cfg.top_n_for_tech)["股票代號"].dropna().astype(str).str.strip().tolist()
+        top_n = min(cfg.top_n_for_tech, len(df_sel))
+        tech_codes = df_sel.head(top_n)["股票代號"].dropna().astype(str).str.strip().tolist()
 
     tech_all, tech_today, buy_today = run_tech(cfg, s, tech_codes, logger)
 
     # KPI
+
+
     sig_summary = signal_level_backtest_event(cfg, tech_all)
     score_map = df_sel.set_index("股票代號")["Score"].to_dict()
+
+    gate_map = {}
+
     eq, trades, pf_kpi, reason_stats = portfolio_backtest_topk_event(cfg, tech_all, score_map, gate_map)
 
     # ==========================================================
@@ -1511,6 +1475,17 @@ class StrategyGUI(tk.Tk):
 
         self._build_ui()
         self._poll_log_queue()
+        # ✅ Dividend Filter（v0.8.3）
+        self.use_dividend_filter = tk.BooleanVar(value=True)
+
+        self.min_dividend = tk.DoubleVar(value=0.2)
+        self.min_yield = tk.DoubleVar(value=2.0)
+
+        self.min_dividend_prev = tk.DoubleVar(value=0.2)
+        self.min_yield_prev = tk.DoubleVar(value=2.0)
+
+        self.use_recent_div = tk.BooleanVar(value=True)
+        self.use_prev_div = tk.BooleanVar(value=True)
 
     def _build_ui(self):
         self.geometry("980x720")
@@ -1539,6 +1514,22 @@ class StrategyGUI(tk.Tk):
         self._add_check(left, "Allow EPSYoY NaN (avoid Trades=0)", "allow_eps_yoy_nan", self.cfg.allow_eps_yoy_nan)
         self._add_check(left, "Require Volume Filter", "require_volume_filter", self.cfg.require_volume_filter)
 
+
+        # ===== Dividend Filter =====
+        ttk.Separator(left, orient="horizontal").pack(fill="x", pady=6)
+
+        ttk.Label(left, text="Dividend Filter").pack(anchor="w")
+
+        self._add_check(left, "Use Dividend Filter", "use_dividend_filter", True)
+        self._add_check(left, "Recent Dividend", "use_recent_div", True)
+        self._add_check(left, "Previous Year Dividend", "use_prev_div", True)
+
+        self._add_entry(left, "Min Dividend", "min_dividend", tk.DoubleVar, 0.2)
+        self._add_entry(left, "Min Yield (%)", "min_yield", tk.DoubleVar, 2.0)
+
+        self._add_entry(left, "Min Dividend (Prev)", "min_dividend_prev", tk.DoubleVar, 0.2)
+        self._add_entry(left, "Min Yield (Prev %)", "min_yield_prev", tk.DoubleVar, 2.0)
+
         # ✅ Excel 選股模式
         self.use_excel_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
@@ -1558,6 +1549,7 @@ class StrategyGUI(tk.Tk):
 
         ttk.Separator(left).pack(fill="x", pady=8)
         ttk.Label(left, text="Signal Params", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 6))
+
         self._add_entry(left, "RSI_OVERSOLD", "rsi_oversold", tk.IntVar, self.cfg.rsi_oversold)
         self._add_entry(left, "MA20_TOLERANCE", "ma20_tolerance", tk.DoubleVar, self.cfg.ma20_tolerance)
 
