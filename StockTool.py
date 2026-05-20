@@ -640,18 +640,44 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     latest_year = eps["年度"].max()
     latest_q = eps.loc[eps["年度"] == latest_year, "季別"].max()
 
-    cur = eps[(eps["年度"] == latest_year) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].copy()
+    #cur = eps[(eps["年度"] == latest_year) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].copy()
+    #cur = cur.rename(columns={"EPS": "EPS本期"})
+
+    #prev = eps[(eps["年度"] == latest_year - 1) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].copy()
+    #prev = prev.rename(columns={"EPS": "EPS去年"})
+
+    # ✅ v0.8.2：改成「累計 EPS YoY」
+
+    # 今年累計 EPS（Q1~Qn）
+    cur = eps[eps["年度"] == latest_year].copy()
+    cur = cur[cur["季別"] <= latest_q]
+    cur = cur.groupby("股票代號")["EPS"].sum().reset_index()
     cur = cur.rename(columns={"EPS": "EPS本期"})
 
-    prev = eps[(eps["年度"] == latest_year - 1) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].copy()
+    # 去年同期累計 EPS
+    prev = eps[eps["年度"] == latest_year - 1].copy()
+    prev = prev[prev["季別"] <= latest_q]
+    prev = prev.groupby("股票代號")["EPS"].sum().reset_index()
     prev = prev.rename(columns={"EPS": "EPS去年"})
 
     out = cur.merge(prev, on="股票代號", how="left")
     out["EPSYoY_raw"] = (out["EPS本期"] - out["EPS去年"]) / out["EPS去年"]
     out["EPSYoY_顯示(%)"] = (out["EPSYoY_raw"] * 100).replace([float("inf"), -float("inf")], 0).fillna(0)
 
-    out["EPS季別"] = f"{int(latest_year)}Q{int(latest_q)}"
-    return out[["股票代號", "EPS季別", "EPS本期", "EPSYoY_raw", "EPSYoY_顯示(%)"]].drop_duplicates("股票代號").reset_index(drop=True)
+    #out["EPS季別"] = f"{int(latest_year)}Q{int(latest_q)}"
+    out["EPS期間"] = f"{int(latest_year)} Q1~Q{int(latest_q)}"
+
+#    return out[["股票代號", "EPS季別", "EPS本期", "EPSYoY_raw", "EPSYoY_顯示(%)"]].drop_duplicates("股票代號").reset_index(drop=True)
+    cols = ["股票代號", "EPS本期", "EPSYoY_raw", "EPSYoY_顯示(%)"]
+
+    # ✅ 動態加入存在欄位
+    final_cols = []
+    for c in ["股票代號", "EPS期間", "EPS季別", "EPS本期", "EPSYoY_raw", "EPSYoY_顯示(%)"]:
+        if c in out.columns:
+            final_cols.append(c)
+
+    return out[final_cols].drop_duplicates("股票代號").reset_index(drop=True)
+
 # ==========================================================
 # 15) TWSE STOCK_DAY fetch + indicators + backtests + Excel + GUI
 # ==========================================================
