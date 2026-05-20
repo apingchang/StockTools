@@ -1,61 +1,172 @@
 """
 檔名：StockTool.py
 
-版本：v0.7.5-GUI (Multi-Data Cache Layer)
-最後更新：2026-05-19 (Asia/Taipei)
+版本：v0.8.1-GUI (Excel Selection + History Cache + Performance Breakdown)
+最後更新：2026-05-20 (Asia/Taipei)
 
+------------------------------------------------------------
+【程式整體流程（Core Flow）】
 
-【目的】
-- 將既有策略引擎（TWSE+TPEX 快照、mopsfin 基本面、TWSE STOCK_DAY 歷史、TopK 等權投組、事件型出場回測）
-  封裝為 GUI 工具：
-  1) 所有影響獲利的參數集中在 GUI Config window，可自行調整
-  2) 程式輸出訊息集中在 GUI Program Console window（不再使用 print）
-  3) 以 v0.7.3 Option A 為預設值（TP=+5%、SL=-4%、RSI=62、Top3 等權、HOLD=5）
-  4) 保留報表格式 7 點（公司名稱第2欄、股票代號排序、技術買點空表保留欄位、交易明細補公司名等）
+1) 下載 / 讀取資料（含 cache）：
+   - 股價（TWSE + TPEX）
+   - 月營收（mopsfin）
+   - EPS（mopsfin）
 
-【策略核心（保留完整）】
-- 進場：三段式買點（超跌→轉強→趨勢確認）
-- 投組：TopK 等權（預設 K=3），僅空手時建倉
-- 出場：事件型（StopLoss / TakeProfit / RSI Exit / Time Exit）
-- Gate（可開關）：營收YoY>0 且 EPSYoY>0；EPSYoY 缺值（NaN）可放行避免 Trades=0
-- 成本：round-trip cost（預設 0.4%）
+2) 合併基本面資料 → 建立 df_sel：
+   - 營收 YoY
+   - EPS YoY
+   - PE / 殖利率
+   - Score（排序用）
 
+3) 選股來源（v0.8.1）：
+   - 模式 A：Score 排序 → 取 TopN（原本）
+   - 模式 B：Excel 指定股票清單 ✅（新增）
+
+4) 抓歷史資料（History Cache）：
+   - 每檔股票獨立 cache（60 個月初始化）
+   - 每日只更新當月資料（增量更新）
+   - 避免重抓歷史（效能大幅提升）
+
+5) 技術分析（calc_tech_indicators）：
+   - MA5 / MA20
+   - RSI / MACD
+   - 三段式買點：
+        ① 超跌（RSI < rsi_oversold）
+        ② 轉強（RSI 或 MACD）
+        ③ 趨勢確認（MA + Volume）
+
+6) 回測（TopK 投組）：
+   - 等權配置（TopK）
+   - 僅空手時建倉
+   - 事件型出場：
+        StopLoss / TakeProfit / RSI Exit / Time Exit
+
+7) KPI 計算：
+   - Signal-level（單筆事件）
+   - Portfolio-level（投組）
+   - 年度績效（v0.8.0新增）
+
+8) Excel 輸出：
+   - 全市場
+   - 強勢股
+   - Top10
+   - 技術分析
+   - 技術買點
+   - 投組回測
+   - 年度績效 ✅
+
+------------------------------------------------------------
+【策略核心（Strategy Logic）】
+
+✔ 進場：
+   - 三段式：回檔 → 轉強 → 趨勢
+   - 本質：Trend-following + Pullback
+
+✔ 投組：
+   - TopK 等權（預設 K=3，可調整）
+
+✔ 出場：
+   - StopLoss
+   - TakeProfit
+   - RSI Exit
+   - Time Exit（HOLD天數）
+
+✔ Gate（可開關）：
+   - 營收YoY > min_rev_yoy
+   - EPSYoY > min_eps_yoy
+   - EPSYoY NaN 可選放行
+
+✔ 成本：
+   - round-trip cost（預設 0.4%）
+
+------------------------------------------------------------
+【v0.8.1 新增功能】
+
+1. Excel 選股模式 ✅
+   - 可切換：
+        □ 使用 Score 自動選股
+        ■ 使用 Excel 指定股票清單
+   - Excel 格式：
+        股票代號 或 code
+
+   用途：
+   - 主觀選股回測
+   - ETF 成分股測試
+   - 主題型策略（AI / 高股息 / 半導體）
+
+------------------------------------------------------------
+【v0.8.0 新功能】
+
+1. History Cache：
+   - 每檔股票獨立 cache
+   - 初始化抓 60 個月
+   - 每日只更新當月
+   - merge + 去重
+
+2. Performance Breakdown：
+   - 分年績效分析
+   - 觀察策略在不同市場環境表現
+
+------------------------------------------------------------
+【v0.7.5 Data Cache】
+
+- price / revenue / eps 分離 cache
+- 每日更新一次
+- 降低 API call
+
+------------------------------------------------------------
+【v0.7.4 Cache Layer】
+
+- get_or_fetch 控制下載
+- 當日資料→直接讀 cache
+- 支援離線回測
+
+------------------------------------------------------------
 【重要工程設計】
-- df_sel（選股/回測用）不做任何輸出排序，避免 KPI 漂移
-- df_out（輸出用）才做公司名欄位位置與股票代號排序
 
+✅ 分層設計
 
-【新增功能（v0.7.5）】
-- Multi-Data Cache Layer：
-  - price / revenue / eps / universe 分別獨立快取
-  - 每種資料各自每日更新一次
-  - 支援細粒度控制，避免不必要 API 呼叫
+- Data Layer（cache）
+- Strategy Layer（tech_months）
+- Portfolio Layer（TopK）
 
-【效益】
-- API 請求進一步降低
-- 回測與調參效率顯著提升
-- 系統可擴展性提高（可新增更多資料種類）
+✅ df_sel 與 df_out 分離
+- df_sel：回測用（不可動）
+- df_out：輸出用（排序 / 欄位調整）
 
-【新增功能（v0.7.4）】
-- Data Cache Layer（資料快取層）
-  - 實作 get_or_fetch 控制資料取得流程
-  - 僅在以下情況觸發下載：
-    1. cache 檔案不存在
-    2. cache 非當日資料
-  - 其餘情況直接讀取本地 cache，加速回測流程
-  - 有效避免 TWSE/TPEX API 重複請求與速率限制
+✅ 技術指標只影響策略，不影響資料層
 
-【效益】
-- 回測/調參速度顯著提升（避免重複下載）
-- 降低 API 請求次數（提升穩定性）
-- 支援離線回測（當日資料存在時）
-``
+------------------------------------------------------------
+【已知特性】
 
+✔ 策略類型：
+   - Trend-following + Pullback
+   - 投組 alpha（非單筆交易 alpha）
 
+✔ 風險特性：
+   - 報酬集中於趨勢行情
+   - 震盪期可能下降
+
+------------------------------------------------------------
+【未來可擴充方向】
+
+- Excel 權重投組（portfolio allocation）
+- Equity Curve（資金曲線）
+- Drawdown 曲線
+- Walk-forward analysis
+- 參數 grid search
+
+------------------------------------------------------------
 【依賴套件】
-- tkinter：Python 內建（GUI）
-- pandas, requests, openpyxl：需 pip 安裝
+
+- tkinter（GUI）
+- pandas
+- requests
+- openpyxl
+
+------------------------------------------------------------
 """
+
 
 from __future__ import annotations
 
@@ -85,6 +196,10 @@ warnings.filterwarnings("ignore")
 # ==========================================================
 # 0) Config（v0.7.3 Option A 預設）
 # ==========================================================
+
+HISTORY_DIR = "cache/history"
+HISTORY_MONTHS = 60
+
 @dataclass
 class StrategyConfig:
     # universe / data
@@ -92,6 +207,10 @@ class StrategyConfig:
     tech_months: int = 24
     timeout: int = 30
     verify_ssl: bool = False
+
+    # ✅ v0.8.1 Excel stock list
+    use_excel_stock_list: bool = False
+    excel_stock_file: str = "stock_list.xlsx"
 
     # TWSE fetch stability
     twse_retries: int = 3
@@ -315,6 +434,91 @@ def format_for_output(df: pd.DataFrame, sort_by_code: bool = True) -> pd.DataFra
         df = df.sort_values("股票代號", ascending=True)
     return df.reset_index(drop=True)
 
+# ==========================================================
+# ✅ v0.8.1 Excel Stock List Loader
+# ==========================================================
+
+def load_stock_list_from_excel(file_path):
+    """
+    從 Excel 讀指定股票清單
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"找不到 Excel: {file_path}")
+
+    df = pd.read_excel(file_path)
+
+    col = find_col(df.columns, ["股票", "code"])
+
+    if col is None:
+        raise ValueError("Excel 必須包含 '股票代號' 或 'code' 欄位")
+
+    codes = df[col].astype(str).str.strip().tolist()
+
+    return codes
+
+# ==========================================================
+# History Cache System (v0.8.0)
+# ==========================================================
+
+def get_history_file(stock_id):
+    return f"{HISTORY_DIR}/{stock_id}.xlsx"
+
+
+def init_stock_history(session, cfg, stock_id):
+    months = month_starts_back(HISTORY_MONTHS)
+
+    frames = []
+    for m in months:
+        df = fetch_twse_stock_day_month(session, cfg, stock_id, m)
+        if df is not None and not df.empty:
+            frames.append(df)
+
+    if not frames:
+        return pd.DataFrame()
+
+    df_all = pd.concat(frames)
+    df_all = df_all.drop_duplicates(subset=["Date"])
+    df_all = df_all.sort_values("Date")
+
+    return df_all
+
+
+def update_stock_history(session, cfg, stock_id, df_old):
+    today_month = datetime.today().strftime("%Y%m01")
+
+    df_new = fetch_twse_stock_day_month(session, cfg, stock_id, today_month)
+
+    if df_new is None or df_new.empty:
+        return df_old
+
+    df_all = pd.concat([df_old, df_new])
+    df_all = df_all.drop_duplicates(subset=["Date"])
+    df_all = df_all.sort_values("Date")
+
+    return df_all
+
+
+def get_stock_history(session, cfg, stock_id, logger):
+
+    os.makedirs(HISTORY_DIR, exist_ok=True)
+    file_path = get_history_file(stock_id)
+
+    # ✅ 沒資料
+    if not os.path.exists(file_path):
+        logger.log(f"📥 [{stock_id}] 初始化 60個月歷史資料")
+        df = init_stock_history(session, cfg, stock_id)
+        save_cache(file_path, df)
+        return df
+
+    # ✅ 有資料 → 更新
+    df_old, _ = load_cache(file_path)
+
+    logger.log(f"🔄 [{stock_id}] 更新當月資料")
+    df_new = update_stock_history(session, cfg, stock_id, df_old)
+
+    save_cache(file_path, df_new)
+
+    return df_new
 
 def fetch_csv_requests(session: requests.Session, url: str, cfg: StrategyConfig, encodings=("utf-8-sig", "utf-8")) -> pd.DataFrame:
     r = session.get(url, timeout=cfg.timeout, verify=cfg.verify_ssl)
@@ -536,37 +740,34 @@ def fetch_twse_stock_day_month(session: requests.Session, cfg: StrategyConfig, s
 
 
 def fetch_twse_history(session: requests.Session, cfg: StrategyConfig, codes: List[str], logger: GuiLogger) -> pd.DataFrame:
-    month_keys = month_starts_back(cfg.tech_months)
-    all_frames = []
+    """
+    v0.8.0：改為使用 History Cache（每檔股票）
+    """
 
-    for i, code in enumerate(codes, 1):
-        code = str(code).strip()
-        frames = []
-        for mk in month_keys:
-            dfm = fetch_twse_stock_day_month(session, cfg, code, mk)
-            if not dfm.empty:
-                frames.append(dfm)
-            time.sleep(cfg.twse_sleep)
+    hist_list = []
 
-        if frames:
-            dfh = pd.concat(frames, ignore_index=True)
-            dfh = dfh.drop_duplicates(subset=["Date"]).sort_values("Date")
-            all_frames.append(dfh)
+    for code in codes:
+        try:
+            df = get_stock_history(session, cfg, code, logger)
+            if df is not None and not df.empty:
+                df["股票代號"] = code
+                hist_list.append(df)
+        except Exception as e:
+            logger.log(f"❌ [{code}] 歷史資料錯誤: {e}")
 
-        if i % 10 == 0:
-            logger.log(f"技術面歷史抓取進度：{i}/{len(codes)}")
-
-    if not all_frames:
-        empty_df = pd.DataFrame()
-        empty_reason = pd.DataFrame(columns=["出場原因", "次數", "比例(%)"])
+    if not hist_list:
         return pd.DataFrame()
 
-    hist = pd.concat(all_frames, ignore_index=True)
-    return hist.sort_values(["股票代號", "Date"]).reset_index(drop=True)
-
-
+    return pd.concat(hist_list, ignore_index=True)
 def calc_tech_indicators(cfg: StrategyConfig, df_hist: pd.DataFrame) -> pd.DataFrame:
     df_hist = df_hist.sort_values("Date").copy()
+
+    # ==========================================================
+    # ✅ v0.8.0：依 tech_months 限制回測區間
+    # ==========================================================
+    if cfg.tech_months is not None:
+        cutoff_date = datetime.today() - pd.DateOffset(months=cfg.tech_months)
+        df_hist = df_hist[df_hist["Date"] >= cutoff_date]
 
     df_hist["MA5"] = df_hist["Close"].rolling(5).mean()
     df_hist["MA20"] = df_hist["Close"].rolling(20).mean()
@@ -960,6 +1161,51 @@ def portfolio_backtest_topk_event(cfg: StrategyConfig, tech_all: pd.DataFrame, s
 
     return eq, trades, kpi, reason_stats
 
+# ==========================================================
+# Performance Breakdown (v0.8.0)
+# ==========================================================
+
+def performance_by_year(trades_df):
+    if trades_df is None or trades_df.empty:
+        return pd.DataFrame()
+
+    df = trades_df.copy()
+    #df["year"] = pd.to_datetime(df["entry_date"]).dt.year
+    # ✅ 自動找進場日期欄位（防止欄位名稱不同）
+    date_col = find_col(df.columns, ["entry", "進場", "買進", "date"])
+
+    if date_col is None:
+        raise ValueError("找不到進場日期欄位（entry_date / 進場日 / 買進日）")
+
+    df["year"] = pd.to_datetime(df[date_col]).dt.year
+
+    out = []
+
+    for y, g in df.groupby("year"):
+        #returns = g["return"]
+        # ✅ 自動找報酬欄位（防欄位名稱不同）
+        ret_col = find_col(g.columns, ["return", "報酬", "損益", "ret", "%"])
+
+        if ret_col is None:
+            raise ValueError("找不到報酬欄位（return / 報酬 / 損益）")
+
+        returns = g[ret_col]
+
+        total = len(g)
+        win_rate = (returns > 0).mean() * 100
+        avg_ret = returns.mean() * 100
+        pf = profit_factor(returns)
+
+        out.append({
+            "year": y,
+            "trades": total,
+            "win_rate(%)": round(win_rate, 2),
+            "avg_return(%)": round(avg_ret, 2),
+            "profit_factor": round(pf, 2) if pf else None
+        })
+
+    return pd.DataFrame(out).sort_values("year")
+
 
 # ==========================================================
 # 16) Excel 美化（不再有 wscell）
@@ -1069,13 +1315,40 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     top10_sel = df_sel.head(10).copy()
 
     logger.log(f"5) 抓歷史日K（TWSE STOCK_DAY）Top{cfg.top_n_for_tech}（不使用Yahoo）...")
-    tech_codes = df_sel.head(cfg.top_n_for_tech)["股票代號"].dropna().tolist()
+
+    # ==========================================================
+    # ✅ v0.8.1 選股來源切換（最重要）
+    # ==========================================================
+
+    if cfg.use_excel_stock_list:
+        logger.log("📂 使用 Excel 指定股票清單")
+
+        try:
+            tech_codes = load_stock_list_from_excel(cfg.excel_stock_file)
+        except Exception as e:
+            logger.log(f"❌ Excel 選股失敗：{e}")
+            return
+    else:
+        tech_codes = df_sel.head(cfg.top_n_for_tech)["股票代號"].dropna().astype(str).str.strip().tolist()
+
     tech_all, tech_today, buy_today = run_tech(cfg, s, tech_codes, logger)
 
     # KPI
     sig_summary = signal_level_backtest_event(cfg, tech_all)
     score_map = df_sel.set_index("股票代號")["Score"].to_dict()
     eq, trades, pf_kpi, reason_stats = portfolio_backtest_topk_event(cfg, tech_all, score_map, gate_map)
+
+    # ==========================================================
+    # ✅ v0.8.0 分年績效分析
+    # ==========================================================
+
+    try:
+        yearly_perf = performance_by_year(trades)
+        logger.log("✅ 年度績效分析：")
+        logger.log(yearly_perf.to_string(index=False))
+    except Exception as e:
+        logger.log(f"⚠️ 年度績效分析失敗：{e}")
+        yearly_perf = pd.DataFrame()
 
     # ===== output tables =====
     name_map = price[["股票代號", "公司名稱_來源"]].drop_duplicates("股票代號")
@@ -1139,6 +1412,13 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         eq.to_excel(writer, index=False, sheet_name="投組回測_TopK等權", startrow=startrow)
         trades_out.to_excel(writer, index=False, sheet_name="投組交易明細", startrow=0)
 
+        # ✅ 新增
+        #yearly_perf.to_excel(writer, sheet_name="年度績效", index=False)
+
+        # ✅ v0.8.0
+        if yearly_perf is not None and not yearly_perf.empty:
+            yearly_perf.to_excel(writer, sheet_name="年度績效", index=False)
+
         ws_tech = writer.sheets["技術分析_今日"]
         ws_buy = writer.sheets["技術買點_今日"]
         ws_sum = writer.sheets["回測摘要"]
@@ -1196,7 +1476,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
 class StrategyGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("StockTool v0.7.3 GUI (TopK Equal Weight)")
+        self.title("StockTool v0.8.0-GUI (TopK Equal Weight)")
 
         self.log_queue = queue.Queue()
         self.logger = GuiLogger(self.log_queue)
@@ -1232,6 +1512,14 @@ class StrategyGUI(tk.Tk):
         self._add_entry(left, "MIN_EPS_YOY", "min_eps_yoy", tk.DoubleVar, self.cfg.min_eps_yoy)
         self._add_check(left, "Allow EPSYoY NaN (avoid Trades=0)", "allow_eps_yoy_nan", self.cfg.allow_eps_yoy_nan)
         self._add_check(left, "Require Volume Filter", "require_volume_filter", self.cfg.require_volume_filter)
+
+        # ✅ Excel 選股模式
+        self.use_excel_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            left,
+            text="Use Excel Stock List",
+            variable=self.use_excel_var
+        ).pack(anchor="w")
 
         ttk.Separator(left).pack(fill="x", pady=8)
 
@@ -1312,6 +1600,8 @@ class StrategyGUI(tk.Tk):
         self.console.see("end")
 
         cfg = self._read_config()
+
+        cfg.use_excel_stock_list = self.use_excel_var.get()
 
         def worker():
             try:
