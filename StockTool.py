@@ -203,7 +203,7 @@ HISTORY_MONTHS = 60
 @dataclass
 class StrategyConfig:
     # universe / data
-    top_n_for_tech: int = 28
+    top_n_for_tech: int = 60
     tech_months: int = 24
     timeout: int = 30
     verify_ssl: bool = False
@@ -218,14 +218,14 @@ class StrategyConfig:
     twse_sleep: float = 0.12
 
     # portfolio
-    topk: int = 3                      # C：TopK 等權
-    hold_days: int = 5
+    topk: int = 7                      # C：TopK 等權
+    hold_days: int = 10
     roundtrip_cost_pct: float = 0.004  # 0.4%
 
     # event-driven exit (Option A defaults)
     stop_loss: float = -0.03
-    take_profit: float = 0.03         # Option A：TP 5%
-    exit_rsi: int = 60                 # Option A：RSI 62
+    take_profit: float = 0.08         # Option A：TP 5%
+    exit_rsi: int = 70                 # Option A：RSI 62
 
     # fundamental gate
     use_gate: bool = True
@@ -239,7 +239,7 @@ class StrategyConfig:
     trading_days: int = 252
 
     # signal params (keep close to your stable settings)
-    rsi_oversold: int = 35
+    rsi_oversold: int = 45
     oversold_lookback: int = 10
     rsi_recover: int = 40
     rsi_aggressive: int = 45
