@@ -1,172 +1,15 @@
 """
 檔名：StockTool.py
 
-版本：v0.8.1-GUI (Excel Selection + History Cache + Performance Breakdown)
-最後更新：2026-05-20 (Asia/Taipei)
+版本：v0.8.4-GUI (Fix dtype mismatch for merge)
+最後更新：2026-05-25 (Asia/Taipei)
 
 ------------------------------------------------------------
-【程式整體流程（Core Flow）】
-
-1) 下載 / 讀取資料（含 cache）：
-   - 股價（TWSE + TPEX）
-   - 月營收（mopsfin）
-   - EPS（mopsfin）
-
-2) 合併基本面資料 → 建立 df_sel：
-   - 營收 YoY
-   - EPS YoY
-   - PE / 殖利率
-   - Score（排序用）
-
-3) 選股來源（v0.8.1）：
-   - 模式 A：Score 排序 → 取 TopN（原本）
-   - 模式 B：Excel 指定股票清單 ✅（新增）
-
-4) 抓歷史資料（History Cache）：
-   - 每檔股票獨立 cache（60 個月初始化）
-   - 每日只更新當月資料（增量更新）
-   - 避免重抓歷史（效能大幅提升）
-
-5) 技術分析（calc_tech_indicators）：
-   - MA5 / MA20
-   - RSI / MACD
-   - 三段式買點：
-        ① 超跌（RSI < rsi_oversold）
-        ② 轉強（RSI 或 MACD）
-        ③ 趨勢確認（MA + Volume）
-
-6) 回測（TopK 投組）：
-   - 等權配置（TopK）
-   - 僅空手時建倉
-   - 事件型出場：
-        StopLoss / TakeProfit / RSI Exit / Time Exit
-
-7) KPI 計算：
-   - Signal-level（單筆事件）
-   - Portfolio-level（投組）
-   - 年度績效（v0.8.0新增）
-
-8) Excel 輸出：
-   - 全市場
-   - 強勢股
-   - Top10
-   - 技術分析
-   - 技術買點
-   - 投組回測
-   - 年度績效 ✅
-
-------------------------------------------------------------
-【策略核心（Strategy Logic）】
-
-✔ 進場：
-   - 三段式：回檔 → 轉強 → 趨勢
-   - 本質：Trend-following + Pullback
-
-✔ 投組：
-   - TopK 等權（預設 K=3，可調整）
-
-✔ 出場：
-   - StopLoss
-   - TakeProfit
-   - RSI Exit
-   - Time Exit（HOLD天數）
-
-✔ Gate（可開關）：
-   - 營收YoY > min_rev_yoy
-   - EPSYoY > min_eps_yoy
-   - EPSYoY NaN 可選放行
-
-✔ 成本：
-   - round-trip cost（預設 0.4%）
-
-------------------------------------------------------------
-【v0.8.1 新增功能】
-
-1. Excel 選股模式 ✅
-   - 可切換：
-        □ 使用 Score 自動選股
-        ■ 使用 Excel 指定股票清單
-   - Excel 格式：
-        股票代號 或 code
-
-   用途：
-   - 主觀選股回測
-   - ETF 成分股測試
-   - 主題型策略（AI / 高股息 / 半導體）
-
-------------------------------------------------------------
-【v0.8.0 新功能】
-
-1. History Cache：
-   - 每檔股票獨立 cache
-   - 初始化抓 60 個月
-   - 每日只更新當月
-   - merge + 去重
-
-2. Performance Breakdown：
-   - 分年績效分析
-   - 觀察策略在不同市場環境表現
-
-------------------------------------------------------------
-【v0.7.5 Data Cache】
-
-- price / revenue / eps 分離 cache
-- 每日更新一次
-- 降低 API call
-
-------------------------------------------------------------
-【v0.7.4 Cache Layer】
-
-- get_or_fetch 控制下載
-- 當日資料→直接讀 cache
-- 支援離線回測
-
-------------------------------------------------------------
-【重要工程設計】
-
-✅ 分層設計
-
-- Data Layer（cache）
-- Strategy Layer（tech_months）
-- Portfolio Layer（TopK）
-
-✅ df_sel 與 df_out 分離
-- df_sel：回測用（不可動）
-- df_out：輸出用（排序 / 欄位調整）
-
-✅ 技術指標只影響策略，不影響資料層
-
-------------------------------------------------------------
-【已知特性】
-
-✔ 策略類型：
-   - Trend-following + Pullback
-   - 投組 alpha（非單筆交易 alpha）
-
-✔ 風險特性：
-   - 報酬集中於趨勢行情
-   - 震盪期可能下降
-
-------------------------------------------------------------
-【未來可擴充方向】
-
-- Excel 權重投組（portfolio allocation）
-- Equity Curve（資金曲線）
-- Drawdown 曲線
-- Walk-forward analysis
-- 參數 grid search
-
-------------------------------------------------------------
-【依賴套件】
-
-- tkinter（GUI）
-- pandas
-- requests
-- openpyxl
-
+【v0.8.4 修改內容】
+1. 統一所有「股票代號」欄位為字串型態，避免 merge 錯誤
+2. 在每個 merge 前強制轉換型態
 ------------------------------------------------------------
 """
-
 
 from __future__ import annotations
 
@@ -192,13 +35,13 @@ from openpyxl.formatting.rule import CellIsRule
 
 warnings.filterwarnings("ignore")
 
-
 # ==========================================================
 # 0) Config（v0.7.3 Option A 預設）
 # ==========================================================
 
 HISTORY_DIR = "cache/history"
 HISTORY_MONTHS = 60
+
 
 @dataclass
 class StrategyConfig:
@@ -218,20 +61,20 @@ class StrategyConfig:
     twse_sleep: float = 0.12
 
     # portfolio
-    topk: int = 7                      # C：TopK 等權
+    topk: int = 7  # C：TopK 等權
     hold_days: int = 10
     roundtrip_cost_pct: float = 0.004  # 0.4%
 
     # event-driven exit (Option A defaults)
     stop_loss: float = -0.03
-    take_profit: float = 0.08         # Option A：TP 5%
-    exit_rsi: int = 70                 # Option A：RSI 62
+    take_profit: float = 0.08  # Option A：TP 5%
+    exit_rsi: int = 70  # Option A：RSI 62
 
     # fundamental gate
     use_gate: bool = True
     min_rev_yoy: float = 2
     min_eps_yoy: float = 2
-    allow_eps_yoy_nan: bool = True     # 避免 EPSYoY 缺值造成 Trades=0
+    allow_eps_yoy_nan: bool = True  # 避免 EPSYoY 缺值造成 Trades=0
 
     # --- 風險指標參數（Sharpe / Sortino 用）---
     risk_free_annual: float = 0.0
@@ -305,6 +148,7 @@ def find_col(cols, keywords):
                 return c
     return None
 
+
 def get_cache_file(name):
     return f"cache/{name}.xlsx"
 
@@ -327,7 +171,6 @@ def load_cache(file_path):
     return df, meta.loc[0, "last_update"]
 
 
-# ✅ ✅ ✅ 最後是 get_or_fetch
 def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
     file_path = get_cache_file(name)
     today = datetime.today().strftime("%Y-%m-%d")
@@ -338,38 +181,6 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
         save_cache(file_path, df)
         return df
 
-    df, last_update = load_cache(file_path)
-
-    if last_update == today:
-        logger.log(f"✅ [{name}] 使用快取資料")
-        return df
-
-    logger.log(f"♻️ [{name}] 資料過期 → 重新下載")
-    df = fetch_func()
-    save_cache(file_path, df)
-    return df
-
-
-
-
-def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
-    """
-    通用 cache 控制器（支援多資料種類）
-
-    name:
-        price / revenue / eps / universe
-    """
-    file_path = get_cache_file(name)
-    today = datetime.today().strftime("%Y-%m-%d")
-
-    # 沒資料
-    if not os.path.exists(file_path):
-        logger.log(f"📥 [{name}] 無快取 → 下載資料")
-        df = fetch_func()
-        save_cache(file_path, df)
-        return df
-
-    # 讀資料
     df, last_update = load_cache(file_path)
 
     if last_update == today:
@@ -385,10 +196,10 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
 def to_num_series(s: pd.Series) -> pd.Series:
     return pd.to_numeric(
         s.astype(str)
-         .str.replace(",", "", regex=False)
-         .str.replace("%", "", regex=False)
-         .str.replace("+", "", regex=False)
-         .str.strip(),
+        .str.replace(",", "", regex=False)
+        .str.replace("%", "", regex=False)
+        .str.replace("+", "", regex=False)
+        .str.strip(),
         errors="coerce"
     )
 
@@ -431,8 +242,18 @@ def format_for_output(df: pd.DataFrame, sort_by_code: bool = True) -> pd.DataFra
         cols = ["股票代號", "公司名稱_來源"] + [c for c in df.columns if c not in ["股票代號", "公司名稱_來源"]]
         df = df[cols]
     if sort_by_code and "股票代號" in df.columns:
-        df = df.sort_values("股票代號", ascending=True)
+        # 依股票代號數字排序（處理 1101, 1102 等）
+        df["股票代號_sort"] = df["股票代號"].astype(str).str.extract(r'(\d+)').astype(int)
+        df = df.sort_values("股票代號_sort", ascending=True).drop(columns=["股票代號_sort"])
     return df.reset_index(drop=True)
+
+
+def ensure_str_column(df: pd.DataFrame, col_name: str) -> pd.DataFrame:
+    """確保指定欄位為字串型態"""
+    if col_name in df.columns:
+        df[col_name] = df[col_name].astype(str).str.strip()
+    return df
+
 
 # ==========================================================
 # ✅ v0.8.1 Excel Stock List Loader
@@ -455,6 +276,7 @@ def load_stock_list_from_excel(file_path):
     codes = df[col].astype(str).str.strip().tolist()
 
     return codes
+
 
 # ==========================================================
 # History Cache System (v0.8.0)
@@ -499,7 +321,6 @@ def update_stock_history(session, cfg, stock_id, df_old):
 
 
 def get_stock_history(session, cfg, stock_id, logger):
-
     os.makedirs(HISTORY_DIR, exist_ok=True)
     file_path = get_history_file(stock_id)
 
@@ -520,7 +341,9 @@ def get_stock_history(session, cfg, stock_id, logger):
 
     return df_new
 
-def fetch_csv_requests(session: requests.Session, url: str, cfg: StrategyConfig, encodings=("utf-8-sig", "utf-8")) -> pd.DataFrame:
+
+def fetch_csv_requests(session: requests.Session, url: str, cfg: StrategyConfig,
+                       encodings=("utf-8-sig", "utf-8")) -> pd.DataFrame:
     r = session.get(url, timeout=cfg.timeout, verify=cfg.verify_ssl)
     r.raise_for_status()
     last_err = None
@@ -568,12 +391,12 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
     price = price.drop_duplicates("股票代號").reset_index(drop=True)
     return price
 
+
 def fetch_prices_wrapper(session, cfg, logger):
     """
     包一層讓 cache 可以呼叫
     """
     return fetch_prices(session, cfg)
-
 
 
 def fetch_revenue_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame:
@@ -651,7 +474,14 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     out["EPSYoY_顯示(%)"] = (out["EPSYoY_raw"] * 100).replace([float("inf"), -float("inf")], 0).fillna(0)
 
     out["EPS季別"] = f"{int(latest_year)}Q{int(latest_q)}"
-    return out[["股票代號", "EPS季別", "EPS本期", "EPSYoY_raw", "EPSYoY_顯示(%)"]].drop_duplicates("股票代號").reset_index(drop=True)
+
+    # 確保股票代號為字串
+    out["股票代號"] = out["股票代號"].astype(str).str.strip()
+
+    return out[["股票代號", "EPS季別", "EPS本期", "EPSYoY_raw", "EPSYoY_顯示(%)"]].drop_duplicates(
+        "股票代號").reset_index(drop=True)
+
+
 # ==========================================================
 # 15) TWSE STOCK_DAY fetch + indicators + backtests + Excel + GUI
 # ==========================================================
@@ -667,7 +497,8 @@ def safe_parse_json(r):
         return None
 
 
-def fetch_twse_stock_day_month(session: requests.Session, cfg: StrategyConfig, stock_no: str, yyyymm01: str) -> pd.DataFrame:
+def fetch_twse_stock_day_month(session: requests.Session, cfg: StrategyConfig, stock_no: str,
+                               yyyymm01: str) -> pd.DataFrame:
     url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY"
     params = {"response": "json", "date": yyyymm01, "stockNo": stock_no}
 
@@ -683,14 +514,11 @@ def fetch_twse_stock_day_month(session: requests.Session, cfg: StrategyConfig, s
 
             if js.get("stat") != "OK" or "data" not in js:
                 empty_df = pd.DataFrame()
-                empty_reason = pd.DataFrame(columns=["出場原因", "次數", "比例(%)"])
                 return pd.DataFrame()
 
             fields = js.get("fields", [])
             data = js.get("data", [])
             if not fields or not data:
-                empty_df = pd.DataFrame()
-                empty_reason = pd.DataFrame(columns=["出場原因", "次數", "比例(%)"])
                 return pd.DataFrame()
 
             dfm = pd.DataFrame(data, columns=fields)
@@ -702,8 +530,6 @@ def fetch_twse_stock_day_month(session: requests.Session, cfg: StrategyConfig, s
             low_col = find_col(dfm.columns, ["最低價"])
             close_col = find_col(dfm.columns, ["收盤價"])
             if date_col is None or close_col is None:
-                empty_df = pd.DataFrame()
-                empty_reason = pd.DataFrame(columns=["出場原因", "次數", "比例(%)"])
                 return pd.DataFrame()
 
             rename_map = {date_col: "Date_roc", open_col: "Open", high_col: "High", low_col: "Low", close_col: "Close"}
@@ -728,18 +554,15 @@ def fetch_twse_stock_day_month(session: requests.Session, cfg: StrategyConfig, s
 
         except Exception:
             if attempt == cfg.twse_retries:
-                empty_df = pd.DataFrame()
-                empty_reason = pd.DataFrame(columns=["出場原因", "次數", "比例(%)"])
                 return pd.DataFrame()
 
             time.sleep(cfg.twse_backoff * attempt)
 
-    empty_df = pd.DataFrame()
-    empty_reason = pd.DataFrame(columns=["出場原因", "次數", "比例(%)"])
     return pd.DataFrame()
 
 
-def fetch_twse_history(session: requests.Session, cfg: StrategyConfig, codes: List[str], logger: GuiLogger) -> pd.DataFrame:
+def fetch_twse_history(session: requests.Session, cfg: StrategyConfig, codes: List[str],
+                       logger: GuiLogger) -> pd.DataFrame:
     """
     v0.8.0：改為使用 History Cache（每檔股票）
     """
@@ -759,6 +582,8 @@ def fetch_twse_history(session: requests.Session, cfg: StrategyConfig, codes: Li
         return pd.DataFrame()
 
     return pd.concat(hist_list, ignore_index=True)
+
+
 def calc_tech_indicators(cfg: StrategyConfig, df_hist: pd.DataFrame) -> pd.DataFrame:
     df_hist = df_hist.sort_values("Date").copy()
 
@@ -798,16 +623,13 @@ def calc_tech_indicators(cfg: StrategyConfig, df_hist: pd.DataFrame) -> pd.DataF
 
     ma20_slope = df_hist["MA20"] - df_hist["MA20"].shift(cfg.ma_slope_days)
     trend_ok = (df_hist["Close"] >= df_hist["MA20"] * (1 - cfg.ma20_tolerance)) & (ma20_slope > 0)
-    volume_ok = (df_hist["Volume"] >= df_hist["VolMA20"]*1.5)
+    volume_ok = (df_hist["Volume"] >= df_hist["VolMA20"] * 1.5)
 
     buy = oversold_recent & turn_strong
     if cfg.require_trend_filter:
         buy = buy & trend_ok
     if cfg.require_volume_filter:
         buy = buy & volume_ok
-
-    # ✅ 新增這行（關鍵）
-    #buy = buy & (df_hist["RSI"] > 45)
 
     df_hist["買點"] = buy
     df_hist["訊號型態"] = "三段式_B(折衷)"
@@ -818,12 +640,11 @@ def calc_tech_indicators(cfg: StrategyConfig, df_hist: pd.DataFrame) -> pd.DataF
     return df_hist
 
 
-def run_tech(cfg: StrategyConfig, session: requests.Session, codes: List[str], logger: GuiLogger) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def run_tech(cfg: StrategyConfig, session: requests.Session, codes: List[str], logger: GuiLogger) -> Tuple[
+    pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     hist = fetch_twse_history(session, cfg, codes, logger)
     if hist.empty:
-        empty_df = pd.DataFrame()
-        empty_reason = pd.DataFrame(columns=["出場原因", "次數", "比例(%)"])
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     parts = []
     for code, g in hist.groupby("股票代號", sort=False):
@@ -888,6 +709,7 @@ def profit_factor(returns):
         return float("inf") if wins > 0 else None
     return float(wins / abs(losses))
 
+
 def annualize_sharpe(cfg: StrategyConfig, daily_returns):
     r = pd.Series(daily_returns).dropna()
     if len(r) < 10:
@@ -900,7 +722,6 @@ def annualize_sharpe(cfg: StrategyConfig, daily_returns):
     if sigma == 0:
         return None
     return float(mu / sigma)
-
 
 
 def annualize_sortino(cfg: StrategyConfig, daily_returns):
@@ -924,8 +745,6 @@ def annualize_sortino(cfg: StrategyConfig, daily_returns):
 
 def signal_level_backtest_event(cfg: StrategyConfig, tech_all: pd.DataFrame) -> pd.DataFrame:
     if tech_all is None or tech_all.empty:
-        empty_df = pd.DataFrame()
-        empty_reason = pd.DataFrame(columns=["出場原因", "次數", "比例(%)"])
         return pd.DataFrame()
 
     returns_net = []
@@ -940,8 +759,6 @@ def signal_level_backtest_event(cfg: StrategyConfig, tech_all: pd.DataFrame) -> 
 
     rnet = pd.Series(returns_net).dropna()
     if rnet.empty:
-        empty_df = pd.DataFrame()
-        empty_reason = pd.DataFrame(columns=["出場原因", "次數", "比例(%)"])
         return pd.DataFrame()
 
     streak = max_losing_streak(rnet.values)
@@ -970,17 +787,16 @@ def build_gate_map(cfg: StrategyConfig, df_sel: pd.DataFrame) -> Dict[str, bool]
     gate = (cond_rev & cond_eps).astype(bool)
     return dict(zip(code, gate))
 
-def portfolio_backtest_topk_event(cfg: StrategyConfig, tech_all: pd.DataFrame, score_map: dict, gate_map: dict) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-#def portfolio_backtest_topk_event(cfg: StrategyConfig, tech_all: pd.DataFrame, score_map: dict, gate_map: dict) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+
+def portfolio_backtest_topk_event(cfg: StrategyConfig, tech_all: pd.DataFrame, score_map: dict, gate_map: dict) -> \
+Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     TopK 等權投組（僅空手時建倉）
     - 當日買點候選 →（可套 Gate）→ 挑 Score 前 K 檔等權進場
     - 每持倉獨立事件型出場
     """
     if tech_all is None or tech_all.empty:
-        empty_df = pd.DataFrame()
-        empty_reason = pd.DataFrame(columns=["出場原因", "次數", "比例(%)"])
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     df = tech_all[["Date", "股票代號", "Close", "買點", "RSI"]].copy()
     df = df.dropna(subset=["Date", "Close"])
@@ -1158,8 +974,8 @@ def portfolio_backtest_topk_event(cfg: StrategyConfig, tech_all: pd.DataFrame, s
     else:
         reason_stats = pd.DataFrame(columns=["出場原因", "次數", "比例(%)"])
 
-
     return eq, trades, kpi, reason_stats
+
 
 # ==========================================================
 # Performance Breakdown (v0.8.0)
@@ -1170,8 +986,6 @@ def performance_by_year(trades_df):
         return pd.DataFrame()
 
     df = trades_df.copy()
-    #df["year"] = pd.to_datetime(df["entry_date"]).dt.year
-    # ✅ 自動找進場日期欄位（防止欄位名稱不同）
     date_col = find_col(df.columns, ["entry", "進場", "買進", "date"])
 
     if date_col is None:
@@ -1182,8 +996,6 @@ def performance_by_year(trades_df):
     out = []
 
     for y, g in df.groupby("year"):
-        #returns = g["return"]
-        # ✅ 自動找報酬欄位（防欄位名稱不同）
         ret_col = find_col(g.columns, ["return", "報酬", "損益", "ret", "%"])
 
         if ret_col is None:
@@ -1266,39 +1078,42 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     GUI 入口：執行完整策略流程，並把 log 寫進 GUI console
     """
     s = build_session()
-    #logger.log("1) 下載股價（TWSE+TPEX）...")
-    #price = fetch_prices(s, cfg)
-    #price = get_or_fetch(lambda: fetch_prices_wrapper(s, cfg, logger), logger)
 
     logger.log("1) 取得股價資料...")
     price = get_or_fetch("price", lambda: fetch_prices_wrapper(s, cfg, logger), logger)
+    price = ensure_str_column(price, "股票代號")
 
     logger.log("2) 取得月營收...")
     revenue = get_or_fetch("revenue", lambda: fetch_revenue_latest(s, cfg), logger)
+    revenue = ensure_str_column(revenue, "股票代號")
 
     logger.log("3) 取得 EPS...")
-    eps = get_or_fetch("eps", lambda: fetch_eps_latest(s, cfg), logger)
-
-
-    logger.log("2) 下載最新月營收（mopsfin L+O；暫時跳過 SSL 驗證）...")
-    rev_latest = fetch_revenue_latest(s, cfg)
-
-    logger.log("3) 下載最新EPS（mopsfin L+O；暫時跳過 SSL 驗證）...")
-    eps_latest = fetch_eps_latest(s, cfg)
+    eps_data = get_or_fetch("eps", lambda: fetch_eps_latest(s, cfg), logger)
+    eps_data = ensure_str_column(eps_data, "股票代號")
 
     logger.log("4) 合併基本面資料...")
-    df_sel = price.merge(rev_latest, on="股票代號", how="left")
-    df_sel = df_sel.merge(eps_latest, on="股票代號", how="left")
-    df_sel["股票代號"] = df_sel["股票代號"].astype(str).str.strip()
+    df_sel = price.merge(revenue, on="股票代號", how="left")
+    df_sel = df_sel.merge(eps_data, on="股票代號", how="left")
+    df_sel = ensure_str_column(df_sel, "股票代號")
+
+    # ✅ 確保 EPSYoY 顯示欄位存在（v0.8.3 修復）
+    if "EPSYoY_顯示(%)" in eps_data.columns:
+        df_sel["EPSYoY_顯示(%)"] = df_sel["EPSYoY_顯示(%)"]
+    else:
+        # 如果沒有 EPSYoY_顯示(%)，就手動計算
+        if "EPSYoY_raw" in df_sel.columns:
+            df_sel["EPSYoY_顯示(%)"] = (df_sel["EPSYoY_raw"] * 100).fillna(0).round(2)
+        else:
+            df_sel["EPSYoY_顯示(%)"] = 0
 
     # 基本面衍生 + Score（與你既有邏輯一致）
     df_sel["PE"] = df_sel["股價"] / df_sel["EPS本期"]
     df_sel["殖利率(估)"] = (df_sel["EPS本期"] * 0.7) / df_sel["股價"]
     df_sel["Score"] = (
-        df_sel["營收YoY(%)"].fillna(0) * 0.35 +
-        (df_sel["EPSYoY_raw"].fillna(0) * 100) * 0.35 +
-        df_sel["殖利率(估)"].fillna(0) * 100 * 0.20 -
-        df_sel["PE"].fillna(0) * 0.05
+            df_sel["營收YoY(%)"].fillna(0) * 0.35 +
+            (df_sel["EPSYoY_raw"].fillna(0) * 100) * 0.35 +
+            df_sel["殖利率(估)"].fillna(0) * 100 * 0.20 -
+            df_sel["PE"].fillna(0) * 0.05
     )
     df_sel = df_sel.sort_values("Score", ascending=False).reset_index(drop=True)
 
@@ -1345,46 +1160,58 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     try:
         yearly_perf = performance_by_year(trades)
         logger.log("✅ 年度績效分析：")
-        logger.log(yearly_perf.to_string(index=False))
+        if not yearly_perf.empty:
+            logger.log(yearly_perf.to_string(index=False))
     except Exception as e:
         logger.log(f"⚠️ 年度績效分析失敗：{e}")
         yearly_perf = pd.DataFrame()
 
     # ===== output tables =====
     name_map = price[["股票代號", "公司名稱_來源"]].drop_duplicates("股票代號")
-    df_out_all = format_for_output(df_sel.copy(), sort_by_code=True)
-    strong_out = format_for_output(strong_sel.copy(), sort_by_code=True)
-    top10_out = format_for_output(top10_sel.copy(), sort_by_code=True)
+    name_map = ensure_str_column(name_map, "股票代號")
 
+    # 全市場_基本面
+    df_out_all = format_for_output(df_sel, sort_by_code=True)
+
+    # 強勢股_基本面
+    strong_out = format_for_output(strong_sel, sort_by_code=True)
+
+    # Top10_基本面
+    top10_out = format_for_output(top10_sel, sort_by_code=True)
+
+    # EPS YoY 對應 map
     eps_disp_map = df_sel.set_index("股票代號")["EPSYoY_顯示(%)"].to_dict()
 
+    # 技術分析_今日
     if tech_today is None or tech_today.empty:
         tech_today_out = pd.DataFrame()
     else:
+        tech_today = ensure_str_column(tech_today, "股票代號")
         tech_today_out = tech_today.merge(name_map, on="股票代號", how="left")
         tech_today_out["EPSYoY_顯示(%)"] = tech_today_out["股票代號"].map(eps_disp_map)
         tech_today_out = format_for_output(tech_today_out, sort_by_code=True)
 
+    # 技術買點_今日（v0.8.2：增加公司名稱）
     if buy_today is None or buy_today.empty:
-        buy_today_out = tech_today_out.head(0).copy() if tech_today_out is not None and not tech_today_out.empty else pd.DataFrame()
+        buy_today_out = pd.DataFrame()
     else:
+        buy_today = ensure_str_column(buy_today, "股票代號")
         buy_today_out = buy_today.merge(name_map, on="股票代號", how="left")
         buy_today_out["EPSYoY_顯示(%)"] = buy_today_out["股票代號"].map(eps_disp_map)
         buy_today_out = format_for_output(buy_today_out, sort_by_code=True)
 
+    # 投組交易明細（v0.8.2：增加公司名稱）
     if trades is None or trades.empty:
-        trades_out = pd.DataFrame(columns=["股票代號", "公司名稱_來源", "進場日", "進場價", "出場日", "出場價", "出場原因", "報酬(%)", "報酬_扣成本(%)"])
+        trades_out = pd.DataFrame(
+            columns=["股票代號", "公司名稱_來源", "進場日", "進場價", "出場日", "出場價", "出場原因", "報酬(%)",
+                     "報酬_扣成本(%)"])
     else:
+        trades = ensure_str_column(trades, "股票代號")
         trades_out = trades.merge(name_map, on="股票代號", how="left")
-
-        # ✅ 先做格式整理（但不要排序）
-        trades_out = format_for_output(trades_out, sort_by_code=False)
-
-        # ✅ 依進場日排序（你要求）
+        trades_out = format_for_output(trades_out, sort_by_code=True)
+        # 依進場日排序
         if "進場日" in trades_out.columns:
             trades_out = trades_out.sort_values("進場日")
-
-        #trades_out = format_for_output(trades_out, sort_by_code=True)
 
     # ===== Excel output =====
     out_file = f"{cfg.out_file_prefix}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
@@ -1396,9 +1223,14 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         strong_out.to_excel(writer, index=False, sheet_name="強勢股_基本面")
         top10_out.to_excel(writer, index=False, sheet_name="Top10_基本面")
 
-        tech_today_out.to_excel(writer, index=False, sheet_name="技術分析_今日", startrow=startrow)
-        buy_today_out.to_excel(writer, index=False, sheet_name="技術買點_今日", startrow=startrow)
-        reason_stats.to_excel(writer, index=False, sheet_name="出場原因統計")
+        if not tech_today_out.empty:
+            tech_today_out.to_excel(writer, index=False, sheet_name="技術分析_今日", startrow=startrow)
+
+        if not buy_today_out.empty:
+            buy_today_out.to_excel(writer, index=False, sheet_name="技術買點_今日", startrow=startrow)
+
+        if not reason_stats.empty:
+            reason_stats.to_excel(writer, index=False, sheet_name="出場原因統計")
 
         summary_sheet = pd.concat(
             [pd.DataFrame([{"區塊": "Signal-level(v0.7.3_event_exit)"}]),
@@ -1409,49 +1241,62 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         )
         summary_sheet.to_excel(writer, index=False, sheet_name="回測摘要", startrow=startrow)
 
-        eq.to_excel(writer, index=False, sheet_name="投組回測_TopK等權", startrow=startrow)
-        trades_out.to_excel(writer, index=False, sheet_name="投組交易明細", startrow=0)
+        if not eq.empty:
+            eq.to_excel(writer, index=False, sheet_name="投組回測_TopK等權", startrow=startrow)
 
-        # ✅ 新增
-        #yearly_perf.to_excel(writer, sheet_name="年度績效", index=False)
+        if not trades_out.empty:
+            trades_out.to_excel(writer, index=False, sheet_name="投組交易明細", startrow=0)
 
-        # ✅ v0.8.0
+        # 年度績效
         if yearly_perf is not None and not yearly_perf.empty:
             yearly_perf.to_excel(writer, sheet_name="年度績效", index=False)
 
-        ws_tech = writer.sheets["技術分析_今日"]
-        ws_buy = writer.sheets["技術買點_今日"]
-        ws_sum = writer.sheets["回測摘要"]
+        # 美化（如果 sheet 存在的話）
+        if "技術分析_今日" in writer.sheets:
+            ws_tech = writer.sheets["技術分析_今日"]
+            tech_explain = [
+                "【技術分析_今日】說明",
+                f"Top{cfg.topk} 等權投組 + 事件型出場（SL={cfg.stop_loss:.0%}, TP={cfg.take_profit:.0%}, RSI={cfg.exit_rsi}, HOLD={cfg.hold_days}日）。",
+                "本表顯示 Ret_1D_past/Ret_5D_past（過去報酬），避免最新日空欄位。"
+            ]
+            write_explanation(ws_tech, tech_explain)
+            header_row = startrow + 1
+            style_header(ws_tech, header_row)
+            ws_tech.freeze_panes = ws_tech[f"A{header_row + 1}"]
+            last_col = get_column_letter(ws_tech.max_column)
+            ws_tech.auto_filter.ref = f"A{header_row}:{last_col}{ws_tech.max_row}"
+            autosize_columns(ws_tech)
+            highlight_true(ws_tech, header_row, "買點")
 
-        tech_explain = [
-            "【技術分析_今日】說明",
-            f"Top{cfg.topk} 等權投組 + 事件型出場（SL={cfg.stop_loss:.0%}, TP={cfg.take_profit:.0%}, RSI={cfg.exit_rsi}, HOLD={cfg.hold_days}日）。",
-            "本表顯示 Ret_1D_past/Ret_5D_past（過去報酬），避免最新日空欄位。"
-        ]
-        buy_explain = [
-            "【技術買點_今日】說明",
-            "空表代表今日無訊號（正常）。"
-        ]
-        bt_explain = [
-            "【回測摘要】說明",
-            "Signal-level：買點事件用事件型出場計算報酬（含成本）。",
-            f"Portfolio-level：Top{cfg.topk} 等權投組，事件型出場。",
-        ]
+        if "技術買點_今日" in writer.sheets:
+            ws_buy = writer.sheets["技術買點_今日"]
+            buy_explain = [
+                "【技術買點_今日】說明",
+                "空表代表今日無訊號（正常）。"
+            ]
+            write_explanation(ws_buy, buy_explain)
+            header_row = startrow + 1
+            style_header(ws_buy, header_row)
+            ws_buy.freeze_panes = ws_buy[f"A{header_row + 1}"]
+            last_col = get_column_letter(ws_buy.max_column)
+            ws_buy.auto_filter.ref = f"A{header_row}:{last_col}{ws_buy.max_row}"
+            autosize_columns(ws_buy)
+            highlight_true(ws_buy, header_row, "買點")
 
-        write_explanation(ws_tech, tech_explain)
-        write_explanation(ws_buy, buy_explain)
-        write_explanation(ws_sum, bt_explain)
-
-        header_row = startrow + 1
-        for ws in (ws_tech, ws_buy, ws_sum):
-            style_header(ws, header_row)
-            ws.freeze_panes = ws[f"A{header_row + 1}"]
-            last_col = get_column_letter(ws.max_column)
-            ws.auto_filter.ref = f"A{header_row}:{last_col}{ws.max_row}"
-            autosize_columns(ws)
-
-        highlight_true(ws_tech, header_row, "買點")
-        highlight_true(ws_buy, header_row, "買點")
+        if "回測摘要" in writer.sheets:
+            ws_sum = writer.sheets["回測摘要"]
+            bt_explain = [
+                "【回測摘要】說明",
+                "Signal-level：買點事件用事件型出場計算報酬（含成本）。",
+                f"Portfolio-level：Top{cfg.topk} 等權投組，事件型出場。",
+            ]
+            write_explanation(ws_sum, bt_explain)
+            header_row = startrow + 1
+            style_header(ws_sum, header_row)
+            ws_sum.freeze_panes = ws_sum[f"A{header_row + 1}"]
+            last_col = get_column_letter(ws_sum.max_column)
+            ws_sum.auto_filter.ref = f"A{header_row}:{last_col}{ws_sum.max_row}"
+            autosize_columns(ws_sum)
 
     # ===== console summary =====
     logger.log("✅ Signal-level KPI（事件型）:")
@@ -1476,7 +1321,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
 class StrategyGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("StockTool v0.8.0-GUI (TopK Equal Weight)")
+        self.title("StockTool v0.8.4-GUI (TopK Equal Weight + Format Fix)")
 
         self.log_queue = queue.Queue()
         self.logger = GuiLogger(self.log_queue)
@@ -1523,7 +1368,8 @@ class StrategyGUI(tk.Tk):
 
         ttk.Separator(left).pack(fill="x", pady=8)
 
-        ttk.Label(left, text="Event Exit (v0.7.3 Option A defaults)", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 6))
+        ttk.Label(left, text="Event Exit (v0.7.3 Option A defaults)", font=("Segoe UI", 10, "bold")).pack(anchor="w",
+                                                                                                          pady=(0, 6))
         self._add_entry(left, "STOP_LOSS (e.g. -0.04)", "stop_loss", tk.DoubleVar, self.cfg.stop_loss)
         self._add_entry(left, "TAKE_PROFIT (e.g. 0.05)", "take_profit", tk.DoubleVar, self.cfg.take_profit)
         self._add_entry(left, "EXIT_RSI (e.g. 62)", "exit_rsi", tk.IntVar, self.cfg.exit_rsi)
@@ -1546,8 +1392,6 @@ class StrategyGUI(tk.Tk):
         # ✅ 新增 Clear Console 按鈕
         self.clear_btn = ttk.Button(left, text="Clear Console", command=self._on_clear_console)
         self.clear_btn.pack(fill="x", pady=(6, 0))
-
-
 
         # ---- Console panel ----
         ttk.Label(right, text="Program Console", font=("Segoe UI", 12, "bold")).pack(anchor="w")
@@ -1593,14 +1437,12 @@ class StrategyGUI(tk.Tk):
         """清空 Program Console"""
         self.console.delete("1.0", "end")
 
-
     def _on_run(self):
         self.run_btn.config(state="disabled")
         self.console.insert("end", "========== RUN ==========\n")
         self.console.see("end")
 
         cfg = self._read_config()
-
         cfg.use_excel_stock_list = self.use_excel_var.get()
 
         def worker():
