@@ -1,37 +1,21 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║                          台灣股市量化選股系統 v0.9.0                          ║
+║                          台灣股市量化選股系統 v0.9.2                          ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 【版本資訊】
-Version: v0.9.0-GUI
-最後更新: 2026-05-25 (Asia/Taipei)
+Version: v0.9.2-GUI
+最後更新: 2026-05-26 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
 ════════════════════════════════════════════════════════════════════════════════
-【v0.9.0 修改內容】2026-05-25
+【v0.9.2 修改內容】2026-05-26
 ════════════════════════════════════════════════════════════════════════════════
 
-1. Walk-forward 分析（滾動回測 + 參數網格搜索）
-   - 避免策略過擬合
-   - 驗證策略穩定性
-   - 輸出穩定性評估報告
-
-2. 多因子評分強化
-   - 加入動能因子（1/3/6個月報酬）
-   - Z-score 標準化
-   - 因子權重可調整
-
-3. 技術訊號強化
-   - 多時間框架確認（週線、月線趨勢）
-   - RSI 背離檢測
-   - 成交量爆發確認
-   - 買點確認層級標示
-
-4. 設定檔自動儲存/載入（v0.8.8 保留）
-
+1. 新增 Top10 基本面回測模式
+2. 技術買點_今日 Sheet 改為永遠顯示
 ════════════════════════════════════════════════════════════════════════════════
 """
 
@@ -69,7 +53,6 @@ warnings.filterwarnings("ignore")
 CONFIG_FILE = "stocktool_config.json"
 
 DEFAULT_CONFIG = {
-    # universe / data
     "top_n_for_tech": 60,
     "tech_months": 24,
     "history_months": 60,
@@ -78,15 +61,13 @@ DEFAULT_CONFIG = {
     "use_excel_stock_list": False,
     "excel_stock_file": "stock_list.xlsx",
     "use_enhanced_score": True,
-
-    # 多因子評分權重（v0.9.0）
+    "use_top10_backtest": False,
+    "excel_force_buy": False,
     "factor_weight_mom1": 0.15,
     "factor_weight_mom3": 0.15,
     "factor_weight_mom6": 0.20,
     "factor_weight_rev": 0.25,
     "factor_weight_eps": 0.25,
-
-    # 簡易評分參數
     "simple_score_weight_rev": 35.0,
     "simple_score_weight_eps": 35.0,
     "simple_score_weight_div": 20.0,
@@ -95,42 +76,29 @@ DEFAULT_CONFIG = {
     "simple_min_eps_yoy": -999.0,
     "simple_min_eps": -999.0,
     "simple_max_pe": 999.0,
-
-    # 技術訊號參數（v0.9.0）
-    "use_mtf_confirmation": True,  # 多時間框架確認
-    "use_divergence_detection": True,  # RSI背離檢測
-    "volume_surge_multiplier": 2.0,  # 成交量爆發倍數
-
-    # Walk-forward 參數（v0.9.0）
+    "use_mtf_confirmation": True,
+    "use_divergence_detection": True,
+    "volume_surge_multiplier": 2.0,
     "wf_enabled": False,
     "wf_train_years": 2,
     "wf_test_years": 1,
     "wf_step_years": 1,
-
-    # TWSE fetch
     "twse_retries": 3,
     "twse_backoff": 0.8,
     "twse_sleep": 0.12,
-
-    # portfolio
     "topk": 7,
     "hold_days": 10,
     "roundtrip_cost_pct": 0.004,
-
-    # event-driven exit
     "stop_loss": -0.03,
     "take_profit": 0.08,
     "exit_rsi": 70,
-
     "use_gate": False,
     "min_rev_yoy": 0.0,
     "min_eps_yoy": 0.0,
     "allow_eps_yoy_nan": True,
-
     "risk_free_annual": 0.0,
     "mar_annual": 0.0,
     "trading_days": 252,
-
     "rsi_oversold": 45,
     "oversold_lookback": 10,
     "rsi_recover": 40,
@@ -140,18 +108,12 @@ DEFAULT_CONFIG = {
     "ma_slope_days": 3,
     "ma20_tolerance": 0.01,
     "require_volume_filter": True,
-
     "strong_revenue_yoy": 10.0,
     "strong_pe_max": 30.0,
     "strong_price_min": 10.0,
-
     "out_file_prefix": "選股報表"
 }
 
-
-# ==========================================================
-# Config 管理函數
-# ==========================================================
 
 def load_config() -> dict:
     if os.path.exists(CONFIG_FILE):
@@ -180,7 +142,7 @@ def save_config(config: dict):
 
 
 # ==========================================================
-# StrategyConfig（v0.9.0）
+# StrategyConfig
 # ==========================================================
 
 HISTORY_DIR = "cache/history"
@@ -188,26 +150,21 @@ HISTORY_DIR = "cache/history"
 
 @dataclass
 class StrategyConfig:
-    # universe / data
     top_n_for_tech: int = 60
     tech_months: int = 24
     history_months: int = 60
     timeout: int = 30
     verify_ssl: bool = False
-
     use_excel_stock_list: bool = False
     excel_stock_file: str = "stock_list.xlsx"
-
     use_enhanced_score: bool = True
-
-    # 多因子評分權重（v0.9.0）
+    use_top10_backtest: bool = False
+    excel_force_buy: bool = False      # Excel 清單強制買點模式
     factor_weight_mom1: float = 0.15
     factor_weight_mom3: float = 0.15
     factor_weight_mom6: float = 0.20
     factor_weight_rev: float = 0.25
     factor_weight_eps: float = 0.25
-
-    # 簡易評分參數
     simple_score_weight_rev: float = 35.0
     simple_score_weight_eps: float = 35.0
     simple_score_weight_div: float = 20.0
@@ -216,42 +173,29 @@ class StrategyConfig:
     simple_min_eps_yoy: float = -999.0
     simple_min_eps: float = -999.0
     simple_max_pe: float = 999.0
-
-    # 技術訊號參數（v0.9.0）
-    use_mtf_confirmation: bool = True  # 多時間框架確認
-    use_divergence_detection: bool = True  # RSI背離檢測
-    volume_surge_multiplier: float = 2.0  # 成交量爆發倍數
-
-    # Walk-forward 參數（v0.9.0）
+    use_mtf_confirmation: bool = True
+    use_divergence_detection: bool = True
+    volume_surge_multiplier: float = 2.0
     wf_enabled: bool = False
     wf_train_years: int = 2
     wf_test_years: int = 1
     wf_step_years: int = 1
-
-    # TWSE fetch
     twse_retries: int = 3
     twse_backoff: float = 0.8
     twse_sleep: float = 0.12
-
-    # portfolio
     topk: int = 7
     hold_days: int = 10
     roundtrip_cost_pct: float = 0.004
-
-    # event-driven exit
     stop_loss: float = -0.03
     take_profit: float = 0.08
     exit_rsi: int = 70
-
     use_gate: bool = False
     min_rev_yoy: float = 0.0
     min_eps_yoy: float = 0.0
     allow_eps_yoy_nan: bool = True
-
     risk_free_annual: float = 0.0
     mar_annual: float = 0.0
     trading_days: int = 252
-
     rsi_oversold: int = 45
     oversold_lookback: int = 10
     rsi_recover: int = 40
@@ -261,11 +205,9 @@ class StrategyConfig:
     ma_slope_days: int = 3
     ma20_tolerance: float = 0.01
     require_volume_filter: bool = True
-
     strong_revenue_yoy: float = 10.0
     strong_pe_max: float = 30.0
     strong_price_min: float = 10.0
-
     out_file_prefix: str = "選股報表"
 
     def to_dict(self) -> dict:
@@ -275,9 +217,12 @@ class StrategyConfig:
         for key, value in data.items():
             if hasattr(self, key):
                 setattr(self, key, value)
+
+
 # ==========================================================
 # Logger
 # ==========================================================
+
 class GuiLogger:
     def __init__(self, q: queue.Queue):
         self.q = q
@@ -285,15 +230,14 @@ class GuiLogger:
     def log(self, msg: str):
         ts = datetime.now().strftime("%H:%M:%S")
         self.q.put(f"[{ts}] {msg}")
-
-
 # ==========================================================
 # Session
 # ==========================================================
+
 def build_session() -> requests.Session:
     s = requests.Session()
     s.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.9.0-GUI",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.9.2-GUI",
         "Accept": "application/json,text/plain,*/*"
     })
     return s
@@ -311,6 +255,7 @@ def find_col(cols, keywords):
                 return c
     return None
 
+
 def get_cache_file(name):
     return f"cache/{name}.xlsx"
 
@@ -318,10 +263,8 @@ def get_cache_file(name):
 def save_cache(file_path, df):
     os.makedirs("cache", exist_ok=True)
     today = datetime.today().strftime("%Y-%m-%d")
-
     with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="data", index=False)
-
         meta = pd.DataFrame({"last_update": [today]})
         meta.to_excel(writer, sheet_name="meta", index=False)
 
@@ -335,19 +278,15 @@ def load_cache(file_path):
 def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
     file_path = get_cache_file(name)
     today = datetime.today().strftime("%Y-%m-%d")
-
     if not os.path.exists(file_path):
         logger.log(f"📥 [{name}] 無快取 → 下載資料")
         df = fetch_func()
         save_cache(file_path, df)
         return df
-
     df, last_update = load_cache(file_path)
-
     if last_update == today:
         logger.log(f"✅ [{name}] 使用快取資料")
         return df
-
     logger.log(f"♻️ [{name}] 資料過期 → 重新下載")
     df = fetch_func()
     save_cache(file_path, df)
@@ -402,30 +341,18 @@ def format_for_output(df: pd.DataFrame, sort_by_code: bool = True) -> pd.DataFra
         df = df.sort_values("股票代號_sort", ascending=True).drop(columns=["股票代號_sort"])
     return df.reset_index(drop=True)
 
+
 def ensure_str_column(df: pd.DataFrame, col_name: str) -> pd.DataFrame:
     if col_name in df.columns:
         df[col_name] = df[col_name].astype(str).str.strip()
     return df
-
-
 # ==========================================================
-# 多因子評分函數（v0.9.0）
+# 多因子評分函數
 # ==========================================================
 
 def calculate_multi_factor_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFrame:
-    """
-    多因子評分系統
-
-    因子分類：
-    1. 動能因子 (Momentum) - 1/3/6個月報酬
-    2. 成長因子 (Growth) - 營收YoY、EPS YoY
-    """
     df = df.copy()
-
-    # ===== 從股價歷史計算動能（需要在 tech_all 中已有 Close 價格）=====
-    # 注意：這個函數會在合併技術資料後呼叫，所以 Close 欄位應該存在
     if "Close" in df.columns:
-        # 計算動能報酬（約21個交易日=1個月）
         df["mom_1m"] = df.groupby("股票代號")["Close"].pct_change(21) * 100
         df["mom_3m"] = df.groupby("股票代號")["Close"].pct_change(63) * 100
         df["mom_6m"] = df.groupby("股票代號")["Close"].pct_change(126) * 100
@@ -434,7 +361,6 @@ def calculate_multi_factor_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.Da
         df["mom_3m"] = 0
         df["mom_6m"] = 0
 
-    # ===== Z-score 標準化 =====
     factors = ['mom_1m', 'mom_3m', 'mom_6m', '營收YoY(%)', 'EPSYoY_顯示(%)']
     for f in factors:
         if f in df.columns:
@@ -445,37 +371,25 @@ def calculate_multi_factor_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.Da
             else:
                 df[f"{f}_zscore"] = 0
 
-    # ===== 加權總分 =====
-    df["Score"] = (
-            df["mom_1m_zscore"].fillna(0) * cfg.factor_weight_mom1 +
-            df["mom_3m_zscore"].fillna(0) * cfg.factor_weight_mom3 +
-            df["mom_6m_zscore"].fillna(0) * cfg.factor_weight_mom6 +
-            df["營收YoY(%)_zscore"].fillna(0) * cfg.factor_weight_rev +
-            df["EPSYoY_顯示(%)_zscore"].fillna(0) * cfg.factor_weight_eps
-    )
-
+    df["Score"] = (df["mom_1m_zscore"].fillna(0) * cfg.factor_weight_mom1 +
+                   df["mom_3m_zscore"].fillna(0) * cfg.factor_weight_mom3 +
+                   df["mom_6m_zscore"].fillna(0) * cfg.factor_weight_mom6 +
+                   df["營收YoY(%)_zscore"].fillna(0) * cfg.factor_weight_rev +
+                   df["EPSYoY_顯示(%)_zscore"].fillna(0) * cfg.factor_weight_eps)
     df["Score"] = df["Score"].round(2)
-
-    # 記錄各因子分數
     df["評分_動能1M"] = df["mom_1m_zscore"].fillna(0).round(2)
     df["評分_動能3M"] = df["mom_3m_zscore"].fillna(0).round(2)
     df["評分_動能6M"] = df["mom_6m_zscore"].fillna(0).round(2)
     df["評分_成長"] = (df["營收YoY(%)_zscore"].fillna(0) * cfg.factor_weight_rev * 4).round(2)
-
     return df
 
 
 def calculate_enhanced_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFrame:
-    """
-    複合評分系統（v0.8.5 保留，v0.9.0 改為呼叫多因子）
-    """
     return calculate_multi_factor_score(df, cfg)
 
 
 def calculate_simple_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFrame:
-    """簡易評分系統（可調整權重 + 門檻過濾）"""
     df = df.copy()
-
     mask = pd.Series([True] * len(df))
     if cfg.simple_min_rev_yoy > -999:
         mask = mask & (df["營收YoY(%)"].fillna(-999) >= cfg.simple_min_rev_yoy)
@@ -500,46 +414,35 @@ def calculate_simple_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFram
                        div_score * (w_div / 100) + pe_score * (w_pe / 100))
     df["Score"] = df["Score_raw"].where(mask, -1e18).round(2)
     df["通過門檻"] = mask
-
     return df
 
 
 # ==========================================================
-# 強化版技術指標（v0.9.0 - 多時間框架 + RSI背離 + 成交量爆發）
+# 強化版技術指標
 # ==========================================================
 
 def calc_enhanced_tech_indicators(cfg: StrategyConfig, df_hist: pd.DataFrame) -> pd.DataFrame:
-    """
-    強化版技術指標計算
-    - 原有：MA5/MA20/RSI/MACD/三段式買點
-    - 新增：多時間框架確認、RSI背離檢測、成交量爆發確認
-    """
     df_hist = df_hist.sort_values("Date").copy()
-
     if cfg.tech_months is not None:
         cutoff_date = datetime.today() - pd.DateOffset(months=cfg.tech_months)
         df_hist = df_hist[df_hist["Date"] >= cutoff_date]
 
-    # ===== 基礎指標 =====
     df_hist["MA5"] = df_hist["Close"].rolling(5).mean()
     df_hist["MA20"] = df_hist["Close"].rolling(20).mean()
     df_hist["VolMA20"] = df_hist["Volume"].rolling(20).mean()
 
-    # RSI(14)
     delta = df_hist["Close"].diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
     rs = gain.rolling(14).mean() / loss.rolling(14).mean()
     df_hist["RSI"] = 100 - (100 / (1 + rs))
 
-    # MACD
     ema12 = df_hist["Close"].ewm(span=12, adjust=False).mean()
     ema26 = df_hist["Close"].ewm(span=26, adjust=False).mean()
     df_hist["MACD"] = ema12 - ema26
     df_hist["MACD_signal"] = df_hist["MACD"].ewm(span=9, adjust=False).mean()
     df_hist["MACD_hist"] = df_hist["MACD"] - df_hist["MACD_signal"]
 
-    # ===== 三段式買點（原有）=====
     oversold = df_hist["RSI"] < cfg.rsi_oversold
     oversold_recent = oversold.rolling(cfg.oversold_lookback).max().shift(1).fillna(0).astype(bool)
 
@@ -558,68 +461,41 @@ def calc_enhanced_tech_indicators(cfg: StrategyConfig, df_hist: pd.DataFrame) ->
     if cfg.require_volume_filter:
         daily_buy = daily_buy & volume_ok
 
-    # ===== v0.9.0 新增：多時間框架確認 =====
     if cfg.use_mtf_confirmation:
-        # 週線趨勢（MA20 > 5日均線）
         df_hist["Weekly_MA20"] = df_hist["MA20"].rolling(5).mean()
         weekly_trend = df_hist["MA20"] > df_hist["Weekly_MA20"]
-
-        # 月線趨勢（MA20 > 20日均線）
         df_hist["Monthly_MA20"] = df_hist["MA20"].rolling(20).mean()
         monthly_trend = df_hist["MA20"] > df_hist["Monthly_MA20"]
-
-        # 買點確認層級（0-3）
-        df_hist["確認層級"] = (
-                daily_buy.astype(int) +
-                weekly_trend.astype(int) +
-                monthly_trend.astype(int)
-        )
-
-        # 多時間框架確認後的買點（至少2層確認）
+        df_hist["確認層級"] = daily_buy.astype(int) + weekly_trend.astype(int) + monthly_trend.astype(int)
         mtf_buy = daily_buy & (weekly_trend | monthly_trend)
     else:
-        weekly_trend = pd.Series(True, index=df_hist.index)
-        monthly_trend = pd.Series(True, index=df_hist.index)
         mtf_buy = daily_buy
         df_hist["確認層級"] = daily_buy.astype(int)
 
-    # ===== v0.9.0 新增：RSI 背離檢測 =====
     if cfg.use_divergence_detection:
-        # 價格創20日新高但 RSI 沒創新高 → 熊市背離（潛在反轉）
         price_high = df_hist["Close"].rolling(20).max()
         rsi_high = df_hist["RSI"].rolling(20).max()
         bearish_divergence = (df_hist["Close"] == price_high) & (df_hist["RSI"] < rsi_high.shift(1))
-
-        # 價格創20日新低但 RSI 沒創新低 → 牛市背離（潛在反轉向上）
         price_low = df_hist["Close"].rolling(20).min()
         rsi_low = df_hist["RSI"].rolling(20).min()
         bullish_divergence = (df_hist["Close"] == price_low) & (df_hist["RSI"] > rsi_low.shift(1))
-
         df_hist["熊市背離"] = bearish_divergence
         df_hist["牛市背離"] = bullish_divergence
-
-        # 背離時過濾買點（避免在熊市背離時買入）
         mtf_buy = mtf_buy & (~bearish_divergence)
     else:
         df_hist["熊市背離"] = False
         df_hist["牛市背離"] = False
 
-    # ===== v0.9.0 新增：成交量爆發確認 =====
     volume_surge = df_hist["Volume"] >= df_hist["VolMA20"] * cfg.volume_surge_multiplier
     df_hist["成交量爆發"] = volume_surge
 
-    # ===== 最終買點 =====
     df_hist["買點"] = mtf_buy
     df_hist["買點_基礎"] = daily_buy
     df_hist["訊號型態"] = "三段式_B_強化版"
-
-    # 歷史報酬
     df_hist["Ret_1D_past(%)"] = df_hist["Close"].pct_change(1) * 100
     df_hist["Ret_5D_past(%)"] = df_hist["Close"].pct_change(5) * 100
 
     return df_hist
-
-
 # ==========================================================
 # Excel Stock List Loader
 # ==========================================================
@@ -799,8 +675,7 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     out["EPS季別"] = f"{int(latest_year)}Q{int(latest_q)}"
     out["股票代號"] = out["股票代號"].astype(str).str.strip()
 
-    return out[["股票代號", "EPS季別", "EPS本期", "EPSYoY_raw", "EPSYoY_顯示(%)"]].drop_duplicates(
-        "股票代號").reset_index(drop=True)
+    return out[["股票代號", "EPS季別", "EPS本期", "EPSYoY_raw", "EPSYoY_顯示(%)"]].drop_duplicates("股票代號").reset_index(drop=True)
 # ==========================================================
 # TWSE STOCK_DAY fetch
 # ==========================================================
@@ -888,7 +763,7 @@ def run_tech(cfg: StrategyConfig, session: requests.Session, codes: List[str], l
 
     parts = []
     for code, g in hist.groupby("股票代號", sort=False):
-        g2 = calc_enhanced_tech_indicators(cfg, g)  # 使用強化版
+        g2 = calc_enhanced_tech_indicators(cfg, g)
         g2["股票代號"] = str(code).strip()
         parts.append(g2)
 
@@ -1018,8 +893,7 @@ def build_gate_map(cfg: StrategyConfig, df_sel: pd.DataFrame) -> Dict[str, bool]
     return dict(zip(code, gate))
 
 
-def portfolio_backtest_topk_event(cfg: StrategyConfig, tech_all: pd.DataFrame, score_map: dict, gate_map: dict) -> \
-Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def portfolio_backtest_topk_event(cfg: StrategyConfig, tech_all: pd.DataFrame, score_map: dict, gate_map: dict) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     if tech_all is None or tech_all.empty:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
@@ -1210,25 +1084,18 @@ def performance_by_year(trades_df):
             "profit_factor": round(profit_factor(returns), 2) if profit_factor(returns) else None
         })
     return pd.DataFrame(out).sort_values("year")
-
-
 # ==========================================================
-# Walk-forward Analysis（v0.9.0）
+# Walk-forward Analysis
 # ==========================================================
 
 def run_walk_forward(cfg: StrategyConfig, logger: GuiLogger, s: requests.Session):
-    """
-    執行 Walk-forward 滾動回測分析
-    """
     logger.log("\n" + "=" * 60)
     logger.log("📊 開始 Walk-forward 分析")
     logger.log("=" * 60)
 
-    # 1. 獲取全部歷史資料的日期範圍
     end_date = datetime.now()
     start_date = end_date - pd.DateOffset(years=cfg.wf_train_years + cfg.wf_test_years * 4)
 
-    # 2. 建立時間窗口
     windows = []
     current_start = start_date
     window_count = 0
@@ -1248,14 +1115,13 @@ def run_walk_forward(cfg: StrategyConfig, logger: GuiLogger, s: requests.Session
         })
         current_start += pd.DateOffset(years=cfg.wf_step_years)
         window_count += 1
-        if window_count > 10:  # 限制最多10個窗口
+        if window_count > 10:
             break
 
     if len(windows) < 2:
-        logger.log("⚠️ 歷史資料不足，無法執行 Walk-forward 分析（需要至少2個窗口）")
+        logger.log("⚠️ 歷史資料不足，無法執行 Walk-forward 分析")
         return pd.DataFrame()
 
-    # 3. 對每個窗口執行
     results = []
     for i, window in enumerate(windows):
         logger.log(f"\n📊 Window {i + 1}/{len(windows)}")
@@ -1263,15 +1129,8 @@ def run_walk_forward(cfg: StrategyConfig, logger: GuiLogger, s: requests.Session
         logger.log(f"   測試期: {window['test_start_str']} ~ {window['test_end_str']}")
 
         try:
-            # 簡化版：使用當前參數測試（完整版需要網格搜索）
-            # 這裡先做簡單的穩定性測試
-
-            # 獲取訓練期股票列表
             tech_codes = get_codes_for_period(s, cfg, window['train_start'], window['train_end'], logger)
-
-            # 在測試期回測
-            test_result = quick_backtest_for_period(cfg, s, tech_codes, window['test_start'], window['test_end'],
-                                                    logger)
+            test_result = quick_backtest_for_period(cfg, s, tech_codes, window['test_start'], window['test_end'], logger)
 
             results.append({
                 "window": i + 1,
@@ -1294,16 +1153,13 @@ def run_walk_forward(cfg: StrategyConfig, logger: GuiLogger, s: requests.Session
                 "test_trades": 0
             })
 
-    # 4. 輸出分析結果
     df_results = pd.DataFrame(results)
 
     logger.log("\n" + "=" * 60)
     logger.log("📈 Walk-forward 分析結果")
     logger.log("=" * 60)
-    logger.log(
-        df_results[['test_period', 'test_cagr', 'test_sharpe', 'test_mdd', 'test_trades']].to_string(index=False))
+    logger.log(df_results[['test_period', 'test_cagr', 'test_sharpe', 'test_mdd', 'test_trades']].to_string(index=False))
 
-    # 5. 計算穩定性指標
     if len(df_results) > 1:
         cagr_std = df_results['test_cagr'].std()
         sharpe_std = df_results['test_sharpe'].std()
@@ -1323,27 +1179,21 @@ def run_walk_forward(cfg: StrategyConfig, logger: GuiLogger, s: requests.Session
 
 
 def get_codes_for_period(s, cfg, start_date, end_date, logger):
-    """獲取指定期間內的股票代號列表"""
-    # 簡化版：使用預設股票池
     from_cache = get_or_fetch("price", lambda: fetch_prices(s, cfg), logger)
     codes = from_cache["股票代號"].dropna().astype(str).str.strip().tolist()
     return codes[:cfg.top_n_for_tech]
 
 
 def quick_backtest_for_period(cfg, s, codes, start_date, end_date, logger):
-    """在指定期間內快速回測"""
     try:
-        # 獲取歷史資料
         hist = fetch_twse_history(s, cfg, codes, logger, cfg.history_months)
         if hist.empty:
             return {'cagr': 0, 'sharpe': 0, 'mdd': 0, 'trades': 0}
 
-        # 過濾期間
         hist = hist[(hist["Date"] >= start_date) & (hist["Date"] <= end_date)]
         if hist.empty:
             return {'cagr': 0, 'sharpe': 0, 'mdd': 0, 'trades': 0}
 
-        # 計算技術指標
         parts = []
         for code, g in hist.groupby("股票代號", sort=False):
             g2 = calc_enhanced_tech_indicators(cfg, g)
@@ -1351,7 +1201,6 @@ def quick_backtest_for_period(cfg, s, codes, start_date, end_date, logger):
             parts.append(g2)
         tech_all = pd.concat(parts, ignore_index=True)
 
-        # 簡化回測
         score_map = {}
         eq, trades, kpi, _ = portfolio_backtest_topk_event(cfg, tech_all, score_map, {})
 
@@ -1372,49 +1221,53 @@ def quick_backtest_for_period(cfg, s, codes, start_date, end_date, logger):
     except Exception as e:
         return {'cagr': 0, 'sharpe': 0, 'mdd': 0, 'trades': 0}
 
-    # ==========================================================
-    # Excel 美化函數
-    # ==========================================================
 
-    def autosize_columns(ws, min_w=10, max_w=44):
-        for col in ws.columns:
-            max_len = 0
-            col_letter = get_column_letter(col[0].column)
-            for cell in col:
-                if cell.value is None:
-                    continue
-                max_len = max(max_len, len(str(cell.value)))
-            ws.column_dimensions[col_letter].width = max(min_w, min(max_w, max_len + 2))
+# ==========================================================
+# Excel 美化函數
+# ==========================================================
 
-    def style_header(ws, header_row):
-        fill = PatternFill("solid", fgColor="1F4E79")
-        font = Font(color="FFFFFF", bold=True)
-        for cell in ws[header_row]:
-            cell.fill = fill
-            cell.font = font
-            cell.alignment = Alignment(horizontal="center", vertical="center")
+def autosize_columns(ws, min_w=10, max_w=44):
+    for col in ws.columns:
+        max_len = 0
+        col_letter = get_column_letter(col[0].column)
+        for cell in col:
+            if cell.value is None:
+                continue
+            max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = max(min_w, min(max_w, max_len + 2))
 
-    def write_explanation(ws, lines, start_row=1, start_col=1):
-        title_font = Font(bold=True, size=12)
-        normal_font = Font(size=11)
-        for i, line in enumerate(lines):
-            c = ws.cell(row=start_row + i, column=start_col, value=line)
-            c.font = title_font if i == 0 else normal_font
-            c.alignment = Alignment(wrap_text=True, vertical="top")
 
-    def highlight_true(ws, header_row, col_name):
-        header_cells = list(ws[header_row])
-        idx = None
-        for i, cell in enumerate(header_cells, 1):
-            if cell.value == col_name:
-                idx = i
-                break
-        if idx is None:
-            return
-        col_letter = get_column_letter(idx)
-        rng = f"{col_letter}{header_row + 1}:{col_letter}{ws.max_row}"
-        ws.conditional_formatting.add(rng, CellIsRule(operator="equal", formula=["TRUE"],
-                                                      fill=PatternFill("solid", fgColor="FFF2CC")))
+def style_header(ws, header_row):
+    fill = PatternFill("solid", fgColor="1F4E79")
+    font = Font(color="FFFFFF", bold=True)
+    for cell in ws[header_row]:
+        cell.fill = fill
+        cell.font = font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+
+def write_explanation(ws, lines, start_row=1, start_col=1):
+    title_font = Font(bold=True, size=12)
+    normal_font = Font(size=11)
+    for i, line in enumerate(lines):
+        c = ws.cell(row=start_row + i, column=start_col, value=line)
+        c.font = title_font if i == 0 else normal_font
+        c.alignment = Alignment(wrap_text=True, vertical="top")
+
+
+def highlight_true(ws, header_row, col_name):
+    header_cells = list(ws[header_row])
+    idx = None
+    for i, cell in enumerate(header_cells, 1):
+        if cell.value == col_name:
+            idx = i
+            break
+    if idx is None:
+        return
+    col_letter = get_column_letter(idx)
+    rng = f"{col_letter}{header_row + 1}:{col_letter}{ws.max_row}"
+    ws.conditional_formatting.add(rng, CellIsRule(operator="equal", formula=["TRUE"],
+                                                  fill=PatternFill("solid", fgColor="FFF2CC")))
 
 
 # ==========================================================
@@ -1425,7 +1278,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     s = build_session()
 
     logger.log("=" * 60)
-    logger.log("🚀 StockTool v0.9.0 開始執行")
+    logger.log("🚀 StockTool v0.9.2 開始執行")
     logger.log(f"   評分系統: {'多因子評分' if cfg.use_enhanced_score else '簡易評分'}")
     logger.log(f"   技術指標: 強化版 (MTF={cfg.use_mtf_confirmation}, 背離={cfg.use_divergence_detection})")
     logger.log("=" * 60)
@@ -1458,7 +1311,93 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     df_sel["PE"] = df_sel["股價"] / df_sel["EPS本期"]
     df_sel["殖利率(估)"] = (df_sel["EPS本期"] * 0.7) / df_sel["股價"]
 
-    # 選股檔數
+    # ==========================================================
+    # v0.9.2：Top10 基本面回測模式
+    # ==========================================================
+
+    if cfg.use_top10_backtest:
+        logger.log("=" * 60)
+        logger.log("📊 啟動 Top10 基本面回測模式")
+        logger.log("   ※ 直接使用 Score 最高的 10 檔股票建倉")
+        logger.log("   ※ 不經過技術買點過濾（買點強制設為 True）")
+        logger.log("=" * 60)
+
+        if cfg.use_enhanced_score:
+            df_sel = calculate_multi_factor_score(df_sel, cfg)
+            logger.log(f"   因子權重: 動能1M={cfg.factor_weight_mom1:.0%} 動能3M={cfg.factor_weight_mom3:.0%} 動能6M={cfg.factor_weight_mom6:.0%} 營收={cfg.factor_weight_rev:.0%} EPS={cfg.factor_weight_eps:.0%}")
+        else:
+            df_sel = calculate_simple_score(df_sel, cfg)
+
+        df_sel = df_sel.sort_values("Score", ascending=False).reset_index(drop=True)
+
+        top10_codes = df_sel.head(10)["股票代號"].dropna().astype(str).str.strip().tolist()
+        logger.log(f"   Top10 股票: {top10_codes}")
+
+        tech_all_top10, tech_today_top10, buy_today_top10 = run_tech(cfg, s, top10_codes, logger, cfg.history_months)
+
+        if tech_all_top10.empty:
+            logger.log("❌ 無法獲取 Top10 股票的歷史資料")
+            return
+
+        tech_all_top10["買點"] = True
+        tech_all_top10["買點_基礎"] = True
+        tech_all_top10["確認層級"] = 3
+
+        score_map = df_sel.set_index("股票代號")["Score"].to_dict()
+        gate_map = build_gate_map(cfg, df_sel)
+        eq_top10, trades_top10, pf_kpi_top10, reason_stats_top10 = portfolio_backtest_topk_event(
+            cfg, tech_all_top10, score_map, gate_map
+        )
+        sig_summary_top10 = signal_level_backtest_event(cfg, tech_all_top10)
+
+        logger.log("\n" + "=" * 60)
+        logger.log("📊 Top10 基本面回測結果")
+        logger.log("=" * 60)
+        logger.log("✅ Signal-level KPI:")
+        logger.log(sig_summary_top10.to_string(index=False) if not sig_summary_top10.empty else "(無訊號)")
+        logger.log(f"\n✅ Portfolio-level KPI (Top{cfg.topk} 等權):")
+        logger.log(pf_kpi_top10.to_string(index=False) if not pf_kpi_top10.empty else "(無投組資料)")
+
+        out_file = f"{cfg.out_file_prefix}_Top10Backtest_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        startrow = 6
+        name_map = price[["股票代號", "公司名稱_來源"]].drop_duplicates("股票代號")
+
+        with pd.ExcelWriter(out_file, engine="openpyxl") as writer:
+            format_for_output(df_sel.head(10), sort_by_code=True).to_excel(writer, index=False, sheet_name="Top10_股票列表")
+            if not eq_top10.empty:
+                eq_top10.to_excel(writer, index=False, sheet_name="投組回測", startrow=startrow)
+            if not trades_top10.empty:
+                trades_out = trades_top10.merge(name_map, on="股票代號", how="left")
+                trades_out = format_for_output(trades_out, sort_by_code=True)
+                # ✅ 按進場日排序
+                if "進場日" in trades_out.columns:
+                    trades_out = trades_out.sort_values("進場日")
+                trades_out.to_excel(writer, index=False, sheet_name="交易明細", startrow=0)
+            if not pf_kpi_top10.empty:
+                pf_kpi_top10.to_excel(writer, index=False, sheet_name="績效摘要", startrow=startrow)
+            if not reason_stats_top10.empty:
+                reason_stats_top10.to_excel(writer, index=False, sheet_name="出場原因統計")
+
+        logger.log(f"✅ Top10 回測完成 → {out_file}")
+        return
+
+    # ==========================================================
+    # 正常回測模式
+    # ==========================================================
+
+    if cfg.use_enhanced_score:
+        df_sel_temp = calculate_multi_factor_score(df_sel, cfg)
+        logger.log(f"   因子權重: 動能1M={cfg.factor_weight_mom1:.0%} 動能3M={cfg.factor_weight_mom3:.0%} 動能6M={cfg.factor_weight_mom6:.0%} 營收={cfg.factor_weight_rev:.0%} EPS={cfg.factor_weight_eps:.0%}")
+    else:
+        df_sel_temp = calculate_simple_score(df_sel, cfg)
+        w_rev = cfg.simple_score_weight_rev
+        w_eps = cfg.simple_score_weight_eps
+        w_div = cfg.simple_score_weight_div
+        w_pe = cfg.simple_score_weight_pe
+        logger.log(f"   權重: 營收{w_rev:.0f}% / EPS{w_eps:.0f}% / 殖利率{w_div:.0f}% / PE{w_pe:.0f}%")
+
+    df_sel_temp = df_sel_temp.sort_values("Score", ascending=False).reset_index(drop=True)
+
     logger.log(f"5) 抓取前 {cfg.top_n_for_tech} 檔股票的歷史日K...")
 
     if cfg.use_excel_stock_list:
@@ -1468,57 +1407,51 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         except Exception as e:
             logger.log(f"❌ Excel 選股失敗：{e}")
             return
-    else:
-        # 先做初步評分（用於選股）
-        if cfg.use_enhanced_score:
-            df_sel_temp = calculate_multi_factor_score(df_sel, cfg)
-        else:
-            df_sel_temp = calculate_simple_score(df_sel, cfg)
-        df_sel_temp = df_sel_temp.sort_values("Score", ascending=False)
-        tech_codes = df_sel_temp.head(cfg.top_n_for_tech)["股票代號"].dropna().astype(str).str.strip().tolist()
 
+        # ✅ v0.9.3 Excel 清單強制買點模式
+        if cfg.excel_force_buy:
+            logger.log("   📊 啟用 Excel 清單強制買點模式")
+            logger.log("   ※ 不經過技術買點過濾（買點強制設為 True）")
+    else:
+        tech_codes = df_sel_temp.head(cfg.top_n_for_tech)["股票代號"].dropna().astype(str).str.strip().tolist()
     logger.log(f"   選股檔數: {len(tech_codes)}，每檔 {cfg.history_months} 個月歷史資料")
 
-    # 抓取技術資料
+    #tech_all, tech_today, buy_today = run_tech(cfg, s, tech_codes, logger, cfg.history_months)
     tech_all, tech_today, buy_today = run_tech(cfg, s, tech_codes, logger, cfg.history_months)
+
+    # ✅ v0.9.3 Excel 清單強制買點模式：將買點強制設為 True
+    if cfg.use_excel_stock_list and cfg.excel_force_buy:
+        if not tech_all.empty:
+            tech_all["買點"] = True
+            tech_all["買點_基礎"] = True
+            tech_all["確認層級"] = 3
+            logger.log("   🔧 已強制將所有日期設為買點")
 
     if tech_all.empty:
         logger.log("❌ 無歷史資料，請檢查網路連線")
         return
 
-    # 計算評分（使用技術資料中的動能因子）
-    logger.log("6) 計算多因子評分...")
     if cfg.use_enhanced_score:
         df_sel = calculate_multi_factor_score(df_sel, cfg)
-        logger.log(
-            f"   因子權重: 動能1M={cfg.factor_weight_mom1:.0%} 動能3M={cfg.factor_weight_mom3:.0%} 動能6M={cfg.factor_weight_mom6:.0%} 營收={cfg.factor_weight_rev:.0%} EPS={cfg.factor_weight_eps:.0%}")
     else:
         df_sel = calculate_simple_score(df_sel, cfg)
-        w_rev = cfg.simple_score_weight_rev
-        w_eps = cfg.simple_score_weight_eps
-        w_div = cfg.simple_score_weight_div
-        w_pe = cfg.simple_score_weight_pe
-        logger.log(f"   權重: 營收{w_rev:.0f}% / EPS{w_eps:.0f}% / 殖利率{w_div:.0f}% / PE{w_pe:.0f}%")
 
     df_sel = df_sel.sort_values("Score", ascending=False).reset_index(drop=True)
 
-    # 強勢股過濾
     strong_sel = df_sel[
         (df_sel["營收YoY(%)"] > cfg.strong_revenue_yoy) &
         (df_sel["EPS本期"] > 0) &
         (df_sel["PE"] < cfg.strong_pe_max) &
         (df_sel["股價"] > cfg.strong_price_min)
-        ].copy()
+    ].copy()
     top10_sel = df_sel.head(10).copy()
 
-    # 回測
-    logger.log("7) 執行回測...")
+    logger.log("6) 執行回測...")
     gate_map = build_gate_map(cfg, df_sel)
     score_map = df_sel.set_index("股票代號")["Score"].to_dict()
     eq, trades, pf_kpi, reason_stats = portfolio_backtest_topk_event(cfg, tech_all, score_map, gate_map)
     sig_summary = signal_level_backtest_event(cfg, tech_all)
 
-    # 年度績效
     try:
         yearly_perf = performance_by_year(trades)
         logger.log("✅ 年度績效分析：")
@@ -1528,18 +1461,19 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         logger.log(f"⚠️ 年度績效分析失敗：{e}")
         yearly_perf = pd.DataFrame()
 
-    # Walk-forward 分析（如果啟用）
     wf_results = pd.DataFrame()
     if cfg.wf_enabled:
-        logger.log("8) 執行 Walk-forward 分析...")
+        logger.log("7) 執行 Walk-forward 分析...")
         wf_results = run_walk_forward(cfg, logger, s)
 
-    # 輸出 Excel
     name_map = price[["股票代號", "公司名稱_來源"]].drop_duplicates("股票代號")
     name_map = ensure_str_column(name_map, "股票代號")
     eps_disp_map = df_sel.set_index("股票代號")["EPSYoY_顯示(%)"].to_dict()
 
-    # 技術分析今日
+    df_out_all = format_for_output(df_sel, sort_by_code=True)
+    strong_out = format_for_output(strong_sel, sort_by_code=True)
+    top10_out = format_for_output(top10_sel, sort_by_code=True)
+
     if tech_today is None or tech_today.empty:
         tech_today_out = pd.DataFrame()
     else:
@@ -1548,9 +1482,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         tech_today_out["EPSYoY_顯示(%)"] = tech_today_out["股票代號"].map(eps_disp_map)
         tech_today_out = format_for_output(tech_today_out, sort_by_code=True)
 
-    # 技術買點_今日（v0.9.1：無買點時顯示診斷說明）
     if buy_today is None or buy_today.empty:
-        # 即使沒有買點，也建立一個有說明的 Sheet
         buy_today_out = pd.DataFrame([{
             "說明": "今日無符合買點條件的股票",
             "可能原因": "1. 市場震盪或下跌 2. 買點條件設定較嚴格 3. 選股檔數不足",
@@ -1569,12 +1501,87 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         buy_today_out["EPSYoY_顯示(%)"] = buy_today_out["股票代號"].map(eps_disp_map)
         buy_today_out = format_for_output(buy_today_out, sort_by_code=True)
         logger.log(f"   📈 今日買點數量: {len(buy_today_out)} 檔")
+    # ==========================================================
+    # ✅ v0.9.3 今日出場清單（計算當日需要賣出的股票）
+    # ==========================================================
 
-    # 交易明細
+    exit_today_list = []
+
+    if trades is not None and not trades.empty:
+        # 獲取最新交易日
+        latest_date = tech_today["Date"].max() if not tech_today.empty else datetime.now()
+
+        # 獲取所有有進場但尚未出場的股票
+        for code in tech_codes:
+            code_trades = trades[trades["股票代號"] == code]
+            if code_trades.empty:
+                continue
+
+            # 找出最新的出場日
+            if "出場日" in code_trades.columns:
+                last_exit = code_trades["出場日"].max()
+                # 如果最後出場日 < 最新交易日，且還有進場記錄，表示仍在持有中
+                if pd.to_datetime(last_exit) < pd.to_datetime(latest_date):
+                    # 找出該股票最新的進場記錄（在最後出場日之後）
+                    code_entries = code_trades[code_trades["出場日"] <= last_exit] if last_exit else code_trades
+                    if not code_entries.empty:
+                        latest_entry = code_entries.sort_values("進場日", ascending=False).iloc[0]
+                        entry_price = latest_entry["進場價"]
+                        entry_date = latest_entry["進場日"]
+
+                        # 獲取當前價格
+                        code_tech = tech_today[tech_today["股票代號"] == code]
+                        if not code_tech.empty:
+                            current_price = code_tech.iloc[0]["Close"]
+                            ret = (current_price - entry_price) / entry_price
+                            rsi = code_tech.iloc[0]["RSI"] if "RSI" in code_tech.columns else None
+                            hold_days = (pd.to_datetime(latest_date) - pd.to_datetime(entry_date)).days
+
+                            # 檢查出場條件
+                            exit_reason = None
+                            if ret <= cfg.stop_loss:
+                                exit_reason = "STOP_LOSS"
+                            elif ret >= cfg.take_profit:
+                                exit_reason = "TAKE_PROFIT"
+                            elif rsi is not None and rsi >= cfg.exit_rsi:
+                                exit_reason = "RSI_EXIT"
+                            elif hold_days >= cfg.hold_days:
+                                exit_reason = "TIME_EXIT"
+
+                            if exit_reason is not None:
+                                # ✅ 獲取公司名稱
+                                company_name = name_map[name_map["股票代號"] == code]["公司名稱_來源"].values
+                                company_name_str = company_name[0] if len(company_name) > 0 else ""
+
+                                exit_today_list.append({
+                                    "股票代號": code,
+                                    "公司名稱": company_name_str,
+                                    "進場日": entry_date,
+                                    "進場價": round(entry_price, 2),
+                                    "今日收盤價": round(current_price, 2),
+                                    "累計報酬(%)": round(ret * 100, 2),
+                                    "持有天數": hold_days,
+                                    "出場原因": exit_reason,
+                                    "當前 RSI": round(rsi, 1) if rsi else None
+                                })
+
+    exit_today_df = pd.DataFrame(exit_today_list)
+
+    if exit_today_df.empty:
+        exit_today_df = pd.DataFrame([{
+            "說明": "今日無需要出場的股票",
+            "可能原因": "1. 無持股 2. 所有持倉均未觸發出場條件",
+            "當前停損門檻": f"{cfg.stop_loss * 100:.1f}%",
+            "當前停利門檻": f"{cfg.take_profit * 100:.1f}%",
+            "當前 RSI 出場門檻": cfg.exit_rsi,
+            "最大持有天數": cfg.hold_days
+        }])
+        logger.log("   📭 今日無出場訊號（已建立診斷說明 Sheet）")
+    else:
+        logger.log(f"   📤 今日出場數量: {len(exit_today_df)} 檔")
+
     if trades is None or trades.empty:
-        trades_out = pd.DataFrame(
-            columns=["股票代號", "公司名稱_來源", "進場日", "進場價", "出場日", "出場價", "出場原因", "報酬(%)",
-                     "報酬_扣成本(%)"])
+        trades_out = pd.DataFrame(columns=["股票代號", "公司名稱_來源", "進場日", "進場價", "出場日", "出場價", "出場原因", "報酬(%)", "報酬_扣成本(%)"])
     else:
         trades = ensure_str_column(trades, "股票代號")
         trades_out = trades.merge(name_map, on="股票代號", how="left")
@@ -1582,29 +1589,27 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         if "進場日" in trades_out.columns:
             trades_out = trades_out.sort_values("進場日")
 
-    # 寫入 Excel
     out_file = f"{cfg.out_file_prefix}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
     startrow = 6
 
-    logger.log(f"9) 輸出 Excel: {out_file}")
+
+    logger.log(f"8) 輸出 Excel: {out_file}")
 
     with pd.ExcelWriter(out_file, engine="openpyxl") as writer:
-        # 基本面報表
-        format_for_output(df_sel, sort_by_code=True).to_excel(writer, index=False, sheet_name="全市場_基本面")
-        format_for_output(strong_sel, sort_by_code=True).to_excel(writer, index=False, sheet_name="強勢股_基本面")
-        format_for_output(top10_sel, sort_by_code=True).to_excel(writer, index=False, sheet_name="Top10_基本面")
+        df_out_all.to_excel(writer, index=False, sheet_name="全市場_基本面")
+        strong_out.to_excel(writer, index=False, sheet_name="強勢股_基本面")
+        top10_out.to_excel(writer, index=False, sheet_name="Top10_基本面")
 
-        # 技術報表
         if not tech_today_out.empty:
             tech_today_out.to_excel(writer, index=False, sheet_name="技術分析_今日", startrow=startrow)
-        # 技術買點_今日（即使空也會顯示說明）
-        buy_today_out.to_excel(writer, index=False, sheet_name="技術買點_今日", startrow=startrow)
 
-        # 統計報表
+        buy_today_out.to_excel(writer, index=False, sheet_name="技術買點_今日", startrow=startrow)
+        # ✅ v0.9.3 今日出場清單
+        exit_today_df.to_excel(writer, index=False, sheet_name="今日出場清單", startrow=startrow)
+
         if not reason_stats.empty:
             reason_stats.to_excel(writer, index=False, sheet_name="出場原因統計")
 
-        # 回測摘要
         summary_sheet = pd.concat([pd.DataFrame([{"區塊": "Signal-level"}]),
                                    sig_summary,
                                    pd.DataFrame([{"區塊": f"Portfolio-level (Top{cfg.topk})"}]),
@@ -1619,8 +1624,89 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
             yearly_perf.to_excel(writer, sheet_name="年度績效", index=False)
         if not wf_results.empty:
             wf_results.to_excel(writer, sheet_name="WalkForward分析", index=False)
+        # ==========================================================
+        # Excel 美化（技術買點_今日、今日出場清單等）
+        # ==========================================================
 
-    # Console 輸出
+        # 技術買點_今日美化
+        if "技術買點_今日" in writer.sheets:
+            ws_buy = writer.sheets["技術買點_今日"]
+
+            # 檢查是否有實際買點
+            first_cell = ws_buy.cell(row=startrow + 1, column=1).value if ws_buy.max_row > startrow else None
+
+            if first_cell == "說明":
+                buy_explain = [
+                    "【技術買點_今日】診斷說明",
+                    "今日無符合買點條件的股票。",
+                    "",
+                    "可能的調整方式：",
+                    f"  - 降低 RSI_OVERSOLD（目前為 {cfg.rsi_oversold}）",
+                    f"  - 關閉「成交量過濾」require_volume_filter",
+                    f"  - 關閉「趨勢過濾」require_trend_filter",
+                    f"  - 關閉「多時間框架確認」use_mtf_confirmation",
+                    f"  - 增加選股檔數 TopN_for_Tech（目前為 {cfg.top_n_for_tech}）",
+                    "",
+                    "※ 買點條件較嚴格時，可能數日無訊號，屬正常現象。"
+                ]
+                write_explanation(ws_buy, buy_explain, start_row=startrow + len(buy_today_out) + 2)
+            else:
+                buy_explain = [
+                    "【技術買點_今日】說明",
+                    "買點 = 超跌(過去10天RSI低於門檻) + 轉強(RSI回升或MACD翻正) + 趨勢(站穩MA20) + 成交量過濾",
+                    "多時間框架確認：週線/月線趨勢確認可提高買點品質"
+                ]
+                write_explanation(ws_buy, buy_explain)
+
+            header_row = startrow + 1
+            style_header(ws_buy, header_row)
+            ws_buy.freeze_panes = ws_buy[f"A{header_row + 1}"]
+            last_col = get_column_letter(ws_buy.max_column)
+            ws_buy.auto_filter.ref = f"A{header_row}:{last_col}{ws_buy.max_row}"
+            autosize_columns(ws_buy)
+
+            # 只有在有實際買點時才高亮「買點」欄位
+            if first_cell != "說明" and "買點" in [cell.value for cell in ws_buy[header_row]]:
+                highlight_true(ws_buy, header_row, "買點")
+
+        # 今日出場清單美化
+        if "今日出場清單" in writer.sheets:
+            ws_exit = writer.sheets["今日出場清單"]
+
+            # 檢查是否有實際出場
+            first_cell = ws_exit.cell(row=startrow + 1, column=1).value if ws_exit.max_row > startrow else None
+
+            if first_cell == "說明":
+                exit_explain = [
+                    "【今日出場清單】診斷說明",
+                    "今日無需要出場的股票。",
+                    "",
+                    "出場條件：",
+                    f"  - 停損：報酬 ≤ {cfg.stop_loss * 100:.1f}%",
+                    f"  - 停利：報酬 ≥ {cfg.take_profit * 100:.1f}%",
+                    f"  - RSI 出場：RSI ≥ {cfg.exit_rsi}",
+                    f"  - 時間出場：持有 ≥ {cfg.hold_days} 天",
+                    "",
+                    "如果持有股票但未觸發條件，表示仍在正常持有中。"
+                ]
+                write_explanation(ws_exit, exit_explain, start_row=startrow + len(exit_today_df) + 2)
+            else:
+                exit_explain = [
+                    "【今日出場清單】說明",
+                    "以下股票今日觸發賣出條件，建議賣出：",
+                    f"  - 停損：報酬 ≤ {cfg.stop_loss * 100:.1f}%",
+                    f"  - 停利：報酬 ≥ {cfg.take_profit * 100:.1f}%",
+                    f"  - RSI 出場：RSI ≥ {cfg.exit_rsi}",
+                    f"  - 時間出場：持有 ≥ {cfg.hold_days} 天"
+                ]
+                write_explanation(ws_exit, exit_explain)
+
+            header_row = startrow + 1
+            style_header(ws_exit, header_row)
+            ws_exit.freeze_panes = ws_exit[f"A{header_row + 1}"]
+            last_col = get_column_letter(ws_exit.max_column)
+            ws_exit.auto_filter.ref = f"A{header_row}:{last_col}{ws_exit.max_row}"
+            autosize_columns(ws_exit)
     logger.log("\n" + "=" * 60)
     logger.log("📊 回測結果摘要")
     logger.log("=" * 60)
@@ -1640,46 +1726,36 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
 class StrategyGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("StockTool v0.9.0-GUI (Multi-Factor + Walk-Forward)")
+        self.title("StockTool v0.9.2-GUI (Multi-Factor + Top10 Backtest)")
 
         self.log_queue = queue.Queue()
         self.logger = GuiLogger(self.log_queue)
 
-        # 載入儲存的設定
         saved_config = load_config()
         self.cfg = StrategyConfig()
         self.cfg.update_from_dict(saved_config)
 
         self._build_ui()
         self._poll_log_queue()
-
-        # 載入完成後，將 GUI 控制項的值設為載入的設定
         self._load_config_to_ui()
 
     def _build_ui(self):
-        self.geometry("1100x850")
+        self.geometry("1024x640")
 
-        # 主容器
         container = ttk.Frame(self)
         container.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # 左側面板 - 可滾動
         left_canvas = tk.Canvas(container, width=400)
         left_scrollbar = ttk.Scrollbar(container, orient="vertical", command=left_canvas.yview)
         left_scrollable_frame = ttk.Frame(left_canvas)
 
-        left_scrollable_frame.bind(
-            "<Configure>",
-            lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all"))
-        )
-
+        left_scrollable_frame.bind("<Configure>", lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
         left_canvas.create_window((0, 0), window=left_scrollable_frame, anchor="nw", width=380)
         left_canvas.configure(yscrollcommand=left_scrollbar.set)
 
         left_canvas.pack(side="left", fill="both", expand=True)
         left_scrollbar.pack(side="left", fill="y")
 
-        # 右側面板
         right = ttk.Frame(container)
         right.pack(side="right", fill="both", expand=True, padx=(10, 0))
 
@@ -1702,12 +1778,9 @@ class StrategyGUI(tk.Tk):
         score_frame.pack(fill="x", pady=5)
 
         self.use_enhanced_score_var = tk.BooleanVar(value=self.cfg.use_enhanced_score)
-        ttk.Radiobutton(score_frame, text="多因子評分 (動能+成長)",
-                        variable=self.use_enhanced_score_var, value=True).pack(anchor="w")
-        ttk.Radiobutton(score_frame, text="簡易評分 (可調權重+門檻)",
-                        variable=self.use_enhanced_score_var, value=False).pack(anchor="w")
+        ttk.Radiobutton(score_frame, text="多因子評分 (動能+成長)", variable=self.use_enhanced_score_var, value=True).pack(anchor="w")
+        ttk.Radiobutton(score_frame, text="簡易評分 (可調權重+門檻)", variable=self.use_enhanced_score_var, value=False).pack(anchor="w")
 
-        # 多因子權重
         weight_frame = ttk.Frame(score_frame)
         weight_frame.pack(fill="x", pady=5)
         ttk.Label(weight_frame, text="因子權重:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
@@ -1720,7 +1793,7 @@ class StrategyGUI(tk.Tk):
         self.adv_btn = ttk.Button(score_frame, text="⚙ 簡易評分進階設定", command=self._open_simple_score_settings)
         self.adv_btn.pack(fill="x", pady=(6, 0))
 
-        # 3. 技術指標（強化版）
+        # 3. 技術指標
         tech_frame = ttk.LabelFrame(left, text="📈 技術指標 (強化版)", padding=5)
         tech_frame.pack(fill="x", pady=5)
 
@@ -1738,6 +1811,22 @@ class StrategyGUI(tk.Tk):
         self.volume_filter_var = tk.BooleanVar(value=self.cfg.require_volume_filter)
         ttk.Checkbutton(tech_frame, text="需要成交量過濾", variable=self.volume_filter_var).pack(anchor="w")
 
+        # ✅ 進階技術參數
+        ttk.Separator(tech_frame, orient="horizontal").pack(fill="x", pady=5)
+        ttk.Label(tech_frame, text="--- 進階技術參數 ---", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+
+        self.trend_filter_var = tk.BooleanVar(value=self.cfg.require_trend_filter)
+        ttk.Checkbutton(tech_frame, text="需要趨勢過濾 (站穩MA20)", variable=self.trend_filter_var).pack(anchor="w")
+
+        self.use_aggressive_signal_var = tk.BooleanVar(value=self.cfg.use_aggressive_signal)
+        ttk.Checkbutton(tech_frame, text="使用積極轉強訊號 (RSI門檻較高)",
+                        variable=self.use_aggressive_signal_var).pack(anchor="w")
+
+        self._add_entry(tech_frame, "RSI 轉強門檻 (積極)", "rsi_aggressive", tk.IntVar, self.cfg.rsi_aggressive)
+        self._add_entry(tech_frame, "RSI 轉強門檻 (保守)", "rsi_recover", tk.IntVar, self.cfg.rsi_recover)
+        self._add_entry(tech_frame, "超跌檢查天數", "oversold_lookback", tk.IntVar, self.cfg.oversold_lookback)
+        self._add_entry(tech_frame, "MA20 斜率計算天數", "ma_slope_days", tk.IntVar, self.cfg.ma_slope_days)
+
         # 4. 出場參數
         exit_frame = ttk.LabelFrame(left, text="🚪 出場參數", padding=5)
         exit_frame.pack(fill="x", pady=5)
@@ -1745,8 +1834,7 @@ class StrategyGUI(tk.Tk):
         self._add_entry(exit_frame, "停利 (%)", "take_profit", tk.DoubleVar, self.cfg.take_profit * 100)
         self._add_entry(exit_frame, "RSI 出場", "exit_rsi", tk.IntVar, self.cfg.exit_rsi)
         self._add_entry(exit_frame, "最大持有天數", "hold_days", tk.IntVar, self.cfg.hold_days)
-        self._add_entry(exit_frame, "交易成本 (%)", "roundtrip_cost_pct", tk.DoubleVar,
-                        self.cfg.roundtrip_cost_pct * 100)
+        self._add_entry(exit_frame, "交易成本 (%)", "roundtrip_cost_pct", tk.DoubleVar, self.cfg.roundtrip_cost_pct * 100)
 
         # 5. Walk-forward 分析
         wf_frame = ttk.LabelFrame(left, text="🔄 Walk-forward 分析", padding=5)
@@ -1769,11 +1857,27 @@ class StrategyGUI(tk.Tk):
         ttk.Checkbutton(source_frame, text="使用 Excel 股票清單", variable=self.use_excel_var).pack(anchor="w")
         self._add_entry(source_frame, "Excel 檔案", "excel_stock_file", tk.StringVar, self.cfg.excel_stock_file)
 
+        # ✅ v0.9.3 Excel 清單強制買點模式
+        self.excel_force_buy_var = tk.BooleanVar(value=self.cfg.excel_force_buy)
+        ttk.Checkbutton(
+            source_frame,
+            text="📊 Excel 清單強制買點模式（跳過技術買點過濾）",
+            variable=self.excel_force_buy_var
+        ).pack(anchor="w", pady=(5, 0))
+        ttk.Label(source_frame, text="  ※ 使用 Excel 股票清單 + 不經過買點過濾（強制滿倉）", foreground="gray").pack(anchor="w")
+
+        # v0.9.2 Top10 基本面回測開關
+        self.top10_backtest_var = tk.BooleanVar(value=self.cfg.use_top10_backtest)
+        ttk.Checkbutton(
+            source_frame,
+            text="📊 使用 Top10_基本面 進行回測（跳過技術買點）",
+            variable=self.top10_backtest_var
+        ).pack(anchor="w", pady=(5, 0))
+        ttk.Label(source_frame, text="  ※ 直接使用評分最高的10檔股票建倉，不經過買點過濾", foreground="gray").pack(anchor="w")
         # 7. 強勢股過濾
         strong_frame = ttk.LabelFrame(left, text="💪 強勢股過濾 (報表用)", padding=5)
         strong_frame.pack(fill="x", pady=5)
-        self._add_entry(strong_frame, "最低營收YoY (%)", "strong_revenue_yoy", tk.DoubleVar,
-                        self.cfg.strong_revenue_yoy)
+        self._add_entry(strong_frame, "最低營收YoY (%)", "strong_revenue_yoy", tk.DoubleVar, self.cfg.strong_revenue_yoy)
         self._add_entry(strong_frame, "最高本益比", "strong_pe_max", tk.DoubleVar, self.cfg.strong_pe_max)
         self._add_entry(strong_frame, "最低股價", "strong_price_min", tk.DoubleVar, self.cfg.strong_price_min)
 
@@ -1807,7 +1911,7 @@ class StrategyGUI(tk.Tk):
         console_scrollbar.pack(side="right", fill="y")
 
         tip = ("💡 提示:\n"
-               "   - v0.9.0 新增: 多因子評分、強化技術指標、Walk-forward 分析\n"
+               "   - v0.9.2 新增: Top10 基本面回測模式\n"
                "   - 參數調整後可按「儲存設定」保存，下次啟動自動載入\n"
                "   - 左側面板可滾動查看所有參數")
         ttk.Label(right, text=tip, foreground="#555", justify="left").pack(anchor="w", pady=(6, 0))
@@ -1816,47 +1920,53 @@ class StrategyGUI(tk.Tk):
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=2)
         ttk.Label(row, text=label, width=18).pack(side="left")
-
         if var_cls == tk.BooleanVar:
             v = var_cls(value=default)
             ttk.Checkbutton(row, variable=v).pack(side="left")
         else:
             v = var_cls(value=default)
             ttk.Entry(row, textvariable=v, width=12).pack(side="left")
-
         self.vars[key] = v
 
     def _load_config_to_ui(self):
-        """將 self.cfg 的設定載入到 GUI 控制項（處理百分比轉換）"""
         for key, var in self.vars.items():
             if hasattr(self.cfg, key):
                 value = getattr(self.cfg, key)
                 if key in ["stop_loss", "take_profit", "roundtrip_cost_pct", "ma20_tolerance"]:
                     value = value * 100.0
                 var.set(value)
-
         self.use_enhanced_score_var.set(self.cfg.use_enhanced_score)
         self.use_excel_var.set(self.cfg.use_excel_stock_list)
         self.volume_filter_var.set(self.cfg.require_volume_filter)
         self.mtf_var.set(self.cfg.use_mtf_confirmation)
         self.divergence_var.set(self.cfg.use_divergence_detection)
         self.wf_enabled_var.set(self.cfg.wf_enabled)
+        self.top10_backtest_var.set(self.cfg.use_top10_backtest)
+        self.excel_force_buy_var.set(self.cfg.excel_force_buy)
+
+        # ✅ 新增以下程式碼
+        self.trend_filter_var.set(self.cfg.require_trend_filter)
+        self.use_aggressive_signal_var.set(self.cfg.use_aggressive_signal)
 
     def _save_ui_to_config(self):
-        """將 GUI 控制項的值儲存到 self.cfg（處理百分比轉換）"""
         for key, var in self.vars.items():
             if hasattr(self.cfg, key):
                 value = var.get()
                 if key in ["stop_loss", "take_profit", "roundtrip_cost_pct", "ma20_tolerance"]:
                     value = value / 100.0
                 setattr(self.cfg, key, value)
-
         self.cfg.use_enhanced_score = self.use_enhanced_score_var.get()
         self.cfg.use_excel_stock_list = self.use_excel_var.get()
         self.cfg.require_volume_filter = self.volume_filter_var.get()
         self.cfg.use_mtf_confirmation = self.mtf_var.get()
         self.cfg.use_divergence_detection = self.divergence_var.get()
         self.cfg.wf_enabled = self.wf_enabled_var.get()
+        self.cfg.use_top10_backtest = self.top10_backtest_var.get()
+        self.cfg.excel_force_buy = self.excel_force_buy_var.get()
+
+        # ✅ 新增以下程式碼
+        self.cfg.require_trend_filter = self.trend_filter_var.get()
+        self.cfg.use_aggressive_signal = self.use_aggressive_signal_var.get()
 
     def _on_save_config(self):
         self._save_ui_to_config()
@@ -1892,82 +2002,60 @@ class StrategyGUI(tk.Tk):
 
         row = 0
 
-        ttk.Label(scrollable_frame, text="═ 權重設定（總和建議100%） ═", font=("Segoe UI", 10, "bold")).grid(row=row,
-                                                                                                           column=0,
-                                                                                                           columnspan=2,
-                                                                                                           pady=(10, 5),
-                                                                                                           sticky="w")
+        ttk.Label(scrollable_frame, text="═ 權重設定（總和建議100%） ═", font=("Segoe UI", 10, "bold")).grid(row=row, column=0, columnspan=2, pady=(10, 5), sticky="w")
         row += 1
 
         self.simple_vars = {}
 
         ttk.Label(scrollable_frame, text="營收YoY 權重 (%)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["weight_rev"] = tk.DoubleVar(value=self.cfg.simple_score_weight_rev)
-        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["weight_rev"], width=10).grid(row=row, column=1,
-                                                                                                sticky="w")
+        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["weight_rev"], width=10).grid(row=row, column=1, sticky="w")
         row += 1
 
         ttk.Label(scrollable_frame, text="EPSYoY 權重 (%)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["weight_eps"] = tk.DoubleVar(value=self.cfg.simple_score_weight_eps)
-        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["weight_eps"], width=10).grid(row=row, column=1,
-                                                                                                sticky="w")
+        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["weight_eps"], width=10).grid(row=row, column=1, sticky="w")
         row += 1
 
         ttk.Label(scrollable_frame, text="殖利率 權重 (%)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["weight_div"] = tk.DoubleVar(value=self.cfg.simple_score_weight_div)
-        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["weight_div"], width=10).grid(row=row, column=1,
-                                                                                                sticky="w")
+        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["weight_div"], width=10).grid(row=row, column=1, sticky="w")
         row += 1
 
         ttk.Label(scrollable_frame, text="本益比 權重 (%)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["weight_pe"] = tk.DoubleVar(value=self.cfg.simple_score_weight_pe)
-        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["weight_pe"], width=10).grid(row=row, column=1,
-                                                                                               sticky="w")
-        ttk.Label(scrollable_frame, text="（負值表示扣分）", foreground="gray").grid(row=row, column=2, sticky="w",
-                                                                                   padx=5)
+        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["weight_pe"], width=10).grid(row=row, column=1, sticky="w")
+        ttk.Label(scrollable_frame, text="（負值表示扣分）", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
         row += 1
 
         ttk.Separator(scrollable_frame, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=10)
         row += 1
 
-        ttk.Label(scrollable_frame, text="═ 門檻過濾（低於門檻直接排除） ═", font=("Segoe UI", 10, "bold")).grid(row=row,
-                                                                                                               column=0,
-                                                                                                               columnspan=2,
-                                                                                                               pady=(5,
-                                                                                                                     5),
-                                                                                                               sticky="w")
+        ttk.Label(scrollable_frame, text="═ 門檻過濾（低於門檻直接排除） ═", font=("Segoe UI", 10, "bold")).grid(row=row, column=0, columnspan=2, pady=(5, 5), sticky="w")
         row += 1
 
         ttk.Label(scrollable_frame, text="最低營收YoY (%)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["min_rev_yoy"] = tk.DoubleVar(value=self.cfg.simple_min_rev_yoy)
-        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["min_rev_yoy"], width=10).grid(row=row, column=1,
-                                                                                                 sticky="w")
-        ttk.Label(scrollable_frame, text="（-999 = 不限制）", foreground="gray").grid(row=row, column=2, sticky="w",
-                                                                                    padx=5)
+        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["min_rev_yoy"], width=10).grid(row=row, column=1, sticky="w")
+        ttk.Label(scrollable_frame, text="（-999 = 不限制）", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
         row += 1
 
         ttk.Label(scrollable_frame, text="最低EPSYoY (%)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["min_eps_yoy"] = tk.DoubleVar(value=self.cfg.simple_min_eps_yoy)
-        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["min_eps_yoy"], width=10).grid(row=row, column=1,
-                                                                                                 sticky="w")
-        ttk.Label(scrollable_frame, text="（-999 = 不限制）", foreground="gray").grid(row=row, column=2, sticky="w",
-                                                                                    padx=5)
+        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["min_eps_yoy"], width=10).grid(row=row, column=1, sticky="w")
+        ttk.Label(scrollable_frame, text="（-999 = 不限制）", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
         row += 1
 
         ttk.Label(scrollable_frame, text="最低EPS (元)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["min_eps"] = tk.DoubleVar(value=self.cfg.simple_min_eps)
-        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["min_eps"], width=10).grid(row=row, column=1,
-                                                                                             sticky="w")
-        ttk.Label(scrollable_frame, text="（-999 = 不限制）", foreground="gray").grid(row=row, column=2, sticky="w",
-                                                                                    padx=5)
+        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["min_eps"], width=10).grid(row=row, column=1, sticky="w")
+        ttk.Label(scrollable_frame, text="（-999 = 不限制）", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
         row += 1
 
         ttk.Label(scrollable_frame, text="最高本益比：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["max_pe"] = tk.DoubleVar(value=self.cfg.simple_max_pe)
-        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["max_pe"], width=10).grid(row=row, column=1,
-                                                                                            sticky="w")
-        ttk.Label(scrollable_frame, text="（999 = 不限制）", foreground="gray").grid(row=row, column=2, sticky="w",
-                                                                                   padx=5)
+        ttk.Entry(scrollable_frame, textvariable=self.simple_vars["max_pe"], width=10).grid(row=row, column=1, sticky="w")
+        ttk.Label(scrollable_frame, text="（999 = 不限制）", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
         row += 1
 
         ttk.Separator(scrollable_frame, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=10)
@@ -1983,8 +2071,7 @@ class StrategyGUI(tk.Tk):
             self.simple_vars["min_eps"].set(-999)
             self.simple_vars["max_pe"].set(999)
 
-        ttk.Button(scrollable_frame, text="恢復預設值", command=set_defaults).grid(row=row, column=0, columnspan=2,
-                                                                                   pady=5)
+        ttk.Button(scrollable_frame, text="恢復預設值", command=set_defaults).grid(row=row, column=0, columnspan=2, pady=5)
         row += 1
 
         def save_settings():
@@ -2000,8 +2087,7 @@ class StrategyGUI(tk.Tk):
             self.logger.log("✅ 簡易評分參數已更新")
             save_config(self.cfg.to_dict())
 
-        ttk.Button(scrollable_frame, text="儲存設定", command=save_settings).grid(row=row, column=0, columnspan=2,
-                                                                                  pady=10)
+        ttk.Button(scrollable_frame, text="儲存設定", command=save_settings).grid(row=row, column=0, columnspan=2, pady=10)
 
     def _poll_log_queue(self):
         try:
@@ -2019,14 +2105,12 @@ class StrategyGUI(tk.Tk):
     def _on_run(self):
         self.run_btn.config(state="disabled")
         self.console.insert("end", "=" * 60 + "\n")
-        self.console.insert("end", "🚀 StockTool v0.9.0 開始執行\n")
+        self.console.insert("end", "🚀 StockTool v0.9.2 開始執行\n")
         self.console.insert("end", "=" * 60 + "\n")
         self.console.see("end")
 
         self._save_ui_to_config()
         cfg = self.cfg
-
-        # 執行前儲存設定
         save_config(cfg.to_dict())
 
         def worker():
