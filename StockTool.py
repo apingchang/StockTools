@@ -1,21 +1,55 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║                          台灣股市量化選股系統 v0.9.2                          ║
+║                          台灣股市量化選股系統 v0.9.3                          ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 【版本資訊】
-Version: v0.9.2-GUI
-最後更新: 2026-05-26 (Asia/Taipei)
+Version: v0.9.3-HOTFIX
+最後更新: 2026-06-08 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
 ════════════════════════════════════════════════════════════════════════════════
-【v0.9.2 修改內容】2026-05-26
+【v0.9.3 緊急修正內容】2026-06-08
 ════════════════════════════════════════════════════════════════════════════════
 
-1. 新增 Top10 基本面回測模式
-2. 技術買點_今日 Sheet 改為永遠顯示
+【問題描述】
+- EPSYoY_raw 欄位完全為空，導致 EPSYoY_顯示(%) 全部為 0
+- Score 欄位計算異常，出現 -1e+18 負無限大值
+- PE 欄位出現 inf 無限值未正確處理
+- 簡易評分門檻過濾邏輯錯誤，導致所有個股被排除
+- Top10 選股結果全部為 ETF 而非正常個股
+
+【修正內容】
+1. 修正 fetch_eps_latest() 函數
+   - 改用「去年同期 EPS 差值」計算 EPS YoY
+   - 新增無限值處理 (inf/-inf → pd.NA)
+
+2. 修正 calculate_simple_score() 函數
+   - 新增 PE 和 EPSYoY_raw 的無限值處理
+   - 修正門檻過濾邏輯（改用 -998 判斷閾值啟用狀態）
+   - 未通過門檻的 Score 改為 pd.NA 而非 -1e+18
+
+3. 修正 calculate_multi_factor_score() 函數
+   - 新增營收YoY和EPSYoY的無限值處理
+
+4. 確認 DEFAULT_CONFIG 中門檻預設值正確
+   - simple_min_rev_yoy: -999.0
+   - simple_min_eps_yoy: -999.0
+   - simple_min_eps: -999.0
+   - simple_max_pe: 999.0
+
+════════════════════════════════════════════════════════════════════════════════
+【修正後執行步驟】
+════════════════════════════════════════════════════════════════════════════════
+
+1. 儲存本檔案
+2. 刪除 cache/ 目錄（強制重新下載資料）
+3. 重新執行 python StockTool.py
+4. 確認 GUI 中簡易評分門檻皆為 -999 / 999
+5. 按下「執行策略」驗證結果
+
 ════════════════════════════════════════════════════════════════════════════════
 """
 
@@ -99,7 +133,7 @@ DEFAULT_CONFIG = {
     "risk_free_annual": 0.0,
     "mar_annual": 0.0,
     "trading_days": 252,
-    "rsi_oversold": 45,
+    "rsi_oversold": 40,
     "oversold_lookback": 10,
     "rsi_recover": 40,
     "rsi_aggressive": 45,
@@ -237,7 +271,7 @@ class GuiLogger:
 def build_session() -> requests.Session:
     s = requests.Session()
     s.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.9.2-GUI",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.9.3-GUI",
         "Accept": "application/json,text/plain,*/*"
     })
     return s
@@ -352,6 +386,11 @@ def ensure_str_column(df: pd.DataFrame, col_name: str) -> pd.DataFrame:
 
 def calculate_multi_factor_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFrame:
     df = df.copy()
+
+    # ✅ 新增：處理異常值
+    df["營收YoY(%)"] = df["營收YoY(%)"].replace([float("inf"), -float("inf")], pd.NA)
+    df["EPSYoY_顯示(%)"] = df["EPSYoY_顯示(%)"].replace([float("inf"), -float("inf")], pd.NA)
+
     if "Close" in df.columns:
         df["mom_1m"] = df.groupby("股票代號")["Close"].pct_change(21) * 100
         df["mom_3m"] = df.groupby("股票代號")["Close"].pct_change(63) * 100
@@ -390,15 +429,87 @@ def calculate_enhanced_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFr
 
 def calculate_simple_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFrame:
     df = df.copy()
+
+    df["PE"] = df["PE"].replace([float("inf"), -float("inf")], pd.NA)
+    df["EPSYoY_raw"] = df["EPSYoY_raw"].replace([float("inf"), -float("inf")], pd.NA)
+
+    # ========== DEBUG: 簡易評分診斷 ==========
+    print("\n" + "=" * 60)
+    print("🔍 [DEBUG] calculate_simple_score 診斷")
+    print("=" * 60)
+
+    print(f"\n📊 原始資料筆數: {len(df)}")
+    print(f"📊 有營收YoY資料的筆數: {df['營收YoY(%)'].notna().sum()}")
+    print(f"📊 有EPS本期資料的筆數: {df['EPS本期'].notna().sum()}")
+    print(f"📊 有EPSYoY_raw資料的筆數: {df['EPSYoY_raw'].notna().sum()}")
+    print(f"📊 有PE資料的筆數: {df['PE'].notna().sum()}")
+
+    print(f"\n⚙️ 目前門檻設定:")
+    print(f"   simple_min_rev_yoy = {cfg.simple_min_rev_yoy}")
+    print(f"   simple_min_eps_yoy = {cfg.simple_min_eps_yoy}")
+    print(f"   simple_min_eps = {cfg.simple_min_eps}")
+    print(f"   simple_max_pe = {cfg.simple_max_pe}")
+    # ========== DEBUG 結束 ==========
+
     mask = pd.Series([True] * len(df))
-    if cfg.simple_min_rev_yoy > -999:
-        mask = mask & (df["營收YoY(%)"].fillna(-999) >= cfg.simple_min_rev_yoy)
-    if cfg.simple_min_eps_yoy > -999:
-        mask = mask & ((df["EPSYoY_raw"].fillna(-999) * 100) >= cfg.simple_min_eps_yoy)
-    if cfg.simple_min_eps > -999:
-        mask = mask & (df["EPS本期"].fillna(-999) >= cfg.simple_min_eps)
-    if cfg.simple_max_pe < 999:
-        mask = mask & (df["PE"].fillna(999) <= cfg.simple_max_pe)
+
+    if cfg.simple_min_rev_yoy > -998:
+        rev_ok = df["營收YoY(%)"].fillna(cfg.simple_min_rev_yoy - 1) >= cfg.simple_min_rev_yoy
+        mask = mask & rev_ok
+
+    if cfg.simple_min_eps_yoy > -998:
+        eps_yoy_ok = (df["EPSYoY_raw"].fillna(cfg.simple_min_eps_yoy / 100 - 1) * 100) >= cfg.simple_min_eps_yoy
+        mask = mask & eps_yoy_ok
+
+    if cfg.simple_min_eps > -998:
+        eps_ok = df["EPS本期"].fillna(cfg.simple_min_eps - 1) >= cfg.simple_min_eps
+        mask = mask & eps_ok
+
+    if cfg.simple_max_pe < 998:
+        pe_ok = df["PE"].fillna(cfg.simple_max_pe + 1) <= cfg.simple_max_pe
+        mask = mask & pe_ok
+
+    # ========== DEBUG: 門檻通過數量 ==========
+    print(f"\n✅ 各門檻通過數量:")
+    if cfg.simple_min_rev_yoy > -998:
+        rev_pass = (df["營收YoY(%)"].fillna(cfg.simple_min_rev_yoy - 1) >= cfg.simple_min_rev_yoy).sum()
+        print(f"   營收門檻 (>= {cfg.simple_min_rev_yoy}%): {rev_pass} 檔")
+    else:
+        print(f"   營收門檻: 未啟用")
+
+    if cfg.simple_min_eps_yoy > -998:
+        eps_yoy_pass = (
+                    (df["EPSYoY_raw"].fillna(cfg.simple_min_eps_yoy / 100 - 1) * 100) >= cfg.simple_min_eps_yoy).sum()
+        print(f"   EPS YoY 門檻 (>= {cfg.simple_min_eps_yoy}%): {eps_yoy_pass} 檔")
+    else:
+        print(f"   EPS YoY 門檻: 未啟用")
+
+    if cfg.simple_min_eps > -998:
+        eps_pass = (df["EPS本期"].fillna(cfg.simple_min_eps - 1) >= cfg.simple_min_eps).sum()
+        print(f"   EPS 門檻 (>= {cfg.simple_min_eps}元): {eps_pass} 檔")
+    else:
+        print(f"   EPS 門檻: 未啟用")
+
+    if cfg.simple_max_pe < 998:
+        pe_pass = (df["PE"].fillna(cfg.simple_max_pe + 1) <= cfg.simple_max_pe).sum()
+        print(f"   PE 門檻 (<= {cfg.simple_max_pe}倍): {pe_pass} 檔")
+    else:
+        print(f"   PE 門檻: 未啟用")
+
+    print(f"\n🎯 最終通過所有門檻的股票數量: {mask.sum()} 檔")
+
+    if mask.sum() == 0 and len(df) > 0:
+        print(f"\n⚠️ 前5筆未通過股票的診斷:")
+        failed_df = df[~mask].head(5)
+        for idx, row in failed_df.iterrows():
+            code = row.get("股票代號", "N/A")
+            name = str(row.get("公司名稱_來源", "N/A"))[:20]
+            rev = row.get("營收YoY(%)", "N/A")
+            eps_yoy_raw = row.get("EPSYoY_raw", "N/A")
+            eps = row.get("EPS本期", "N/A")
+            pe = row.get("PE", "N/A")
+            print(f"   {code} {name} | 營收:{rev}% | EPS YoY:{eps_yoy_raw} | EPS:{eps} | PE:{pe}")
+    # ========== DEBUG 結束 ==========
 
     rev_score = df["營收YoY(%)"].fillna(0)
     eps_score = (df["EPSYoY_raw"].fillna(0) * 100)
@@ -410,10 +521,16 @@ def calculate_simple_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFram
     w_div = cfg.simple_score_weight_div
     w_pe = cfg.simple_score_weight_pe
 
-    df["Score_raw"] = (rev_score * (w_rev / 100) + eps_score * (w_eps / 100) +
-                       div_score * (w_div / 100) + pe_score * (w_pe / 100))
-    df["Score"] = df["Score_raw"].where(mask, -1e18).round(2)
+    df["Score_raw"] = (rev_score * (w_rev / 100) +
+                       eps_score * (w_eps / 100) +
+                       div_score * (w_div / 100) +
+                       pe_score * (w_pe / 100))
+
+    df["Score"] = df["Score_raw"].where(mask, pd.NA)
     df["通過門檻"] = mask
+
+    print("\n" + "=" * 60 + " DEBUG 結束 " + "=" * 60 + "\n")
+
     return df
 
 
@@ -577,8 +694,25 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
     twse_url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
     tpex_url = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes"
 
-    twse = pd.DataFrame(session.get(twse_url, timeout=cfg.timeout).json())
-    tpex = pd.DataFrame(session.get(tpex_url, timeout=cfg.timeout).json())
+    try:
+        twse_response = session.get(twse_url, timeout=cfg.timeout)
+        twse_response.raise_for_status()
+        twse = pd.DataFrame(twse_response.json())
+    except Exception as e:
+        print(f"⚠️ 讀取上市股價失敗：{e}")
+        twse = pd.DataFrame()
+
+    try:
+        tpex_response = session.get(tpex_url, timeout=cfg.timeout)
+        tpex_response.raise_for_status()
+        tpex = pd.DataFrame(tpex_response.json())
+    except Exception as e:
+        print(f"⚠️ 讀取上櫃股價失敗：{e}")
+        tpex = pd.DataFrame()
+
+    if twse.empty and tpex.empty:
+        print("❌ 無法讀取任何股價資料")
+        return pd.DataFrame()
 
     twse = twse.rename(columns={
         find_col(twse.columns, ["證券代號", "Code"]): "股票代號",
@@ -644,17 +778,36 @@ def fetch_revenue_latest(session: requests.Session, cfg: StrategyConfig) -> pd.D
 def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame:
     urls = ["https://mopsfin.twse.com.tw/opendata/t187ap14_L.csv",
             "https://mopsfin.twse.com.tw/opendata/t187ap14_O.csv"]
-    eps = pd.concat([fetch_csv_requests(session, u, cfg) for u in urls], ignore_index=True)
 
-    code_col = find_col(eps.columns, ["公司代號"])
-    year_col = find_col(eps.columns, ["年度"])
-    q_col = find_col(eps.columns, ["季別"])
-    eps_col = find_col(eps.columns, ["基本每股盈餘", "每股盈餘"])
+    eps_list = []
+    for url in urls:
+        try:
+            df = fetch_csv_requests(session, url, cfg)
+            eps_list.append(df)
+        except Exception as e:
+            print(f"⚠️ 讀取 {url} 失敗：{e}")
 
-    if code_col is None or year_col is None or q_col is None or eps_col is None:
-        raise RuntimeError(f"EPS 欄位無法識別：{eps.columns}")
+    if not eps_list:
+        return pd.DataFrame()
 
-    eps = eps.rename(columns={code_col: "股票代號", year_col: "年度", q_col: "季別", eps_col: "EPS"})
+    eps = pd.concat(eps_list, ignore_index=True)
+
+    code_col = find_col(eps.columns, ["公司代號", "證券代號"])
+    year_col = find_col(eps.columns, ["年度", "西元年度"])
+    q_col = find_col(eps.columns, ["季別", "季度"])
+    eps_col = find_col(eps.columns, ["基本每股盈餘(元)", "基本每股盈餘", "每股盈餘"])
+
+    if None in [code_col, year_col, q_col, eps_col]:
+        print(f"❌ 找不到必要欄位")
+        return pd.DataFrame()
+
+    eps = eps.rename(columns={
+        code_col: "股票代號",
+        year_col: "年度",
+        q_col: "季別",
+        eps_col: "EPS"
+    })
+
     eps["股票代號"] = eps["股票代號"].astype(str).str.strip()
     eps["年度"] = pd.to_numeric(eps["年度"], errors="coerce")
     eps["季別"] = pd.to_numeric(eps["季別"], errors="coerce")
@@ -663,19 +816,72 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     latest_year = eps["年度"].max()
     latest_q = eps.loc[eps["年度"] == latest_year, "季別"].max()
 
-    cur = eps[(eps["年度"] == latest_year) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].copy()
-    cur = cur.rename(columns={"EPS": "EPS本期"})
+    cur = eps[(eps["年度"] == latest_year) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].rename(
+        columns={"EPS": "EPS本期"})
+    prev = eps[(eps["年度"] == latest_year - 1) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].rename(
+        columns={"EPS": "EPS去年"})
 
-    prev = eps[(eps["年度"] == latest_year - 1) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].copy()
-    prev = prev.rename(columns={"EPS": "EPS去年"})
+    # ========== DEBUG: 查看所有年度資料 ==========
+    print("\n" + "=" * 60)
+    print("🔍 [DEBUG] EPS 年度資料分布")
+    print("=" * 60)
+
+    # 顯示所有年度
+    years = eps["年度"].dropna().unique()
+    years.sort()
+    print(f"📊 資料中的年度: {years}")
+
+    # 顯示每個年度的季別
+    for year in years:
+        quarters = eps[eps["年度"] == year]["季別"].dropna().unique()
+        quarters.sort()
+        print(f"   {int(year)}年: Q{quarters}")
+
+    # 顯示資料筆數統計
+    print(f"\n📊 各年度季別資料筆數:")
+    year_q_counts = eps.groupby(["年度", "季別"]).size()
+    for (year, q), count in year_q_counts.items():
+        print(f"   {int(year)}年 Q{int(q)}: {count} 筆")
+
+    # 顯示前幾筆原始資料範例
+    print(f"\n📋 原始資料範例 (前5筆):")
+    for idx in range(min(5, len(eps))):
+        row = eps.iloc[idx]
+        print(f"   {row['年度']}年 Q{row['季別']} | {row['股票代號']} | EPS: {row['EPS']}")
+
+    print("=" * 60 + "\n")
+    # ========== DEBUG 結束 ==========
 
     out = cur.merge(prev, on="股票代號", how="left")
-    out["EPSYoY_raw"] = (out["EPS本期"] - out["EPS去年"]) / out["EPS去年"]
-    out["EPSYoY_顯示(%)"] = (out["EPSYoY_raw"] * 100).replace([float("inf"), -float("inf")], 0).fillna(0)
-    out["EPS季別"] = f"{int(latest_year)}Q{int(latest_q)}"
-    out["股票代號"] = out["股票代號"].astype(str).str.strip()
 
-    return out[["股票代號", "EPS季別", "EPS本期", "EPSYoY_raw", "EPSYoY_顯示(%)"]].drop_duplicates("股票代號").reset_index(drop=True)
+    def safe_yoy(row):
+        if pd.isna(row["EPS去年"]) or row["EPS去年"] == 0:
+            return pd.NA
+        return (row["EPS本期"] - row["EPS去年"]) / abs(row["EPS去年"])
+
+    out["EPSYoY_raw"] = out.apply(safe_yoy, axis=1)
+    out["EPSYoY_顯示(%)"] = out["EPSYoY_raw"].apply(
+        lambda x: round(x * 100, 2) if pd.notna(x) else pd.NA
+    )
+    out["EPS季別"] = f"{int(latest_year)}Q{int(latest_q)}"
+
+    # ========== DEBUG 訊息 ==========
+    print(f"\n📊 EPS 資料筆數: {len(out)}")
+    print(f"📊 有 EPS YoY 資料的筆數: {out['EPSYoY_raw'].notna().sum()}")
+
+    sample = out[out['EPSYoY_raw'].notna()].head(5)
+    if len(sample) > 0:
+        print(f"\n📋 EPS YoY 範例:")
+        for _, row in sample.iterrows():
+            print(f"   {row['股票代號']} | 本期EPS: {row['EPS本期']} | YoY: {row['EPSYoY_顯示(%)']}%")
+    else:
+        print(f"\n⚠️ 沒有找到任何有 YoY 資料的股票！")
+    # ========== DEBUG 結束 ==========
+
+    return out[["股票代號", "EPS季別", "EPS本期", "EPSYoY_raw", "EPSYoY_顯示(%)"]].drop_duplicates(
+        "股票代號").reset_index(drop=True)
+
+
 # ==========================================================
 # TWSE STOCK_DAY fetch
 # ==========================================================
@@ -1278,7 +1484,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     s = build_session()
 
     logger.log("=" * 60)
-    logger.log("🚀 StockTool v0.9.2 開始執行")
+    logger.log("🚀 StockTool v0.9.3 開始執行")
     logger.log(f"   評分系統: {'多因子評分' if cfg.use_enhanced_score else '簡易評分'}")
     logger.log(f"   技術指標: 強化版 (MTF={cfg.use_mtf_confirmation}, 背離={cfg.use_divergence_detection})")
     logger.log("=" * 60)
@@ -1321,6 +1527,32 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         logger.log("   ※ 直接使用 Score 最高的 10 檔股票建倉")
         logger.log("   ※ 不經過技術買點過濾（買點強制設為 True）")
         logger.log("=" * 60)
+
+        # ========== DEBUG: 基本面資料診斷 ==========
+        print("\n" + "=" * 60)
+        print("🔍 [DEBUG] 基本面資料合併後診斷")
+        print("=" * 60)
+
+        print(f"\n📊 df_sel 總筆數: {len(df_sel)}")
+        print(f"📊 有營收YoY的筆數: {df_sel['營收YoY(%)'].notna().sum()}")
+        print(f"📊 有EPS本期(非ETF)的筆數: {df_sel['EPS本期'].notna().sum()}")
+        print(f"📊 有EPSYoY_raw的筆數: {df_sel['EPSYoY_raw'].notna().sum()}")
+
+        # 顯示前5筆有EPS資料的股票
+        eps_notna = df_sel[df_sel['EPS本期'].notna()].head(5)
+        if len(eps_notna) > 0:
+            print(f"\n📋 有EPS資料的前5檔股票:")
+            for idx, row in eps_notna.iterrows():
+                print(
+                    f"   {row['股票代號']} {row.get('公司名稱_來源', '')} | EPS: {row.get('EPS本期', 'N/A')} | EPS YoY: {row.get('EPSYoY_顯示(%)', 'N/A')}%")
+        else:
+            print(f"\n⚠️ 沒有任何股票有 EPS 資料！")
+            print(f"   請檢查 fetch_eps_latest 函數是否正常運作。")
+
+        print("\n" + "=" * 60 + "\n")
+        # ========== DEBUG 結束 ==========
+
+
 
         if cfg.use_enhanced_score:
             df_sel = calculate_multi_factor_score(df_sel, cfg)
@@ -1726,7 +1958,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
 class StrategyGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("StockTool v0.9.2-GUI (Multi-Factor + Top10 Backtest)")
+        self.title("StockTool v0.9.3-GUI (Multi-Factor + Top10 Backtest)")
 
         self.log_queue = queue.Queue()
         self.logger = GuiLogger(self.log_queue)
@@ -2105,7 +2337,7 @@ class StrategyGUI(tk.Tk):
     def _on_run(self):
         self.run_btn.config(state="disabled")
         self.console.insert("end", "=" * 60 + "\n")
-        self.console.insert("end", "🚀 StockTool v0.9.2 開始執行\n")
+        self.console.insert("end", "🚀 StockTool v0.9.3 開始執行\n")
         self.console.insert("end", "=" * 60 + "\n")
         self.console.see("end")
 
