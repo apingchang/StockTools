@@ -3,18 +3,25 @@ __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
+*.py.bak
 
 # Local DB / cache
 portfolio.db
 portfolio.db-journal
 cache/
 
-# PyCharm
+# PyCharm / IntelliJ
 .idea/
+*.iml
+*.iws
+*.ipr
+
+# VSCode
+.vscode/
+
+# LibreOffice / OpenOffice lock files
+.~lock.*
 
 # 系統
 .DS_Store
 Thumbs.db
-
-# LibreOffice / OpenOffice lock files
-.~lock.*
