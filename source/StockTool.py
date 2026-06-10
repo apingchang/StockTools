@@ -2363,13 +2363,58 @@ class StrategyGUI(tk.Tk):
     # V0.9.4 買賣記錄 Tab（不動 V0.9.3 上面所有 method）
     # ==========================================================
     def _on_tab_changed(self, event):
-        """Tab 切換時自動 refresh 買賣記錄"""
+        """Tab 切換時自動 refresh 買賣記錄 + 抓持倉現價"""
         try:
             current = self.notebook.index(self.notebook.select())
             if current == 1:  # Tab 2 = 買賣記錄
                 self._refresh_portfolio_view()
+                # 背景執行抓現價（不 blocking GUI）
+                self.after(100, self._auto_fetch_positions_prices)
         except Exception as e:
             self.logger.log(f"⚠️ Tab 切換 refresh 失敗：{e}")
+
+    def _auto_fetch_positions_prices(self):
+        """切到買賣記錄 Tab 時自動抓持倉所有股票現價（背景 thread）"""
+        positions = self.portfolio.get_positions()
+        if not positions:
+            return
+        stock_ids = [p.stock_id for p in positions if p.stock_id]
+
+        def worker():
+            from portfolio import fetch_prices_batch
+            try:
+                results = fetch_prices_batch(stock_ids)
+                # 用 after 回主執行緒更新 GUI
+                self.after(0, lambda: self._apply_fetched_prices(results))
+            except Exception as e:
+                self.after(0, lambda: self.logger.log(f"⚠️ 自動抓現價失敗：{e}"))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.logger.log(f"📡 背景抓 {len(stock_ids)} 檔現價中...")
+
+    def _apply_fetched_prices(self, results: Dict[str, Dict[str, Any]]):
+        """把背景抓回來的現價套到 GUI（主執行緒）"""
+        for sid, info in results.items():
+            if info.get("ok") and info.get("price", 0) > 0:
+                self._current_prices[sid] = info["price"]
+                # 同時補上股票名稱（如果 DB 沒有的話）
+                if info.get("name"):
+                    self._backfill_stock_name(sid, info["name"])
+        self._refresh_portfolio_view()
+        ok_count = sum(1 for v in results.values() if v.get("ok"))
+        self.logger.log(f"✅ 現價抓取完成：{ok_count}/{len(results)} 檔成功")
+
+    def _backfill_stock_name(self, stock_id: str, name: str):
+        """把抓到的名稱補回 DB 中所有該代號的紀錄"""
+        try:
+            with self.portfolio._connect() as conn:
+                conn.execute(
+                    "UPDATE transactions SET stock_name=? WHERE stock_id=? AND (stock_name IS NULL OR stock_name='')",
+                    (name, stock_id)
+                )
+                conn.commit()
+        except Exception:
+            pass
 
     def _build_portfolio_tab(self, parent):
         """建立「買賣記錄」Tab 的 UI"""
@@ -2476,29 +2521,73 @@ class StrategyGUI(tk.Tk):
             messagebox.showerror("Refresh 失敗", str(e))
 
     def _open_buy_dialog(self):
-        """新增買入對話框"""
+        """新增買入對話框（V0.9.4：手續費自動算、股票代號失焦自動抓現價+名稱）"""
         win = tk.Toplevel(self)
         win.title("新增買入")
-        win.geometry("360x320")
+        win.geometry("420x360")
         win.transient(self)
         win.grab_set()
 
-        # 欄位
+        # 欄位（拿掉 fee 欄位，自動算）
         fields = {}
         rows = [
             ("stock_id",   "股票代號", ""),
-            ("stock_name", "股票名稱", ""),
+            ("stock_name", "股票名稱", "（輸入代號後自動帶出）"),
             ("trade_date", "買入日期", datetime.now().strftime("%Y-%m-%d")),
             ("shares",     "買入股數", "0"),
             ("price",      "買入價格", "0"),
-            ("fee",        "手續費",   "0"),
             ("note",       "備註",     ""),
         ]
         for i, (key, label, default) in enumerate(rows):
             ttk.Label(win, text=label, width=10, anchor="e").grid(row=i, column=0, padx=8, pady=4, sticky="e")
             v = tk.StringVar(value=default)
-            ttk.Entry(win, textvariable=v, width=24).grid(row=i, column=1, padx=8, pady=4, sticky="w")
+            e = ttk.Entry(win, textvariable=v, width=28)
+            e.grid(row=i, column=1, padx=8, pady=4, sticky="w")
             fields[key] = v
+
+        # 預估手續費 label
+        est_label = ttk.Label(win, text="預估手續費：—", foreground="#444", font=("Segoe UI", 9, "bold"))
+        est_label.grid(row=len(rows), column=0, columnspan=2, padx=8, pady=(8, 4), sticky="w")
+
+        # 股票代號失焦 → 自動抓現價 + 名稱
+        def on_stock_id_focusout(event=None):
+            sid = fields["stock_id"].get().strip()
+            if not sid or not sid.isdigit():
+                return
+            # 異步抓（不卡 GUI）
+            def worker():
+                from portfolio import fetch_stock_info
+                try:
+                    info = fetch_stock_info(sid)
+                except Exception as e:
+                    info = {"ok": False, "error": str(e)}
+                # 回到主執行緒更新
+                def update_ui():
+                    if info.get("ok"):
+                        if info.get("name"):
+                            fields["stock_name"].set(info["name"])
+                        if info.get("price", 0) > 0 and fields["price"].get() in ("0", ""):
+                            fields["price"].set(f"{info['price']:.2f}")
+                        self._update_fee_estimate(fields, "BUY", est_label, win)
+                        self.logger.log(f"📡 {sid} {info.get('name', '')} 現價 {info.get('price', 0):.2f}")
+                    else:
+                        self.logger.log(f"⚠️ {sid} 抓不到現價：{info.get('error', '')}")
+                win.after(0, update_ui)
+            threading.Thread(target=worker, daemon=True).start()
+
+        fields["stock_id"].trace_add("write", lambda *_: None)  # placeholder
+        # 綁定 FocusOut
+        for child in win.grid_slaves():
+            if isinstance(child, ttk.Entry) and child.grid_info().get("row") == 0:
+                child.bind("<FocusOut>", on_stock_id_focusout)
+                child.bind("<Return>", on_stock_id_focusout)
+                break
+
+        # 股數 / 價格改變 → 重算預估
+        def on_change(*_):
+            self._update_fee_estimate(fields, "BUY", est_label, win)
+        for k in ("shares", "price"):
+            fields[k].trace_add("write", on_change)
 
         def on_submit():
             try:
@@ -2507,7 +2596,6 @@ class StrategyGUI(tk.Tk):
                     trade_date=fields["trade_date"].get().strip(),
                     shares=float(fields["shares"].get()),
                     price=float(fields["price"].get()),
-                    fee=float(fields["fee"].get() or 0),
                     stock_name=fields["stock_name"].get().strip(),
                     note=fields["note"].get().strip(),
                 )
@@ -2517,31 +2605,69 @@ class StrategyGUI(tk.Tk):
             except Exception as e:
                 messagebox.showerror("新增失敗", str(e), parent=win)
 
-        ttk.Button(win, text="確定", command=on_submit).grid(row=len(rows), column=0, padx=8, pady=12, sticky="e")
-        ttk.Button(win, text="取消", command=win.destroy).grid(row=len(rows), column=1, padx=8, pady=12, sticky="w")
+        ttk.Button(win, text="確定", command=on_submit).grid(row=len(rows)+1, column=0, padx=8, pady=12, sticky="e")
+        ttk.Button(win, text="取消", command=win.destroy).grid(row=len(rows)+1, column=1, padx=8, pady=12, sticky="w")
 
     def _open_sell_dialog(self):
-        """新增賣出對話框"""
+        """新增賣出對話框（V0.9.4：手續費+稅自動算、代號失焦抓現價）"""
         win = tk.Toplevel(self)
         win.title("新增賣出")
-        win.geometry("360x300")
+        win.geometry("420x340")
         win.transient(self)
         win.grab_set()
 
         fields = {}
         rows = [
             ("stock_id",   "股票代號", ""),
+            ("stock_name", "股票名稱", "（輸入代號後自動帶出）"),
             ("trade_date", "賣出日期", datetime.now().strftime("%Y-%m-%d")),
             ("shares",     "賣出股數", "0"),
             ("price",      "賣出價格", "0"),
-            ("fee",        "手續費",   "0"),
             ("note",       "備註",     ""),
         ]
         for i, (key, label, default) in enumerate(rows):
             ttk.Label(win, text=label, width=10, anchor="e").grid(row=i, column=0, padx=8, pady=4, sticky="e")
             v = tk.StringVar(value=default)
-            ttk.Entry(win, textvariable=v, width=24).grid(row=i, column=1, padx=8, pady=4, sticky="w")
+            e = ttk.Entry(win, textvariable=v, width=28)
+            e.grid(row=i, column=1, padx=8, pady=4, sticky="w")
             fields[key] = v
+
+        est_label = ttk.Label(win, text="預估成本：—", foreground="#444", font=("Segoe UI", 9, "bold"))
+        est_label.grid(row=len(rows), column=0, columnspan=2, padx=8, pady=(8, 4), sticky="w")
+
+        def on_stock_id_focusout(event=None):
+            sid = fields["stock_id"].get().strip()
+            if not sid or not sid.isdigit():
+                return
+            def worker():
+                from portfolio import fetch_stock_info
+                try:
+                    info = fetch_stock_info(sid)
+                except Exception as e:
+                    info = {"ok": False, "error": str(e)}
+                def update_ui():
+                    if info.get("ok"):
+                        if info.get("name"):
+                            fields["stock_name"].set(info["name"])
+                        if info.get("price", 0) > 0 and fields["price"].get() in ("0", ""):
+                            fields["price"].set(f"{info['price']:.2f}")
+                        self._update_fee_estimate(fields, "SELL", est_label, win)
+                        self.logger.log(f"📡 {sid} {info.get('name', '')} 現價 {info.get('price', 0):.2f}")
+                    else:
+                        self.logger.log(f"⚠️ {sid} 抓不到現價：{info.get('error', '')}")
+                win.after(0, update_ui)
+            threading.Thread(target=worker, daemon=True).start()
+
+        for child in win.grid_slaves():
+            if isinstance(child, ttk.Entry) and child.grid_info().get("row") == 0:
+                child.bind("<FocusOut>", on_stock_id_focusout)
+                child.bind("<Return>", on_stock_id_focusout)
+                break
+
+        def on_change(*_):
+            self._update_fee_estimate(fields, "SELL", est_label, win)
+        for k in ("shares", "price"):
+            fields[k].trace_add("write", on_change)
 
         def on_submit():
             try:
@@ -2550,7 +2676,6 @@ class StrategyGUI(tk.Tk):
                     trade_date=fields["trade_date"].get().strip(),
                     shares=float(fields["shares"].get()),
                     price=float(fields["price"].get()),
-                    fee=float(fields["fee"].get() or 0),
                     note=fields["note"].get().strip(),
                 )
                 self.logger.log(f"✅ 賣出新增成功：{fields['stock_id'].get()}")
@@ -2559,28 +2684,48 @@ class StrategyGUI(tk.Tk):
             except Exception as e:
                 messagebox.showerror("新增失敗", str(e), parent=win)
 
-        ttk.Button(win, text="確定", command=on_submit).grid(row=len(rows), column=0, padx=8, pady=12, sticky="e")
-        ttk.Button(win, text="取消", command=win.destroy).grid(row=len(rows), column=1, padx=8, pady=12, sticky="w")
+        ttk.Button(win, text="確定", command=on_submit).grid(row=len(rows)+1, column=0, padx=8, pady=12, sticky="e")
+        ttk.Button(win, text="取消", command=win.destroy).grid(row=len(rows)+1, column=1, padx=8, pady=12, sticky="w")
+
+    def _update_fee_estimate(self, fields: Dict[str, tk.StringVar], action: str, label: ttk.Label, win: tk.Toplevel):
+        """即時更新對話框的『預估手續費 / 成本』label"""
+        try:
+            shares = float(fields["shares"].get() or 0)
+            price = float(fields["price"].get() or 0)
+            if shares <= 0 or price <= 0:
+                label.config(text="預估手續費：—")
+                return
+            from portfolio import estimate_total_cost
+            est = estimate_total_cost(action, shares, price, self.portfolio.broker_discount)
+            if action == "BUY":
+                label.config(text=f"預估手續費：{est['fee']:,.2f} 元（買入不收證交稅）")
+            else:
+                label.config(text=f"預估成本：手續費 {est['fee']:,.2f} + 證交稅 {est['tax']:,.2f} = {est['total']:,.2f} 元")
+        except (ValueError, tk.TclError):
+            label.config(text="預估手續費：—")
 
     def _update_prices_dialog(self):
-        """批次更新現價（所有持倉列出來，預填上次輸入）"""
+        """V0.9.4：批次從 TWSE 抓現價（可手動覆寫）"""
         positions = self.portfolio.get_positions()
         if not positions:
             messagebox.showinfo("無持倉", "目前沒有持倉股票可更新現價")
             return
 
         win = tk.Toplevel(self)
-        win.title("更新現價")
-        win.geometry("380x420")
+        win.title("更新現價（TWSE 自動抓）")
+        win.geometry("420x460")
         win.transient(self)
         win.grab_set()
 
-        ttk.Label(win, text="請輸入每檔股票的目前市價：", font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=10, pady=(10, 4))
+        ttk.Label(win, text="從 TWSE / TPEx 抓取每檔現價（可手動修改）",
+                  font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=10, pady=(10, 4))
+        ttk.Label(win, text="按「自動抓 TWSE」按鈕一次抓全部，個別欄位可手動覆寫",
+                  foreground="#666", font=("Segoe UI", 9)).pack(anchor="w", padx=10, pady=(0, 8))
 
         price_vars = {}
         frame = ttk.Frame(win)
         frame.pack(fill="both", expand=True, padx=10, pady=4)
-        for i, p in enumerate(positions):
+        for p in positions:
             row = ttk.Frame(frame)
             row.pack(fill="x", pady=2)
             ttk.Label(row, text=f"{p.stock_id} {p.stock_name}", width=20, anchor="w").pack(side="left")
@@ -2589,7 +2734,32 @@ class StrategyGUI(tk.Tk):
             ttk.Entry(row, textvariable=v, width=14).pack(side="right")
             price_vars[p.stock_id] = v
 
-        def on_submit():
+        def fetch_all():
+            stock_ids = list(price_vars.keys())
+            def worker():
+                from portfolio import fetch_prices_batch
+                try:
+                    results = fetch_prices_batch(stock_ids)
+                except Exception as e:
+                    win.after(0, lambda: messagebox.showerror("抓取失敗", str(e), parent=win))
+                    return
+                def apply():
+                    for sid, info in results.items():
+                        if info.get("ok") and info.get("price", 0) > 0:
+                            price_vars[sid].set(f"{info['price']:.2f}")
+                            if info.get("name"):
+                                self._backfill_stock_name(sid, info["name"])
+                    self.logger.log(f"📡 自動抓取完成：{sum(1 for v in results.values() if v.get('ok'))}/{len(results)} 檔")
+                win.after(0, apply)
+            threading.Thread(target=worker, daemon=True).start()
+
+        btn_frame = ttk.Frame(win)
+        btn_frame.pack(fill="x", padx=10, pady=8)
+        ttk.Button(btn_frame, text="📡 自動抓 TWSE", command=fetch_all).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="確定", command=lambda: apply_and_close()).pack(side="right", padx=2)
+        ttk.Button(btn_frame, text="取消", command=win.destroy).pack(side="right", padx=2)
+
+        def apply_and_close():
             for sid, var in price_vars.items():
                 txt = var.get().strip()
                 if txt:
@@ -2601,9 +2771,6 @@ class StrategyGUI(tk.Tk):
             self.logger.log(f"✅ 已更新 {len(price_vars)} 檔現價")
             win.destroy()
             self._refresh_portfolio_view()
-
-        ttk.Button(win, text="確定", command=on_submit).pack(side="right", padx=10, pady=10)
-        ttk.Button(win, text="取消", command=win.destroy).pack(side="right", padx=4, pady=10)
 
     def _delete_selected_tx(self):
         """刪除選中的交易（從交易明細 Treeview）"""
