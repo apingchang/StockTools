@@ -72,11 +72,14 @@ import numpy as np
 import requests
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog, simpledialog
 
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.formatting.rule import CellIsRule
+
+# V0.9.4 買賣記錄模組
+from portfolio import PortfolioDB, Transaction, DEFAULT_PORTFOLIO_DB
 
 warnings.filterwarnings("ignore")
 
@@ -1958,7 +1961,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
 class StrategyGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("StockTool v0.9.3-GUI (Multi-Factor + Top10 Backtest)")
+        self.title("StockTool v0.9.4-GUI (Multi-Factor + Top10 Backtest + Portfolio)")
 
         self.log_queue = queue.Queue()
         self.logger = GuiLogger(self.log_queue)
@@ -1967,15 +1970,37 @@ class StrategyGUI(tk.Tk):
         self.cfg = StrategyConfig()
         self.cfg.update_from_dict(saved_config)
 
+        # V0.9.4 買賣記錄
+        self.portfolio = PortfolioDB(DEFAULT_PORTFOLIO_DB)
+        # 記憶體中現價（stock_id → price）
+        self._current_prices: Dict[str, float] = {}
+
         self._build_ui()
         self._poll_log_queue()
         self._load_config_to_ui()
 
     def _build_ui(self):
-        self.geometry("1024x640")
+        self.geometry("1280x720")
 
-        container = ttk.Frame(self)
-        container.pack(fill="both", expand=True, padx=10, pady=10)
+        # V0.9.4 Tab 化：notebook 包兩個分頁（不改 V0.9.3 既有 widget 結構）
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True, padx=8, pady=8)
+
+        # Tab 1：策略參數（V0.9.3 原本內容搬進來）
+        strategy_tab = ttk.Frame(self.notebook)
+        self.notebook.add(strategy_tab, text="⚙️ 策略參數")
+
+        # Tab 2：買賣記錄（V0.9.4 新增）
+        self.portfolio_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.portfolio_tab, text="📒 買賣記錄")
+        self._build_portfolio_tab(self.portfolio_tab)
+
+        # 綁定 Tab 切換 → 切到買賣記錄時自動 refresh
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+        # V0.9.3 原本的 container（左參數 + 右 Console），改掛到 strategy_tab 下
+        container = ttk.Frame(strategy_tab)
+        container.pack(fill="both", expand=True, padx=4, pady=4)
 
         left_canvas = tk.Canvas(container, width=400)
         left_scrollbar = ttk.Scrollbar(container, orient="vertical", command=left_canvas.yview)
@@ -2333,6 +2358,288 @@ class StrategyGUI(tk.Tk):
 
     def _on_clear_console(self):
         self.console.delete("1.0", "end")
+
+    # ==========================================================
+    # V0.9.4 買賣記錄 Tab（不動 V0.9.3 上面所有 method）
+    # ==========================================================
+    def _on_tab_changed(self, event):
+        """Tab 切換時自動 refresh 買賣記錄"""
+        try:
+            current = self.notebook.index(self.notebook.select())
+            if current == 1:  # Tab 2 = 買賣記錄
+                self._refresh_portfolio_view()
+        except Exception as e:
+            self.logger.log(f"⚠️ Tab 切換 refresh 失敗：{e}")
+
+    def _build_portfolio_tab(self, parent):
+        """建立「買賣記錄」Tab 的 UI"""
+        # 上方：5 個總覽 Label
+        summary_frame = ttk.LabelFrame(parent, text="📊 持倉總覽", padding=8)
+        summary_frame.pack(fill="x", padx=8, pady=(8, 4))
+        self._summary_labels = {}
+        for i, (key, label) in enumerate([
+            ("total_cost", "總成本"),
+            ("total_market_value", "總市值"),
+            ("total_unrealized_pl", "未實現損益"),
+            ("total_realized_pl", "已實現損益"),
+            ("total_return_pct", "總報酬率 %"),
+        ]):
+            cell = ttk.Frame(summary_frame)
+            cell.grid(row=0, column=i, padx=10, pady=2, sticky="w")
+            ttk.Label(cell, text=label, font=("Segoe UI", 9), foreground="#666").pack(anchor="w")
+            val_lbl = ttk.Label(cell, text="—", font=("Segoe UI", 12, "bold"))
+            val_lbl.pack(anchor="w")
+            self._summary_labels[key] = val_lbl
+
+        # 中間：持倉明細 Treeview
+        pos_frame = ttk.LabelFrame(parent, text="🌳 持倉明細", padding=4)
+        pos_frame.pack(fill="both", expand=True, padx=8, pady=4)
+        pos_cols = ("代號", "名稱", "股數", "均價", "現價", "市值", "未實現損益", "報酬率%", "已實現損益")
+        self._positions_tree = ttk.Treeview(pos_frame, columns=pos_cols, show="headings", height=8)
+        for col, w in zip(pos_cols, [60, 80, 80, 70, 70, 90, 90, 70, 90]):
+            self._positions_tree.heading(col, text=col)
+            self._positions_tree.column(col, width=w, anchor="e" if col not in ("代號", "名稱") else "w")
+        pos_scroll = ttk.Scrollbar(pos_frame, orient="vertical", command=self._positions_tree.yview)
+        self._positions_tree.configure(yscrollcommand=pos_scroll.set)
+        self._positions_tree.pack(side="left", fill="both", expand=True)
+        pos_scroll.pack(side="right", fill="y")
+
+        # 下方：交易明細 Treeview
+        tx_frame = ttk.LabelFrame(parent, text="📋 交易明細", padding=4)
+        tx_frame.pack(fill="both", expand=True, padx=8, pady=4)
+        tx_cols = ("id", "日期", "代號", "名稱", "買/賣", "股數", "價格", "手續費", "備註")
+        self._tx_tree = ttk.Treeview(tx_frame, columns=tx_cols, show="headings", height=8)
+        for col, w in zip(tx_cols, [40, 80, 60, 80, 50, 70, 70, 60, 120]):
+            self._tx_tree.heading(col, text=col)
+            self._tx_tree.column(col, width=w, anchor="w" if col in ("代號", "名稱", "買/賣", "備註", "日期") else "e")
+        tx_scroll = ttk.Scrollbar(tx_frame, orient="vertical", command=self._tx_tree.yview)
+        self._tx_tree.configure(yscrollcommand=tx_scroll.set)
+        self._tx_tree.pack(side="left", fill="both", expand=True)
+        tx_scroll.pack(side="right", fill="y")
+
+        # 最下：按鈕區
+        btn_frame = ttk.Frame(parent)
+        btn_frame.pack(fill="x", padx=8, pady=(4, 8))
+        ttk.Button(btn_frame, text="➕ 新增買入", command=self._open_buy_dialog).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="➖ 新增賣出", command=self._open_sell_dialog).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="💲 更新現價", command=self._update_prices_dialog).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="🗑 刪除選中", command=self._delete_selected_tx).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="🔄 重新整理", command=self._refresh_portfolio_view).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="📤 匯出 Excel", command=self._export_portfolio_excel).pack(side="right", padx=2)
+
+    def _refresh_portfolio_view(self):
+        """重新查詢 DB，更新總覽 + 兩個 Treeview"""
+        try:
+            positions = self.portfolio.get_positions(self._current_prices)
+            summary = self.portfolio.get_summary(self._current_prices)
+            txs = self.portfolio.list_transactions()
+
+            # 總覽
+            self._summary_labels["total_cost"].config(text=f"{summary.total_cost:,.0f}")
+            self._summary_labels["total_market_value"].config(text=f"{summary.total_market_value:,.0f}")
+            pl_color = "#0a7d2c" if summary.total_unrealized_pl >= 0 else "#c00000"
+            self._summary_labels["total_unrealized_pl"].config(text=f"{summary.total_unrealized_pl:+,.0f}", foreground=pl_color)
+            real_color = "#0a7d2c" if summary.total_realized_pl >= 0 else "#c00000"
+            self._summary_labels["total_realized_pl"].config(text=f"{summary.total_realized_pl:+,.0f}", foreground=real_color)
+            ret_color = "#0a7d2c" if summary.total_return_pct >= 0 else "#c00000"
+            self._summary_labels["total_return_pct"].config(text=f"{summary.total_return_pct:+.2f}%", foreground=ret_color)
+
+            # 持倉明細
+            for item in self._positions_tree.get_children():
+                self._positions_tree.delete(item)
+            for p in positions:
+                self._positions_tree.insert("", "end", values=(
+                    p.stock_id, p.stock_name,
+                    f"{p.shares:,.0f}",
+                    f"{p.avg_cost:,.2f}",
+                    f"{p.current_price:,.2f}" if p.current_price > 0 else "—",
+                    f"{p.market_value:,.0f}" if p.current_price > 0 else "—",
+                    f"{p.unrealized_pl:+,.0f}" if p.current_price > 0 else "—",
+                    f"{p.unrealized_pl_pct:+.2f}%" if p.current_price > 0 else "—",
+                    f"{p.realized_pl:+,.0f}",
+                ))
+
+            # 交易明細
+            for item in self._tx_tree.get_children():
+                self._tx_tree.delete(item)
+            for t in txs:
+                self._tx_tree.insert("", "end", values=(
+                    t.id, t.trade_date, t.stock_id, t.stock_name,
+                    "買" if t.action == "BUY" else "賣",
+                    f"{t.shares:,.0f}",
+                    f"{t.price:,.2f}",
+                    f"{t.fee:,.0f}",
+                    t.note,
+                ))
+
+        except Exception as e:
+            messagebox.showerror("Refresh 失敗", str(e))
+
+    def _open_buy_dialog(self):
+        """新增買入對話框"""
+        win = tk.Toplevel(self)
+        win.title("新增買入")
+        win.geometry("360x320")
+        win.transient(self)
+        win.grab_set()
+
+        # 欄位
+        fields = {}
+        rows = [
+            ("stock_id",   "股票代號", ""),
+            ("stock_name", "股票名稱", ""),
+            ("trade_date", "買入日期", datetime.now().strftime("%Y-%m-%d")),
+            ("shares",     "買入股數", "0"),
+            ("price",      "買入價格", "0"),
+            ("fee",        "手續費",   "0"),
+            ("note",       "備註",     ""),
+        ]
+        for i, (key, label, default) in enumerate(rows):
+            ttk.Label(win, text=label, width=10, anchor="e").grid(row=i, column=0, padx=8, pady=4, sticky="e")
+            v = tk.StringVar(value=default)
+            ttk.Entry(win, textvariable=v, width=24).grid(row=i, column=1, padx=8, pady=4, sticky="w")
+            fields[key] = v
+
+        def on_submit():
+            try:
+                self.portfolio.add_buy(
+                    stock_id=fields["stock_id"].get().strip(),
+                    trade_date=fields["trade_date"].get().strip(),
+                    shares=float(fields["shares"].get()),
+                    price=float(fields["price"].get()),
+                    fee=float(fields["fee"].get() or 0),
+                    stock_name=fields["stock_name"].get().strip(),
+                    note=fields["note"].get().strip(),
+                )
+                self.logger.log(f"✅ 買入新增成功：{fields['stock_id'].get()}")
+                win.destroy()
+                self._refresh_portfolio_view()
+            except Exception as e:
+                messagebox.showerror("新增失敗", str(e), parent=win)
+
+        ttk.Button(win, text="確定", command=on_submit).grid(row=len(rows), column=0, padx=8, pady=12, sticky="e")
+        ttk.Button(win, text="取消", command=win.destroy).grid(row=len(rows), column=1, padx=8, pady=12, sticky="w")
+
+    def _open_sell_dialog(self):
+        """新增賣出對話框"""
+        win = tk.Toplevel(self)
+        win.title("新增賣出")
+        win.geometry("360x300")
+        win.transient(self)
+        win.grab_set()
+
+        fields = {}
+        rows = [
+            ("stock_id",   "股票代號", ""),
+            ("trade_date", "賣出日期", datetime.now().strftime("%Y-%m-%d")),
+            ("shares",     "賣出股數", "0"),
+            ("price",      "賣出價格", "0"),
+            ("fee",        "手續費",   "0"),
+            ("note",       "備註",     ""),
+        ]
+        for i, (key, label, default) in enumerate(rows):
+            ttk.Label(win, text=label, width=10, anchor="e").grid(row=i, column=0, padx=8, pady=4, sticky="e")
+            v = tk.StringVar(value=default)
+            ttk.Entry(win, textvariable=v, width=24).grid(row=i, column=1, padx=8, pady=4, sticky="w")
+            fields[key] = v
+
+        def on_submit():
+            try:
+                self.portfolio.add_sell(
+                    stock_id=fields["stock_id"].get().strip(),
+                    trade_date=fields["trade_date"].get().strip(),
+                    shares=float(fields["shares"].get()),
+                    price=float(fields["price"].get()),
+                    fee=float(fields["fee"].get() or 0),
+                    note=fields["note"].get().strip(),
+                )
+                self.logger.log(f"✅ 賣出新增成功：{fields['stock_id'].get()}")
+                win.destroy()
+                self._refresh_portfolio_view()
+            except Exception as e:
+                messagebox.showerror("新增失敗", str(e), parent=win)
+
+        ttk.Button(win, text="確定", command=on_submit).grid(row=len(rows), column=0, padx=8, pady=12, sticky="e")
+        ttk.Button(win, text="取消", command=win.destroy).grid(row=len(rows), column=1, padx=8, pady=12, sticky="w")
+
+    def _update_prices_dialog(self):
+        """批次更新現價（所有持倉列出來，預填上次輸入）"""
+        positions = self.portfolio.get_positions()
+        if not positions:
+            messagebox.showinfo("無持倉", "目前沒有持倉股票可更新現價")
+            return
+
+        win = tk.Toplevel(self)
+        win.title("更新現價")
+        win.geometry("380x420")
+        win.transient(self)
+        win.grab_set()
+
+        ttk.Label(win, text="請輸入每檔股票的目前市價：", font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=10, pady=(10, 4))
+
+        price_vars = {}
+        frame = ttk.Frame(win)
+        frame.pack(fill="both", expand=True, padx=10, pady=4)
+        for i, p in enumerate(positions):
+            row = ttk.Frame(frame)
+            row.pack(fill="x", pady=2)
+            ttk.Label(row, text=f"{p.stock_id} {p.stock_name}", width=20, anchor="w").pack(side="left")
+            cur = self._current_prices.get(p.stock_id, 0.0)
+            v = tk.StringVar(value=f"{cur:.2f}" if cur > 0 else "")
+            ttk.Entry(row, textvariable=v, width=14).pack(side="right")
+            price_vars[p.stock_id] = v
+
+        def on_submit():
+            for sid, var in price_vars.items():
+                txt = var.get().strip()
+                if txt:
+                    try:
+                        self._current_prices[sid] = float(txt)
+                    except ValueError:
+                        messagebox.showerror("格式錯誤", f"{sid} 現價格式錯誤：{txt!r}", parent=win)
+                        return
+            self.logger.log(f"✅ 已更新 {len(price_vars)} 檔現價")
+            win.destroy()
+            self._refresh_portfolio_view()
+
+        ttk.Button(win, text="確定", command=on_submit).pack(side="right", padx=10, pady=10)
+        ttk.Button(win, text="取消", command=win.destroy).pack(side="right", padx=4, pady=10)
+
+    def _delete_selected_tx(self):
+        """刪除選中的交易（從交易明細 Treeview）"""
+        sel = self._tx_tree.selection()
+        if not sel:
+            messagebox.showinfo("未選取", "請先在「交易明細」表格中選取要刪除的紀錄")
+            return
+        if not messagebox.askyesno("確認刪除", f"確定要刪除 {len(sel)} 筆交易紀錄？此操作無法復原。"):
+            return
+        try:
+            for item in sel:
+                vals = self._tx_tree.item(item, "values")
+                tx_id = int(vals[0])
+                self.portfolio.delete_transaction(tx_id)
+            self.logger.log(f"🗑 已刪除 {len(sel)} 筆交易")
+            self._refresh_portfolio_view()
+        except Exception as e:
+            messagebox.showerror("刪除失敗", str(e))
+
+    def _export_portfolio_excel(self):
+        """匯出 4 sheet Excel（讓使用者選存檔位置）"""
+        default_name = f"portfolio_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        out = filedialog.asksaveasfilename(
+            title="匯出買賣記錄",
+            defaultextension=".xlsx",
+            initialfile=default_name,
+            filetypes=[("Excel 檔案", "*.xlsx"), ("所有檔案", "*.*")],
+        )
+        if not out:
+            return
+        try:
+            self.portfolio.export_excel(out, current_prices=self._current_prices)
+            self.logger.log(f"📤 已匯出：{out}")
+            messagebox.showinfo("匯出成功", f"已寫入：\n{out}")
+        except Exception as e:
+            messagebox.showerror("匯出失敗", str(e))
 
     def _on_run(self):
         self.run_btn.config(state="disabled")
