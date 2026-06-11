@@ -2762,7 +2762,6 @@ class StrategyGUI(tk.Tk):
         win.title(f"📊 {stock_id} {stock_name} — 統計明細")
         win.geometry("520x480")
         win.transient(self)
-        win.grab_set()
 
         # 標題
         tk.Label(win, text=f"{stock_id}  {stock_name}", font=("Segoe UI", 12, "bold")
