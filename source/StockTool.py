@@ -1982,7 +1982,6 @@ class _CalendarDialog:
 
     def __init__(self, parent, initial: str = ""):
         self.result: Optional[str] = None
-        self._done = tk.BooleanVar(value=False)  # V0.9.4 phase2.3 fix: 改用 wait_variable() blocking
 
         self.win = tk.Toplevel(parent)
         self.win.withdraw()
@@ -1990,7 +1989,7 @@ class _CalendarDialog:
         self.win.resizable(False, False)
         self.win.transient(parent)
         self.win.grab_set()
-        self.win.protocol("WM_DELETE_WINDOW", self._on_close)  # 處理 X 按鈕
+        self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
         if initial:
             try:
@@ -2002,55 +2001,130 @@ class _CalendarDialog:
 
         self._build()
         self.win.deiconify()
-        # V0.9.4 phase2.3 fix:
-        # 用 wait_variable() 阻塞（blocking but GUI still responsive because
-        # grab_set() makes win modal + wait_variable yields to event loop）。
-        # wait_variable 只在 _done.set(True) 時 unblock。
-        self.win.wait_variable(self._done)
-        self.win.destroy()
+        # wait_window() blocks until win is destroyed (_select / _cancel / X).
+        # GUI stays fully responsive; grab_set() makes this window modal.
+        self.win.wait_window()
 
     def _build(self):
         win = self.win
+
+        # ── 頂部導航列 ──
         nav = ttk.Frame(win)
         nav.pack(fill="x", padx=8, pady=(8, 4))
+        ttk.Button(nav, text="◀◀", width=3,
+                   command=lambda: self._navigate_years(-1)).pack(side="left")
         ttk.Button(nav, text="◀", width=3,
                    command=lambda: self._navigate(-1)).pack(side="left")
-        self._month_lbl = ttk.Label(nav, text="", width=14, font=("Segoe UI", 10, "bold"))
-        self._month_lbl.pack(side="left", expand=True)
+
+        # 年份 label（點擊可直接修改年份）
+        self._year_lbl = tk.Label(nav, text="", font=("Segoe UI", 9, "bold"),
+                                   cursor="hand2", bg="#e8f0fe", padx=4)
+        self._year_lbl.pack(side="left", padx=(4, 0))
+        self._year_lbl.bind("<Button-1>", lambda e: self._open_year_dialog())
+
+        # 月份 label（點擊可直接修改月份）
+        self._month_lbl = tk.Label(nav, text="", width=10, font=("Segoe UI", 10, "bold"),
+                                   cursor="hand2", bg="#fff8e1", padx=4)
+        self._month_lbl.pack(side="left", padx=4, expand=True)
+        self._month_lbl.bind("<Button-1>", lambda e: self._open_month_menu())
+
         ttk.Button(nav, text="▶", width=3,
                    command=lambda: self._navigate(1)).pack(side="right")
+        ttk.Button(nav, text="▶▶", width=3,
+                   command=lambda: self._navigate_years(1)).pack(side="right")
 
+        # ── 星期抬頭 ──
         hdr = ttk.Frame(win)
         hdr.pack(fill="x", padx=8, pady=(0, 2))
         for d in self.DAY_HEADER:
             lbl = ttk.Label(hdr, text=d, width=4, anchor="center",
-                            font=("Segoe UI", 8, "bold"))
+                             font=("Segoe UI", 8, "bold"))
             lbl.pack(side="left", padx=1)
             if d == "六":
                 lbl.config(foreground="#0070c0")
             elif d == "日":
                 lbl.config(foreground="#c00000")
 
+        # ── 日按鈕區域 ──
         self._day_frame = ttk.Frame(win)
         self._day_frame.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self._render_days()
-        ttk.Button(win, text="取消", command=self._cancel).pack(pady=(0, 8))
+
+        # ── 底部按鈕 ──
+        btn_frame = ttk.Frame(win)
+        btn_frame.pack(pady=(0, 8))
+        ttk.Button(btn_frame, text="取消", command=self._cancel).pack(side="left", padx=8)
+
+    def _navigate_years(self, delta: int):
+        """往前/往後跳一年"""
+        self.current = self.current.replace(year=self.current.year + delta)
+        self._render_days()
 
     def _navigate(self, delta: int):
+        """往前/往後跳一個月"""
         y, m = self.current.year, self.current.month
         m += delta
         if m > 12:
             m, y = 1, y + 1
-        elif m < 1:
+        elif m < 1:   # Bugfix: month=0 → 12 月（往前翻年）
             m, y = 12, y - 1
         self.current = self.current.replace(year=y, month=m)
+        self._render_days()
+
+    def _open_year_dialog(self):
+        """點年份 → 彈出對話框直接輸入年份"""
+        dlg = tk.Toplevel(self.win)
+        dlg.overrideredirect(True)
+        dlg.attributes("-topmost", True)
+        rx = self._year_lbl.winfo_rootx()
+        ry = self._year_lbl.winfo_rooty() + self._year_lbl.winfo_height()
+        dlg.geometry(f"+{rx}+{ry}")
+        tk.Label(dlg, text="年份：", font=("Segoe UI", 10)).pack(side="left")
+        var = tk.StringVar(value=str(self.current.year))
+        ent = tk.Entry(dlg, textvariable=var, width=6, font=("Segoe UI", 10))
+        ent.pack(side="left")
+        ent.focus()
+        ent.select_range(0, "end")
+
+        def commit():
+            try:
+                yr = int(var.get())
+                if 1950 <= yr <= 2100:
+                    self.current = self.current.replace(year=yr)
+                    self._render_days()
+            except ValueError:
+                pass
+            dlg.destroy()
+
+        tk.Button(dlg, text="確定", font=("Segoe UI", 9), command=commit).pack(side="left", padx=4)
+        tk.Button(dlg, text="取消", font=("Segoe UI", 9), command=dlg.destroy).pack(side="left")
+        ent.bind("<Return>", lambda e: commit())
+        ent.bind("<Escape>", lambda e: dlg.destroy())
+
+    def _open_month_menu(self):
+        """點月份 → 彈出 1-12 月快速選單"""
+        mnu = tk.Toplevel(self.win)
+        mnu.overrideredirect(True)
+        mnu.attributes("-topmost", True)
+        mx = self._month_lbl.winfo_rootx()
+        my = self._month_lbl.winfo_rooty() + self._month_lbl.winfo_height()
+        mnu.geometry(f"+{mx}+{my}")
+        for m in range(1, 13):
+            tk.Button(mnu, text=f"{m} 月", font=("Segoe UI", 10), width=5,
+                      command=lambda month=m: self._apply_month_and_close(month, mnu)
+                      ).pack(fill="x")
+
+    def _apply_month_and_close(self, month: int, mnu: tk.Toplevel):
+        self.current = self.current.replace(month=month)
+        mnu.destroy()
         self._render_days()
 
     def _render_days(self):
         for w in self._day_frame.winfo_children():
             w.destroy()
         year, month = self.current.year, self.current.month
-        self._month_lbl.config(text=f"{year} 年 {month} 月")
+        self._year_lbl.config(text=f"{year} 年")
+        self._month_lbl.config(text=f"{month} 月")
         first_wd = datetime(year, month, 1).weekday()
         days_in_month = (datetime(year, month + 1, 1) - datetime(year, month, 1)).days
         for _ in range(first_wd):
@@ -2060,36 +2134,33 @@ class _CalendarDialog:
             col = (first_wd + d - 1) % 7
             date_str = f"{year:04d}-{month:02d}-{d:02d}"
             btn = tk.Button(self._day_frame, text=str(d), width=4, height=1,
-                            font=("Segoe UI", 9),
-                            command=lambda ds=date_str: self._select(ds))
+                           font=("Segoe UI", 9),
+                           command=lambda ds=date_str: self._select(ds))
             btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
             wd = (first_wd + d - 1) % 7
             if wd == 5:
-                btn.config(foreground="#0070c0", bg="#f0f4ff")   # 週六：藍字淡底
+                btn.config(foreground="#0070c0", bg="#f0f4ff")
             elif wd == 6:
-                btn.config(foreground="#c00000", bg="#fff0f0")   # 週日：紅字淡底
+                btn.config(foreground="#c00000", bg="#fff0f0")
             else:
-                btn.config(foreground="#222222", bg="#f5f5f5")   # 平日：深灰
+                btn.config(foreground="#222222", bg="#f5f5f5")
         for c in range(7):
             self._day_frame.columnconfigure(c, weight=1)
 
     def _select(self, date_str: str):
         self.result = date_str
-        self._done.set(True)   # unblock wait_variable()
+        self.win.destroy()
 
     def _cancel(self):
         self.result = None
-        self._done.set(True)   # unblock wait_variable()
+        self.win.destroy()
 
     def _on_close(self):
-        # X 按鈕：視同取消
         self._cancel()
 
     @staticmethod
     def pick(parent, initial: str = "") -> Optional[str]:
         return _CalendarDialog(parent, initial).result
-
-
 # ==========================================================
 # GUI 主視窗
 # ==========================================================
@@ -2693,7 +2764,7 @@ class StrategyGUI(tk.Tk):
         chosen = _CalendarDialog.pick(win, initial)
         if chosen:
             var.set(chosen)
-            entry.xview_moveto(0)  # 把文字往左拉回起點（選完後自然顯示開頭）
+            pass  # date written to var by var.set(chosen) above
 
     def _open_buy_dialog(self):
         """新增買入對話框（V0.9.4 phase2.3：支援股利配發 price=0、萬年曆選日期）"""
