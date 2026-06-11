@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     action      TEXT    NOT NULL CHECK(action IN ('BUY','SELL')),
     trade_date  TEXT    NOT NULL,
     shares      REAL    NOT NULL CHECK(shares > 0),
-    price       REAL    NOT NULL CHECK(price > 0),
+    price       REAL    NOT NULL CHECK(price >= 0),  -- V0.9.4 phase2.3: 允許 price=0（股票股利配發）
     fee         REAL    NOT NULL DEFAULT 0,
     tax         REAL    NOT NULL DEFAULT 0,
     note        TEXT,
@@ -112,6 +112,14 @@ MIGRATION_SQL = [
 
 DEFAULT_PORTFOLIO_DB = "portfolio.db"
 
+# ==========================================================
+# V0.9.4 phase2.3: 費用 default（台股規定值，可經策略參數覆寫）
+# ==========================================================
+DEFAULT_BROKER_DISCOUNT = 1.0          # 券商折扣（1.0 = 零折扣，0.6 = 6折）
+DEFAULT_MIN_FEE = 20                   # 最低手續費 20 元（台股規定）
+DEFAULT_BROKER_FEE_RATE = 0.001425     # 0.1425%（台股牌告手續費率）
+DEFAULT_SELL_TAX_RATE = 0.003          # 0.3%（台股賣出證交稅率，買入不收）
+
 
 # ==========================================================
 # 費用計算（靜態工具）
@@ -121,7 +129,10 @@ def calc_fee(shares: float, price: float, broker_discount: float = DEFAULT_BROKE
     計算券商手續費（買 / 賣都適用）
 
     公式：max(20, 股數 × 價格 × 0.001425 × 券商折扣)
+    注意：股票股利配發（price=0）時不收手續費，直接回傳 0
     """
+    if price == 0:
+        return 0.0
     raw = shares * price * BROKER_FEE_RATE * broker_discount
     return round(max(MIN_FEE, raw), 2)
 
@@ -717,8 +728,13 @@ class PortfolioDB:
             raise ValueError(f"trade_date 格式錯誤：{trade_date!r}（應為 YYYY-MM-DD）")
         if shares <= 0:
             raise ValueError(f"shares 必須 > 0，得到 {shares}")
-        if price <= 0:
-            raise ValueError(f"price 必須 > 0，得到 {price}")
+        # V0.9.4 phase2.3: 股利配發（price=0）僅限 BUY；SELL 必須有價格
+        if action == "BUY":
+            if price < 0:
+                raise ValueError(f"price 不可為負（股利配發可設為 0），得到 {price}")
+        elif action == "SELL":
+            if price <= 0:
+                raise ValueError(f"SELL 時 price 必須 > 0，得到 {price}")
         if fee < 0:
             raise ValueError(f"fee 不可為負，得到 {fee}")
         if tax < 0:
