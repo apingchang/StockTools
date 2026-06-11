@@ -329,7 +329,10 @@ class PortfolioSummary:
     total_cost: float = 0.0
     total_market_value: float = 0.0
     total_unrealized_pl: float = 0.0
-    total_realized_pl: float = 0.0
+    total_realized_pl: float = 0.0       # 原始已實現損益（扣 fee+tax 前）
+    total_fee: float = 0.0               # V0.9.4: 累計手續費
+    total_tax: float = 0.0               # V0.9.4: 累計證交稅
+    net_realized_pl: float = 0.0         # V0.9.4: 已實現淨損益（扣 fee+tax 後）
     total_pl: float = 0.0
     total_return_pct: float = 0.0
     position_count: int = 0
@@ -584,7 +587,10 @@ class PortfolioDB:
         total_mv = sum(p.market_value for p in positions)
         total_unrealized = sum(p.unrealized_pl for p in positions)
         total_realized = sum(p.realized_pl for p in positions)
-        total_pl = total_unrealized + total_realized
+        total_fee = sum(t.fee for t in txs)
+        total_tax = sum(t.tax for t in txs)
+        net_realized = total_realized - total_fee - total_tax
+        total_pl = total_unrealized + net_realized
         total_return = (total_pl / total_cost * 100) if total_cost > 0 else 0.0
 
         return PortfolioSummary(
@@ -592,6 +598,9 @@ class PortfolioDB:
             total_market_value=total_mv,
             total_unrealized_pl=total_unrealized,
             total_realized_pl=total_realized,
+            total_fee=total_fee,
+            total_tax=total_tax,
+            net_realized_pl=net_realized,
             total_pl=total_pl,
             total_return_pct=total_return,
             position_count=sum(1 for p in positions if p.shares > 0),
