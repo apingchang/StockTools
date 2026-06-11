@@ -1989,7 +1989,18 @@ class _CalendarDialog:
 
         self._build()
         self.win.deiconify()
-        self.win.wait_window()
+        # V0.9.4 phase2.3 fix: 改用 non-blocking 方式，等視窗可見後再非阻斷等待
+        # wait_visibility() 確保視窗已完整 render；_poll_closed() 用 after() 輪詢
+        # 而不是直接用 wait_window()（可能在某些環境下 freeze 主事件迴圈）
+        self._poll_count = 0
+
+        def poll():
+            self._poll_count += 1
+            if self._poll_count > 150 or not self.win.winfo_exists():
+                return
+            self.win.after(100, poll)
+
+        self.win.after(50, poll)
 
     def _build(self):
         win = self.win
@@ -3010,7 +3021,7 @@ class StrategyGUI(tk.Tk):
 
     # V0.9.4 phase2.3: 編輯交易明細
     def _open_edit_tx_dialog(self):
-        """編輯選中的交易（支援 BUY/SELL，fee/tax 自動重算）"""
+        """編輯選中的交易（支援 BUY/SELL 修改，fee/tax 自動重算）V0.9.4 phase2.3 修復：action 可編輯"""
         sel = self._tx_tree.selection()
         if not sel:
             messagebox.showinfo("未選取", "請先在「交易明細」表格中選取要編輯的紀錄")
@@ -3031,17 +3042,20 @@ class StrategyGUI(tk.Tk):
 
         fields = {}
 
-        # Row 0: 股票代號（不允許改）
+        # Row 0: 股票代號（readonly）
         ttk.Label(win, text="股票代號", width=10, anchor="e").grid(row=0, column=0, padx=8, pady=4, sticky="e")
         ttk.Label(win, text=f"{tx.stock_id} {tx.stock_name}", foreground="#555", font=("Segoe UI", 9, "bold")
                   ).grid(row=0, column=1, padx=8, pady=4, sticky="w")
 
-        # Row 1: 買/賣（action，不允許改）
+        # Row 1: 買/賣（可切換 BUY↔SELL）V0.9.4 phase2.3 fix: 改為 Combobox
         ttk.Label(win, text="買/賣", width=10, anchor="e").grid(row=1, column=0, padx=8, pady=4, sticky="e")
-        ttk.Label(win, text="買入" if tx.action == "BUY" else "賣出", foreground="#0070c0" if tx.action == "BUY" else "#c00000",
-                  font=("Segoe UI", 9, "bold")).grid(row=1, column=1, padx=8, pady=4, sticky="w")
+        v = tk.StringVar(value=tx.action)  # "BUY" or "SELL"
+        action_cbox = ttk.Combobox(win, textvariable=v, values=["BUY", "SELL"],
+                                   state="readonly", width=8)
+        action_cbox.grid(row=1, column=1, padx=8, pady=4, sticky="w")
+        fields["action"] = v
 
-        # Row 2: 交易日期（entry + 萬年曆按鈕）V0.9.4 phase2.3
+        # Row 2: 交易日期（entry + 萬年曆按鈕）
         ttk.Label(win, text="交易日期", width=10, anchor="e").grid(row=2, column=0, padx=8, pady=4, sticky="e")
         date_frame = ttk.Frame(win)
         date_frame.grid(row=2, column=1, padx=8, pady=4, sticky="w")
@@ -3059,11 +3073,10 @@ class StrategyGUI(tk.Tk):
         ttk.Entry(win, textvariable=v, width=22).grid(row=3, column=1, padx=8, pady=4, sticky="w")
         fields["shares"] = v
 
-        # Row 4: 價格（不允許改 BUY 的 price=0 股利）
+        # Row 4: 價格（支援 price=0 股利配發 BUY）
         ttk.Label(win, text="價格", width=10, anchor="e").grid(row=4, column=0, padx=8, pady=4, sticky="e")
         v = tk.StringVar(value=str(tx.price))
-        price_entry = ttk.Entry(win, textvariable=v, width=22)
-        price_entry.grid(row=4, column=1, padx=8, pady=4, sticky="w")
+        ttk.Entry(win, textvariable=v, width=22).grid(row=4, column=1, padx=8, pady=4, sticky="w")
         fields["price"] = v
 
         # Row 5: 備註
@@ -3077,34 +3090,48 @@ class StrategyGUI(tk.Tk):
                               foreground="#444", font=("Segoe UI", 9))
         est_label.grid(row=6, column=0, columnspan=2, padx=8, pady=(10, 4), sticky="w")
 
-        # fee/tax 自動重算（不改手動 fee 欄位，直接由 add_buy/add_sell 重新算）
-        # 股數/價格改變 → 重算
+        # fee/tax 自動重算（當 action / shares / price 改變時）V0.9.4 phase2.3
+        def _recalc(action, shares, price, label):
+            try:
+                if shares <= 0:
+                    label.config(text="（ fee / 證交稅將自動重算）")
+                    return
+                if price == 0 and action == "BUY":
+                    label.config(text="股利配發：手續費 0 元（fee/tax 將自動更新）")
+                    return
+                if price <= 0:
+                    label.config(text="（ fee / 證交稅將自動重算）")
+                    return
+                from portfolio import estimate_total_cost
+                est = estimate_total_cost(action, shares, price, self.portfolio.broker_discount)
+                if action == "BUY":
+                    label.config(text=f"預估手續費：{est['fee']:,.2f} 元（fee/tax 將自動更新）")
+                else:
+                    label.config(text=f"預估成本：手續費 {est['fee']:,.2f} + 證交稅 {est['tax']:,.2f} = 共 {est['total']:,.2f} 元")
+            except ValueError:
+                label.config(text="（ fee / 證交稅將自動重算）")
+
         def on_change(*_):
+            action = fields["action"].get()
             try:
                 shares = float(fields["shares"].get() or 0)
                 price = float(fields["price"].get() or 0)
-                if shares > 0 and price > 0:
-                    from portfolio import estimate_total_cost
-                    est = estimate_total_cost(tx.action, shares, price, self.portfolio.broker_discount)
-                    if tx.action == "BUY":
-                        est_label.config(text=f"預估手續費：{est['fee']:,.2f} 元（fee/tax 將自動更新）")
-                    else:
-                        est_label.config(text=f"預估成本：手續費 {est['fee']:,.2f} + 證交稅 {est['tax']:,.2f} = 共 {est['total']:,.2f} 元")
-                else:
-                    est_label.config(text="（ fee / 證交稅將自動重算）")
             except ValueError:
-                est_label.config(text="（ fee / 證交稅將自動重算）")
+                shares, price = 0.0, 0.0
+            _recalc(action, shares, price, est_label)
 
-        for k in ("shares", "price"):
+        for k in ("action", "shares", "price"):
             fields[k].trace_add("write", on_change)
+        on_change()  # 初始顯示一次
 
         def on_submit():
             try:
+                tx.action = fields["action"].get()  # 可能 BUY↔SELL
                 tx.trade_date = fields["trade_date"].get().strip()
                 tx.shares = float(fields["shares"].get())
                 tx.price = float(fields["price"].get())
                 tx.note = fields["note"].get().strip()
-                # fee / tax 自動重算
+                # fee / tax 自動重算（以新的 action 為準）
                 if tx.action == "BUY":
                     from portfolio import calc_fee
                     tx.fee = calc_fee(tx.shares, tx.price, self.portfolio.broker_discount)
@@ -3114,7 +3141,7 @@ class StrategyGUI(tk.Tk):
                     tx.fee = calc_fee(tx.shares, tx.price, self.portfolio.broker_discount)
                     tx.tax = calc_tax(tx.shares, tx.price)
                 self.portfolio.update_transaction(tx)
-                self.logger.log(f"✏️ 交易 #{tx_id} 已更新")
+                self.logger.log(f"✏️ 交易 #{tx_id} 已更新（{tx.action}）")
                 win.destroy()
                 self._refresh_portfolio_view()
             except Exception as e:
