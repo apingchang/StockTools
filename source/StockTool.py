@@ -2059,14 +2059,17 @@ class _CalendarDialog:
             row = (first_wd + d - 1) // 7
             col = (first_wd + d - 1) % 7
             date_str = f"{year:04d}-{month:02d}-{d:02d}"
-            btn = ttk.Button(self._day_frame, text=str(d), width=3,
-                             command=lambda ds=date_str: self._select(ds))
+            btn = tk.Button(self._day_frame, text=str(d), width=4, height=1,
+                            font=("Segoe UI", 9),
+                            command=lambda ds=date_str: self._select(ds))
             btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
             wd = (first_wd + d - 1) % 7
             if wd == 5:
-                btn.config(foreground="#0070c0")
+                btn.config(foreground="#0070c0", bg="#f0f4ff")   # 週六：藍字淡底
             elif wd == 6:
-                btn.config(foreground="#c00000")
+                btn.config(foreground="#c00000", bg="#fff0f0")   # 週日：紅字淡底
+            else:
+                btn.config(foreground="#222222", bg="#f5f5f5")   # 平日：深灰
         for c in range(7):
             self._day_frame.columnconfigure(c, weight=1)
 
