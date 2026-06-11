@@ -1,14 +1,24 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║                          台灣股市量化選股系統 v0.9.3                             ║
+║                          台灣股市量化選股系統 v0.9.4                             ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-V0.9.3
+V0.9.4
 【版本資訊】
-Version: v0.9.3-HOTFIX
-最後更新: 2026-06-08 (Asia/Taipei)
+Version: v0.9.4
+最後更新: 2026-06-11 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.4 更新內容】2026-06-11
+════════════════════════════════════════════════════════════════════════════════
+Phase 2.3 — 買賣記錄 5 項更新：
+1. 股票股利配發（price=0）支援
+2. 萬年曆日期挑選（_CalendarDialog，純 Tkinter 原生）
+3. 成本加計手續費 + 證交稅（Treeview 新增「證交稅」欄）
+4. 策略參數設定支援券商折扣（broker_discount，預設 1.0）
+5. 交易明細可編輯（✏️編輯，action/shares/price/date 皆可改）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.3 緊急修正內容】2026-06-08
@@ -278,7 +288,7 @@ class GuiLogger:
 def build_session() -> requests.Session:
     s = requests.Session()
     s.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.9.3-GUI",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.9.4-GUI",
         "Accept": "application/json,text/plain,*/*"
     })
     return s
@@ -1491,7 +1501,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     s = build_session()
 
     logger.log("=" * 60)
-    logger.log("🚀 StockTool v0.9.3 開始執行")
+    logger.log("🚀 StockTool v0.9.4 開始執行")
     logger.log(f"   評分系統: {'多因子評分' if cfg.use_enhanced_score else '簡易評分'}")
     logger.log(f"   技術指標: 強化版 (MTF={cfg.use_mtf_confirmation}, 背離={cfg.use_divergence_detection})")
     logger.log("=" * 60)
@@ -1647,7 +1657,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
             logger.log(f"❌ Excel 選股失敗：{e}")
             return
 
-        # ✅ v0.9.3 Excel 清單強制買點模式
+        # ✅ v0.9.4 Excel 清單強制買點模式
         if cfg.excel_force_buy:
             logger.log("   📊 啟用 Excel 清單強制買點模式")
             logger.log("   ※ 不經過技術買點過濾（買點強制設為 True）")
@@ -1658,7 +1668,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     #tech_all, tech_today, buy_today = run_tech(cfg, s, tech_codes, logger, cfg.history_months)
     tech_all, tech_today, buy_today = run_tech(cfg, s, tech_codes, logger, cfg.history_months)
 
-    # ✅ v0.9.3 Excel 清單強制買點模式：將買點強制設為 True
+    # ✅ v0.9.4 Excel 清單強制買點模式：將買點強制設為 True
     if cfg.use_excel_stock_list and cfg.excel_force_buy:
         if not tech_all.empty:
             tech_all["買點"] = True
@@ -2238,7 +2248,7 @@ class StrategyGUI(tk.Tk):
         ttk.Checkbutton(source_frame, text="使用 Excel 股票清單", variable=self.use_excel_var).pack(anchor="w")
         self._add_entry(source_frame, "Excel 檔案", "excel_stock_file", tk.StringVar, self.cfg.excel_stock_file)
 
-        # ✅ v0.9.3 Excel 清單強制買點模式
+        # ✅ v0.9.4 Excel 清單強制買點模式
         self.excel_force_buy_var = tk.BooleanVar(value=self.cfg.excel_force_buy)
         ttk.Checkbutton(
             source_frame,
@@ -3172,7 +3182,7 @@ class StrategyGUI(tk.Tk):
     def _on_run(self):
         self.run_btn.config(state="disabled")
         self.console.insert("end", "=" * 60 + "\n")
-        self.console.insert("end", "🚀 StockTool v0.9.3 開始執行\n")
+        self.console.insert("end", "🚀 StockTool v0.9.4 開始執行\n")
         self.console.insert("end", "=" * 60 + "\n")
         self.console.see("end")
 
