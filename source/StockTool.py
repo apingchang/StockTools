@@ -1972,12 +1972,15 @@ class _CalendarDialog:
 
     def __init__(self, parent, initial: str = ""):
         self.result: Optional[str] = None
+        self._done = tk.BooleanVar(value=False)  # V0.9.4 phase2.3 fix: 改用 wait_variable() blocking
+
         self.win = tk.Toplevel(parent)
         self.win.withdraw()
         self.win.title("挑選日期")
         self.win.resizable(False, False)
         self.win.transient(parent)
         self.win.grab_set()
+        self.win.protocol("WM_DELETE_WINDOW", self._on_close)  # 處理 X 按鈕
 
         if initial:
             try:
@@ -1989,18 +1992,12 @@ class _CalendarDialog:
 
         self._build()
         self.win.deiconify()
-        # V0.9.4 phase2.3 fix: 改用 non-blocking 方式，等視窗可見後再非阻斷等待
-        # wait_visibility() 確保視窗已完整 render；_poll_closed() 用 after() 輪詢
-        # 而不是直接用 wait_window()（可能在某些環境下 freeze 主事件迴圈）
-        self._poll_count = 0
-
-        def poll():
-            self._poll_count += 1
-            if self._poll_count > 150 or not self.win.winfo_exists():
-                return
-            self.win.after(100, poll)
-
-        self.win.after(50, poll)
+        # V0.9.4 phase2.3 fix:
+        # 用 wait_variable() 阻塞（blocking but GUI still responsive because
+        # grab_set() makes win modal + wait_variable yields to event loop）。
+        # wait_variable 只在 _done.set(True) 時 unblock。
+        self.win.wait_variable(self._done)
+        self.win.destroy()
 
     def _build(self):
         win = self.win
@@ -2065,11 +2062,15 @@ class _CalendarDialog:
 
     def _select(self, date_str: str):
         self.result = date_str
-        self.win.destroy()
+        self._done.set(True)   # unblock wait_variable()
 
     def _cancel(self):
         self.result = None
-        self.win.destroy()
+        self._done.set(True)   # unblock wait_variable()
+
+    def _on_close(self):
+        # X 按鈕：視同取消
+        self._cancel()
 
     @staticmethod
     def pick(parent, initial: str = "") -> Optional[str]:
