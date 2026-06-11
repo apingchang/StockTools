@@ -2683,6 +2683,7 @@ class StrategyGUI(tk.Tk):
         self._positions_tree.configure(yscrollcommand=pos_scroll.set)
         self._positions_tree.pack(side="left", fill="both", expand=True)
         pos_scroll.pack(side="right", fill="y")
+        self._positions_tree.bind("<<TreeviewSelect>>", self._on_position_selected)
 
         # 下方：交易明細 Treeview
         tx_frame = ttk.LabelFrame(parent, text="📋 交易明細", padding=4)
@@ -2707,6 +2708,133 @@ class StrategyGUI(tk.Tk):
         ttk.Button(btn_frame, text="🔄 重新整理", command=self._refresh_portfolio_view).pack(side="left", padx=2)
         ttk.Button(btn_frame, text="✏️ 編輯", command=self._open_edit_tx_dialog).pack(side="left", padx=2)  # V0.9.4 phase2.3
         ttk.Button(btn_frame, text="📤 匯出 Excel", command=self._export_portfolio_excel).pack(side="right", padx=2)
+
+    def _on_position_selected(self, event):
+        """持倉明細任一列被點擊 → 顯示該股票完整統計"""
+        sel = self._positions_tree.selection()
+        if not sel:
+            return
+        item = sel[0]
+        vals = self._positions_tree.item(item, "values")
+        # vals: (代號, 名稱, 股數, 均價, 現價, 市值, 未實現損益, 報酬率%, 已實現損益)
+        stock_id = str(vals[0]).strip()
+        self._show_position_detail(stock_id)
+
+    def _show_position_detail(self, stock_id: str):
+        """顯示指定股票的完整統計視窗（V0.9.4 phase2.3）"""
+        # 抓所有該股票的 transaction
+        txs = self.portfolio.list_transactions()
+        stock_txs = [t for t in txs if t.stock_id == stock_id]
+        if not stock_txs:
+            return
+
+        stock_name = stock_txs[0].stock_name or stock_id
+        buys = [t for t in stock_txs if t.action == "BUY"]
+        sells = [t for t in stock_txs if t.action == "SELL"]
+
+        # 計算總手續費、總證交稅、總成本（含費）
+        total_fee = sum(t.fee for t in stock_txs)
+        total_tax = sum(t.tax for t in stock_txs)
+
+        # 總買入成本（含手續費）
+        total_buy_cost = sum(t.shares * t.price + t.fee for t in buys)
+        # 總賣出收入（扣手續費+證交稅）
+        total_sellgross = sum(t.shares * t.price - t.fee - t.tax for t in sells)
+        # 已實現損益 = 賣出淨收入 - 買入總成本（均攤到每次賣出）
+        realized_pl = total_sellgross - (sum(t.shares * t.price for t in buys) if not sells else
+            sum(t.shares * t.price for t in sells) * (sum(t.shares * t.price for t in buys) /
+            sum(t.shares * t.price for t in buys) if buys else 0) - total_buy_cost)
+        # 簡化：已實現损益 = 累計賣出净收入 - 累計買入成本（按比例攤）
+        buy_cost_excl_fee = sum(t.shares * t.price for t in buys)
+        sell_net = sum(t.shares * t.price - t.fee - t.tax for t in sells)
+        realized_pl = sell_net - buy_cost_excl_fee if sells else 0.0
+
+        # 平均成本
+        total_shares = sum(t.shares for t in buys) - sum(t.shares for t in sells)
+        avg_cost = buy_cost_excl_fee / sum(t.shares for t in buys) if buys else 0
+
+        # 現價（從 current_prices 抓）
+        cur_price = self._current_prices.get(stock_id, 0.0)
+        cur_market_value = total_shares * cur_price
+        unrealized_pl = (cur_price - avg_cost) * total_shares if total_shares > 0 else 0.0
+
+        win = tk.Toplevel(self)
+        win.title(f"📊 {stock_id} {stock_name} — 統計明細")
+        win.geometry("520x480")
+        win.transient(self)
+        win.grab_set()
+
+        # 標題
+        tk.Label(win, text=f"{stock_id}  {stock_name}", font=("Segoe UI", 12, "bold")
+                ).pack(pady=(12, 4))
+        tk.Label(win, text=f"共 {len(stock_txs)} 筆交易（買入 {len(buys)} 筆 / 賣出 {len(sells)} 筆）",
+                font=("Segoe UI", 9), foreground="#555").pack(pady=(0, 12))
+
+        # 統計 Frame
+        stats_frame = tk.Frame(win)
+        stats_frame.pack(fill="x", padx=20)
+
+        def stat_row(parent, label, value, row, color="black"):
+            tk.Label(parent, text=label, font=("Segoe UI", 10),
+                    anchor="e", width=18).grid(row=row, column=0, padx=4, pady=3, sticky="e")
+            tk.Label(parent, text=value, font=("Segoe UI", 10, "bold"),
+                    anchor="w", foreground=color).grid(row=row, column=1, padx=4, pady=3, sticky="w")
+
+        def section(parent, label, row):
+            tk.Label(parent, text=label, font=("Segoe UI", 10, "bold"),
+                    foreground="#0070c0").grid(row=row, column=0, columnspan=2, pady=(10, 2), sticky="w")
+
+        r = 0
+        section(stats_frame, "【持有概況】", r); r += 1
+        stat_row(stats_frame, "目前持有股數", f"{total_shares:,.0f} 股", r); r += 1
+        stat_row(stats_frame, "平均成本（含費用前）", f"{avg_cost:,.4f} 元", r); r += 1
+        stat_row(stats_frame, "目前現價", f"{cur_price:,.2f} 元", r); r += 1
+        stat_row(stats_frame, "市值", f"{cur_market_value:,.2f} 元", r); r += 1
+        unreal_color = "#0a7d2c" if unrealized_pl >= 0 else "#c00000"
+        stat_row(stats_frame, "未實現損益", f"{unrealized_pl:+,.2f} 元", r, unreal_color); r += 1
+
+        r += 1  # 空行
+        section(stats_frame, "【費用累計】", r); r += 1
+        stat_row(stats_frame, "總手續費", f"{total_fee:,.2f} 元", r); r += 1
+        stat_row(stats_frame, "總證交稅", f"{total_tax:,.2f} 元", r); r += 1
+        stat_row(stats_frame, "總買入成本（含費）", f"{total_buy_cost:,.2f} 元", r); r += 1
+
+        if sells:
+            r += 1
+            section(stats_frame, "【已實現損益】", r); r += 1
+            stat_row(stats_frame, "總賣出淨收入", f"{sell_net:,.2f} 元", r); r += 1
+            stat_row(stats_frame, "已實現損益", f"{realized_pl:+,.2f} 元", r,
+                    "#0a7d2c" if realized_pl >= 0 else "#c00000"); r += 1
+
+        # 該股交易明細（mini table）
+        tk.Label(win, text="【交易明細】", font=("Segoe UI", 10, "bold"),
+                foreground="#0070c0").pack(pady=(10, 4))
+
+        mini_frame = tk.Frame(win)
+        mini_frame.pack(fill="both", expand=True, padx=20, pady=(0, 12))
+        mini_tree = ttk.Treeview(mini_frame, columns=("日期", "買/賣", "股數", "價格", "手續費", "證交稅", "備註"),
+                                 show="headings", height=8)
+        for col, w in zip(mini_tree["columns"], [90, 40, 60, 60, 55, 55, 80]):
+            mini_tree.heading(col, text=col)
+            mini_tree.column(col, width=w, anchor="e" if col not in ("日期", "買/賣", "備註") else "w")
+        mini_tree.pack(side="left", fill="both", expand=True)
+        mini_scroll = ttk.Scrollbar(mini_frame, orient="vertical", command=mini_tree.yview)
+        mini_tree.configure(yscrollcommand=mini_scroll.set)
+        mini_scroll.pack(side="right", fill="y")
+
+        for t in sorted(stock_txs, key=lambda x: x.trade_date):
+            mini_tree.insert("", "end", values=(
+                t.trade_date,
+                "買" if t.action == "BUY" else "賣",
+                f"{t.shares:,.0f}",
+                f"{t.price:,.2f}",
+                f"{t.fee:,.2f}",
+                f"{t.tax:,.2f}",
+                t.note or "",
+            ))
+
+        tk.Button(win, text="關閉", font=("Segoe UI", 10), command=win.destroy
+                 ).pack(pady=(0, 12))
 
     def _refresh_portfolio_view(self):
         """重新查詢 DB，更新總覽 + 兩個 Treeview"""
