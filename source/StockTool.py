@@ -2798,7 +2798,7 @@ class StrategyGUI(tk.Tk):
         date_entry = ttk.Entry(date_frame, textvariable=v, width=14)
         date_entry.pack(side="left")
         ttk.Button(date_frame, text="📅", width=3, padding="2px",
-                   command=lambda: self._pick_date(win, v, date_entry)
+                   command=lambda v=v, de=date_entry: self._pick_date(win, v, de)
                    ).pack(side="left", padx=(4, 0))
         fields["trade_date"] = v
 
@@ -2913,7 +2913,7 @@ class StrategyGUI(tk.Tk):
         date_entry = ttk.Entry(date_frame, textvariable=v, width=14)
         date_entry.pack(side="left")
         ttk.Button(date_frame, text="📅", width=3, padding="2px",
-                   command=lambda: self._pick_date(win, v, date_entry)
+                   command=lambda v=v, de=date_entry: self._pick_date(win, v, de)
                    ).pack(side="left", padx=(4, 0))
         fields["trade_date"] = v
 
@@ -3148,7 +3148,7 @@ class StrategyGUI(tk.Tk):
         date_entry = ttk.Entry(date_frame, textvariable=v, width=14)
         date_entry.pack(side="left")
         ttk.Button(date_frame, text="📅", width=3, padding="2px",
-                   command=lambda: self._pick_date(win, v, date_entry)
+                   command=lambda v=v, de=date_entry: self._pick_date(win, v, de)
                    ).pack(side="left", padx=(4, 0))
         fields["trade_date"] = v
 
