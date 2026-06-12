@@ -829,45 +829,35 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     eps["年度"] = pd.to_numeric(eps["年度"], errors="coerce")
     eps["季別"] = pd.to_numeric(eps["季別"], errors="coerce")
     eps["EPS"] = pd.to_numeric(eps["EPS"], errors="coerce")
+    eps = eps.dropna(subset=["年度", "季別", "股票代號"])
 
-    latest_year = eps["年度"].max()
-    latest_q = eps.loc[eps["年度"] == latest_year, "季別"].max()
+    if eps.empty:
+        return pd.DataFrame()
+
+    # 找「覆蓋率達標」的最新季，避免年初時只取到少數 Q4 公告的公司
+    # 邏輯：以最大覆蓋數為基準，要求 >= 80% 才採用
+    year_q_counts = eps.groupby(["年度", "季別"]).size().reset_index(name='count')
+    max_count = int(year_q_counts['count'].max())
+    threshold = max_count * 0.8
+    candidates = year_q_counts[year_q_counts['count'] >= threshold]
+
+    if candidates.empty:
+        # 全部都不達標（罕見），退而求其次用最大覆蓋那一季
+        latest_row = year_q_counts.sort_values('count', ascending=False).iloc[0]
+    else:
+        latest_row = candidates.sort_values(['年度', '季別'], ascending=False).iloc[0]
+
+    latest_year = int(latest_row['年度'])
+    latest_q = int(latest_row['季別'])
+    latest_count = int(latest_row['count'])
+    coverage_pct = latest_count / max_count * 100
+
+    print(f"📊 EPS 最新季: {latest_year}Q{latest_q}（{latest_count}/{max_count} 筆，覆蓋率 {coverage_pct:.0f}%）")
 
     cur = eps[(eps["年度"] == latest_year) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].rename(
         columns={"EPS": "EPS本期"})
     prev = eps[(eps["年度"] == latest_year - 1) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].rename(
         columns={"EPS": "EPS去年"})
-
-    # ========== DEBUG: 查看所有年度資料 ==========
-    print("\n" + "=" * 60)
-    print("🔍 [DEBUG] EPS 年度資料分布")
-    print("=" * 60)
-
-    # 顯示所有年度
-    years = eps["年度"].dropna().unique()
-    years.sort()
-    print(f"📊 資料中的年度: {years}")
-
-    # 顯示每個年度的季別
-    for year in years:
-        quarters = eps[eps["年度"] == year]["季別"].dropna().unique()
-        quarters.sort()
-        print(f"   {int(year)}年: Q{quarters}")
-
-    # 顯示資料筆數統計
-    print(f"\n📊 各年度季別資料筆數:")
-    year_q_counts = eps.groupby(["年度", "季別"]).size()
-    for (year, q), count in year_q_counts.items():
-        print(f"   {int(year)}年 Q{int(q)}: {count} 筆")
-
-    # 顯示前幾筆原始資料範例
-    print(f"\n📋 原始資料範例 (前5筆):")
-    for idx in range(min(5, len(eps))):
-        row = eps.iloc[idx]
-        print(f"   {row['年度']}年 Q{row['季別']} | {row['股票代號']} | EPS: {row['EPS']}")
-
-    print("=" * 60 + "\n")
-    # ========== DEBUG 結束 ==========
 
     out = cur.merge(prev, on="股票代號", how="left")
 
@@ -880,20 +870,9 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     out["EPSYoY_顯示(%)"] = out["EPSYoY_raw"].apply(
         lambda x: round(x * 100, 2) if pd.notna(x) else pd.NA
     )
-    out["EPS季別"] = f"{int(latest_year)}Q{int(latest_q)}"
+    out["EPS季別"] = f"{latest_year}Q{latest_q}"
 
-    # ========== DEBUG 訊息 ==========
-    print(f"\n📊 EPS 資料筆數: {len(out)}")
-    print(f"📊 有 EPS YoY 資料的筆數: {out['EPSYoY_raw'].notna().sum()}")
-
-    sample = out[out['EPSYoY_raw'].notna()].head(5)
-    if len(sample) > 0:
-        print(f"\n📋 EPS YoY 範例:")
-        for _, row in sample.iterrows():
-            print(f"   {row['股票代號']} | 本期EPS: {row['EPS本期']} | YoY: {row['EPSYoY_顯示(%)']}%")
-    else:
-        print(f"\n⚠️ 沒有找到任何有 YoY 資料的股票！")
-    # ========== DEBUG 結束 ==========
+    print(f"📊 EPS 計算結果: 本期 {len(out)} 筆，有 YoY 資料 {out['EPSYoY_raw'].notna().sum()} 筆")
 
     return out[["股票代號", "EPS季別", "EPS本期", "EPSYoY_raw", "EPSYoY_顯示(%)"]].drop_duplicates(
         "股票代號").reset_index(drop=True)
