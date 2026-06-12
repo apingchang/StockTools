@@ -8,6 +8,10 @@ __pycache__/
 # Local DB / cache
 portfolio.db
 portfolio.db-journal
+eps_history.db
+eps_history.db-journal
+stocktool_config.json
+*.db.bak
 cache/
 
 # PyCharm / IntelliJ

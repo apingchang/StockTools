@@ -123,6 +123,7 @@ DEFAULT_CONFIG = {
     "simple_min_eps_yoy": -999.0,
     "simple_min_eps": -999.0,
     "simple_max_pe": 999.0,
+    "eps_history_db": "eps_history.db",
     "use_mtf_confirmation": True,
     "use_divergence_detection": True,
     "volume_surge_multiplier": 2.0,
@@ -222,6 +223,7 @@ class StrategyConfig:
     simple_min_eps_yoy: float = -999.0
     simple_min_eps: float = -999.0
     simple_max_pe: float = 999.0
+    eps_history_db: str = "eps_history.db"
     # V0.9.4 phase2.3: 券商折扣（1.0 = 無折扣，0.6 = 6折）
     broker_discount: float = 1.0
     use_mtf_confirmation: bool = True
@@ -377,6 +379,83 @@ def roc_to_ad(roc_str: str):
     mm = int(parts[1])
     dd = int(parts[2])
     return date(yy, mm, dd)
+
+
+# ==========================================================
+# V0.9.4 phase4: EPS 歷史庫（補抓不到去年同期的解法）
+# 每日把最新一季 EPS 存進 SQLite，累積一年後 fetch_eps_latest 就能算 YoY
+# ==========================================================
+EPS_HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS eps_history (
+    stock_id    TEXT    NOT NULL,
+    year        INTEGER NOT NULL,
+    quarter     INTEGER NOT NULL,
+    eps         REAL,
+    source      TEXT,
+    fetched_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (stock_id, year, quarter)
+);
+CREATE INDEX IF NOT EXISTS idx_eps_period ON eps_history(year, quarter);
+"""
+
+
+def _init_eps_history_db(db_path: str):
+    """初始化/建立 EPS 歷史庫（不重複執行也不會壞）"""
+    import sqlite3
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(EPS_HISTORY_SCHEMA)
+        conn.commit()
+
+
+def _upsert_eps_history(db_path: str, rows: list):
+    """
+    rows: [(stock_id, year, quarter, eps, source), ...]
+    用 REPLACE 策略：新資料覆蓋舊的（讓 CSV 更新時自動修正）
+    """
+    import sqlite3
+    if not rows:
+        return 0
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            """INSERT OR REPLACE INTO eps_history
+               (stock_id, year, quarter, eps, source)
+               VALUES (?, ?, ?, ?, ?)""",
+            rows,
+        )
+        conn.commit()
+    return len(rows)
+
+
+def _query_eps_history(db_path: str, year: int, quarter: int) -> pd.DataFrame:
+    """查詢指定 (year, quarter) 的歷史 EPS"""
+    import sqlite3
+    with sqlite3.connect(db_path) as conn:
+        df = pd.read_sql_query(
+            "SELECT stock_id, year, quarter, eps FROM eps_history WHERE year = ? AND quarter = ?",
+            conn, params=(year, quarter),
+        )
+    if not df.empty:
+        df["stock_id"] = df["stock_id"].astype(str).str.strip()
+    return df
+
+
+def _eps_history_stats(db_path: str) -> dict:
+    """回傳歷史庫摘要（給 GUI 狀態列用）"""
+    import sqlite3
+    if not os.path.exists(db_path):
+        return {"total": 0, "periods": 0, "latest": None}
+    with sqlite3.connect(db_path) as conn:
+        total = conn.execute("SELECT COUNT(*) FROM eps_history").fetchone()[0]
+        periods = conn.execute("SELECT COUNT(DISTINCT year*10+quarter) FROM eps_history").fetchone()[0]
+        latest = conn.execute(
+            "SELECT year, quarter, COUNT(*) FROM eps_history "
+            "ORDER BY year DESC, quarter DESC LIMIT 1"
+        ).fetchone()
+    return {
+        "total": total,
+        "periods": periods,
+        "latest": f"{latest[0]}Q{latest[1]} ({latest[2]}筆)" if latest else None,
+    }
 
 
 def format_for_output(df: pd.DataFrame, sort_by_code: bool = True) -> pd.DataFrame:
@@ -854,10 +933,42 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
 
     print(f"📊 EPS 最新季: {latest_year}Q{latest_q}（{latest_count}/{max_count} 筆，覆蓋率 {coverage_pct:.0f}%）")
 
+    # ========== V0.9.4 phase4: 寫入歷史庫 ==========
+    # 每天都存最新一季，累積一年後 fetch_eps_latest 就能算 YoY
+    try:
+        _init_eps_history_db(cfg.eps_history_db)
+        rows_to_save = [
+            (str(r["股票代號"]).strip(), int(r["年度"]), int(r["季別"]),
+             float(r["EPS"]) if pd.notna(r["EPS"]) else None, "twse_csv")
+            for _, r in eps.iterrows()
+        ]
+        saved = _upsert_eps_history(cfg.eps_history_db, rows_to_save)
+        stats = _eps_history_stats(cfg.eps_history_db)
+        print(f"💾 歷史庫: 本次存 {saved} 筆，總累計 {stats['total']} 筆 / {stats['periods']} 季")
+    except Exception as e:
+        print(f"⚠️ 寫入歷史庫失敗（不影響本函式結果）：{e}")
+
     cur = eps[(eps["年度"] == latest_year) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].rename(
         columns={"EPS": "EPS本期"})
-    prev = eps[(eps["年度"] == latest_year - 1) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].rename(
+
+    # ========== V0.9.4 phase4: 從歷史庫查去年同期 ==========
+    # TWSE CSV 只保留最新一季，必須靠歷史庫才能跨年比對
+    prev_year = latest_year - 1
+    prev_from_csv = eps[(eps["年度"] == prev_year) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].rename(
         columns={"EPS": "EPS去年"})
+    prev_from_db = _query_eps_history(cfg.eps_history_db, prev_year, latest_q)
+    if not prev_from_db.empty:
+        prev_from_db = prev_from_db.rename(columns={"eps": "EPS去年"})[["stock_id", "EPS去年"]]
+        prev_from_db = prev_from_db.rename(columns={"stock_id": "股票代號"})
+        # CSV 與 DB 合併，CSV 優先（更新）
+        prev = prev_from_csv.merge(prev_from_db, on="股票代號", how="outer", suffixes=("_csv", "_db"))
+        prev["EPS去年"] = prev["EPS去年_csv"].combine_first(prev["EPS去年_db"])
+        prev = prev[["股票代號", "EPS去年"]]
+        print(f"📂 去年同期 {prev_year}Q{latest_q}: CSV {len(prev_from_csv)} 筆 + 歷史庫 {len(prev_from_db)} 筆 → 合併 {len(prev)} 筆")
+    else:
+        prev = prev_from_csv
+        if prev.empty:
+            print(f"⚠️ 去年同期 {prev_year}Q{latest_q} 沒有資料（CSV 無、歷史庫也無）→ YoY 將全 NA")
 
     out = cur.merge(prev, on="股票代號", how="left")
 
