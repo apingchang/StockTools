@@ -72,8 +72,8 @@ import time
 import queue
 import threading
 import warnings
-from dataclasses import dataclass, asdict
-from datetime import datetime, date
+from dataclasses import dataclass, asdict, field
+from datetime import datetime, date, timedelta
 from typing import Dict, Any, Tuple, Optional, List
 from itertools import product
 
@@ -162,6 +162,9 @@ DEFAULT_CONFIG = {
     "out_file_prefix": "選股報表",
     # V0.9.4 phase2.3: 交易成本設定（台股預設值）
     "broker_discount": 1.0,          # 券商折扣（1.0 = 無折扣，0.6 = 6折）
+    # V0.9.5: 手動選股 Preset
+    "manual_select_presets": {},
+    "manual_select_last_preset": None,
 }
 
 
@@ -262,6 +265,9 @@ class StrategyConfig:
     strong_pe_max: float = 30.0
     strong_price_min: float = 10.0
     out_file_prefix: str = "選股報表"
+    # V0.9.5: 手動選股 Preset
+    manual_select_presets: dict = field(default_factory=dict)
+    manual_select_last_preset: str = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -382,6 +388,71 @@ def roc_to_ad(roc_str: str):
 
 
 # ==========================================================
+
+
+# 股利歷史庫（跟 eps_history 同一風格）
+DIV_HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS dividend_history (
+    stock_id    TEXT    NOT NULL,
+    year        INTEGER NOT NULL,
+    cash        REAL,
+    stock       REAL,
+    source      TEXT,
+    fetched_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (stock_id, year)
+);
+CREATE INDEX IF NOT EXISTS idx_div_period ON dividend_history(year);
+"""
+
+def _init_div_history_db(db_path: str):
+    import sqlite3
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(DIV_HISTORY_SCHEMA)
+        conn.commit()
+
+def _upsert_div_history(db_path: str, rows: list):
+    """rows: [(stock_id, year, cash, stock, source), ...]"""
+    import sqlite3
+    if not rows:
+        return 0
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            """INSERT OR REPLACE INTO dividend_history
+               (stock_id, year, cash, stock, source)
+               VALUES (?, ?, ?, ?, ?)""",
+            rows,
+        )
+        conn.commit()
+    return len(rows)
+
+def _query_div_history(db_path: str, codes: list) -> dict:
+    """查詢多檔股票的所有年度股利 → {code: {year: {cash, stock}}}"""
+    import sqlite3
+    if not codes:
+        return {}
+    with sqlite3.connect(db_path) as conn:
+        placeholders = ",".join("?" * len(codes))
+        rows = conn.execute(
+            f"SELECT stock_id, year, cash, stock FROM dividend_history WHERE stock_id IN ({placeholders})",
+            codes,
+        ).fetchall()
+    result: Dict[str, Dict[int, Dict[str, float]]] = {}
+    for code, year, cash, stock in rows:
+        result.setdefault(str(code).strip(), {})
+        result[str(code).strip()][year] = {"cash": cash or 0.0, "stock": stock or 0.0}
+    return result
+
+def _div_history_stats(db_path: str) -> dict:
+    import sqlite3
+    if not os.path.exists(db_path):
+        return {"total": 0, "stocks": 0, "years": 0}
+    with sqlite3.connect(db_path) as conn:
+        total = conn.execute("SELECT COUNT(*) FROM dividend_history").fetchone()[0]
+        stocks = conn.execute("SELECT COUNT(DISTINCT stock_id) FROM dividend_history").fetchone()[0]
+        years = conn.execute("SELECT COUNT(DISTINCT year) FROM dividend_history").fetchone()[0]
+    return {"total": total, "stocks": stocks, "years": years}
+
+
 # V0.9.4 phase4: EPS 歷史庫（補抓不到去年同期的解法）
 # 每日把最新一季 EPS 存進 SQLite，累積一年後 fetch_eps_latest 就能算 YoY
 # ==========================================================
@@ -457,6 +528,519 @@ def _eps_history_stats(db_path: str) -> dict:
         "latest": f"{latest[0]}Q{latest[1]} ({latest[2]}筆)" if latest else None,
     }
 
+
+# ==========================================================
+# V0.9.5: 手動選股功能 - FinMind 資料拉取輔助
+# ==========================================================
+
+FINMIND_BASE = "https://api.finmindtrade.com/api/v4/data"
+
+# 手動選股進度（背景 thread 寫、UI thread 讀）
+_MS_PROGRESS = {"stage": "", "done": 0, "total": 0, "msg": ""}
+
+
+def _fetch_market_stock_list() -> pd.DataFrame:
+    """
+    從 TWSE / TPEx 抓全市場股票代號與名稱（當 pipeline 未執行時的 fallback）。
+    回傳 DataFrame：[股票代號, 股票名稱]
+    """
+    import sqlite3
+    # 優先用 eps_history.db 湊出名單（已有股票代號，快速）
+    db_path = "eps_history.db"
+    if os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path)
+            codes = pd.read_sql_query(
+                "SELECT DISTINCT stock_id FROM eps_history ORDER BY stock_id", conn)
+            conn.close()
+            if not codes.empty:
+                df = codes.copy()
+                df["股票名稱"] = ""
+                return df.rename(columns={"stock_id": "股票代號"})
+        except Exception:
+            pass
+
+    # TWSE / TPEx 上市股票清單（從 ISIN 頁面）
+    rows = []
+    for url in ["https://isin.twse.com.tw/isin/C_public.jsp?strMode=2",
+                 "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"]:
+        try:
+            r = requests.get(url, timeout=20, verify=False)
+            from io import StringIO
+            tables = pd.read_html(StringIO(r.text), header=0)
+            for t in tables:
+                if "有價證券代號及名稱" in t.columns:
+                    # 第一欄是「代號　名稱」混合，需用空白拆開
+                    combined = t["有價證券代號及名稱"].dropna().tolist()
+                    for item in combined:
+                        s = str(item).strip()
+                        # 格式：「1101　台泥」或「1101 台泥」
+                        parts = s.split(maxsplit=1)
+                        if len(parts) == 2 and parts[0].strip().isdigit() and len(parts[0].strip()) == 4:
+                            rows.append({"股票代號": parts[0].strip(), "股票名稱": parts[1].strip()})
+                    break  # 只處理第一張表
+        except Exception:
+            continue
+
+    if rows:
+        result = pd.DataFrame(rows).drop_duplicates("股票代號")
+        result["股票代號"] = result["股票代號"].astype(str).str.strip()
+        return result
+    return pd.DataFrame(columns=["股票代號", "股票名稱"])
+
+_FINMIND_PRICE_CACHE = {}   # {stock_id: {date: row}}
+_FINMIND_DIVIDEND_CACHE = {}  # {stock_id: {year: {cash, stock}}}
+
+
+def _finmind_get(dataset: str, stock_id: str, start: str, end: str, retry: int = 2) -> list:
+    """統一的 FinMind API 呼叫（含 429 回退）。"""
+    for attempt in range(retry + 1):
+        try:
+            r = requests.get(FINMIND_BASE, params={
+                "dataset": dataset,
+                "data_id": stock_id,
+                "start_date": start,
+                "end_date": end,
+            }, timeout=20)
+            if r.status_code == 429:
+                time.sleep(61)
+                continue
+            d = r.json()
+            return d.get("data", []) or []
+        except Exception:
+            if attempt < retry:
+                time.sleep(2)
+            return []
+    return []
+
+
+def _parse_roc_year(year_str: str) -> int:
+    """把 "113年第3季" → 2024（西元年）。民國年 = 西元年 - 1911。"""
+    import re
+    m = re.match(r"(\d+)年", str(year_str))
+    if m:
+        return int(m.group(1)) + 1911  # 錯誤：-1911；修正：+1911
+    return 0
+
+
+def _fetch_finmind_prices_batch(stock_ids: List[str],
+                                progress_callback=None) -> pd.DataFrame:
+    """
+    批次抓取股票現價（FinMind TaiwanStockPrice，支援 rate limit 回退）。
+    每批 10 個，間隔 0.35s，超過 300/h 會被擋 → 等 61s 再試。
+    progress_callback(n_done, n_total) 可傳進來做 UI 更新。
+    """
+    rows = []
+    end_date = datetime.now().strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+    total = len(stock_ids)
+    _MS_PROGRESS["stage"] = "股價"
+    _MS_PROGRESS["total"] = total
+
+    for i, code in enumerate(stock_ids):
+        code = str(code).strip()
+        if code in _FINMIND_PRICE_CACHE:
+            cached = _FINMIND_PRICE_CACHE[code]
+            if cached:
+                rows.append({"股票代號": code,
+                            "現價": cached.get("close"),
+                            "成交量_張": (cached.get("Trading_Volume", 0) or 0) / 1000})
+        else:
+            data = _finmind_get("TaiwanStockPrice", code, start_date, end_date)
+            if data:
+                latest = data[-1]
+                _FINMIND_PRICE_CACHE[code] = latest
+                rows.append({"股票代號": code,
+                            "現價": latest.get("close"),
+                            "成交量_張": (latest.get("Trading_Volume", 0) or 0) / 1000})
+            else:
+                _FINMIND_PRICE_CACHE[code] = None
+
+            # Rate limit：每小時最多 300 次 → 每次間隔 12s
+            # 實測 0.35s 可用（用 threading 並行），但避免一次打太多
+            _MS_PROGRESS["done"] = i + 1
+            if (i + 1) % 10 == 0 and progress_callback:
+                progress_callback(i + 1, total)
+            time.sleep(0.35)
+
+    return pd.DataFrame(rows) if rows else pd.DataFrame(
+        columns=["股票代號", "現價", "成交量_張"])
+
+
+def _fetch_finmind_dividend(stock_ids: List[str],
+                             db_path: str = "dividend_history.db",
+                             progress_callback=None,
+                             skip_remote: bool = False) -> pd.DataFrame:
+    """
+    取得近 3 年股利（先查 DB，沒有的才即時抓 FinMind 並寫回 DB）。
+    - skip_remote=True: DB 沒有的回 None，不抓 FinMind（避免 rate limit）
+    - 第一次跑：會 FinMind 抓一批 + 寫 DB
+    - 之後跑：只查 DB，不打網路
+    """
+    rows = []
+    current_year = datetime.now().year
+    start_date = f"{current_year - 2}-01-01"
+    end_date = f"{current_year}-12-31"
+
+    # 1. 先查 DB
+    _init_div_history_db(db_path)
+    cached = _query_div_history(db_path, [str(c).strip() for c in stock_ids])
+
+    # 2. 區分「DB 有的」跟「要即時抓的」
+    to_fetch = [str(c).strip() for c in stock_ids if str(c).strip() not in cached]
+    if skip_remote:
+        # 跳過 FinMind 抓取：DB 沒有的回 None（避免 rate limit）
+        to_fetch = []
+    fetch_rows: list = []
+    _MS_PROGRESS["stage"] = "股利"
+    _MS_PROGRESS["total"] = len(to_fetch)
+    for i, code in enumerate(to_fetch):
+        _MS_PROGRESS["done"] = i
+        data = _finmind_get("TaiwanStockDividend", code, start_date, end_date)
+        by_year: Dict[int, Dict[str, float]] = {}
+        import re as _re_div
+        for rec in data:
+            year_str = rec.get("year", "")
+            cash_raw = float(rec.get("CashEarningsDistribution") or 0)
+            stock_raw = float(rec.get("StockEarningsDistribution") or 0)
+            m_q = _re_div.match(r"(\d+)年第(\d+)季", year_str)
+            m_h1 = _re_div.match(r"(\d+)年前半年度", year_str)
+            m_h2 = _re_div.match(r"(\d+)年後半年度", year_str)
+            m_y = _re_div.match(r"^(\d+)年$", year_str)  # 純年（無季/半年度）
+            if m_q:
+                yr = int(m_q.group(1)) + 1911
+                by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
+                by_year[yr]["cash"] = max(by_year[yr]["cash"], cash_raw)
+                by_year[yr]["stock"] = max(by_year[yr]["stock"], stock_raw)
+            elif m_h1:
+                yr = int(m_h1.group(1)) + 1911
+                by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
+                by_year[yr]["cash"] += cash_raw
+                by_year[yr]["stock"] += stock_raw
+            elif m_h2:
+                yr = int(m_h2.group(1)) + 1911
+                by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
+                by_year[yr]["cash"] += cash_raw
+                by_year[yr]["stock"] += stock_raw
+            elif m_y:
+                yr = int(m_y.group(1)) + 1911
+                by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
+                by_year[yr]["cash"] = max(by_year[yr]["cash"], cash_raw)
+                by_year[yr]["stock"] = max(by_year[yr]["stock"], stock_raw)
+            else:
+                continue
+        # 寫入 DB
+        for yr, d in by_year.items():
+            fetch_rows.append((code, yr, d["cash"], d["stock"], "finmind"))
+        if (i + 1) % 10 == 0 and progress_callback:
+            progress_callback(i + 1, len(to_fetch))
+        time.sleep(0.35)
+    if fetch_rows:
+        _upsert_div_history(db_path, fetch_rows)
+        # 重新讀一次 DB 拿新資料
+        cached = _query_div_history(db_path, [str(c).strip() for c in stock_ids])
+
+    # 3. 組裝結果
+    for code in [str(c).strip() for c in stock_ids]:
+        by_year = cached.get(code, {})
+        this_yr = by_year.get(current_year, {})
+        last_yr = by_year.get(current_year - 1, {})
+        prev_yr = by_year.get(current_year - 2, {})
+        rows.append({
+            "股票代號": code,
+            f"{current_year}現金股利": this_yr.get("cash", 0.0),
+            f"{current_year}股票股利": this_yr.get("stock", 0.0),
+            f"{current_year - 1}現金股利": last_yr.get("cash", 0.0),
+            f"{current_year - 1}股票股利": last_yr.get("stock", 0.0),
+            f"{current_year - 2}現金股利": prev_yr.get("cash", 0.0),
+            f"{current_year - 2}股票股利": prev_yr.get("stock", 0.0),
+        })
+
+    return pd.DataFrame(rows) if rows else pd.DataFrame(
+        columns=["股票代號", f"{current_year}現金股利", f"{current_year}股票股利",
+                 f"{current_year - 1}現金股利", f"{current_year - 1}股票股利",
+                 f"{current_year - 2}現金股利", f"{current_year - 2}股票股利"])
+
+def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = "dividend_history.db") -> int:
+    """
+    背景抓取全市場股利寫入 DB（手動啟動用）。
+    回傳實際新增的股數。
+    """
+    _init_div_history_db(db_path)
+    cached = _query_div_history(db_path, [str(c).strip() for c in stock_ids])
+    to_fetch = [c for c in stock_ids if str(c).strip() not in cached]
+    if not to_fetch:
+        return 0
+    current_year = datetime.now().year
+    start_date = f"{current_year - 2}-01-01"
+    end_date = f"{current_year}-12-31"
+    fetch_rows: list = []
+    for code in to_fetch:
+        data = _finmind_get("TaiwanStockDividend", code, start_date, end_date)
+        for rec in data:
+            yr = _parse_roc_year(rec.get("year", ""))
+            if yr == 0:
+                continue
+            cash_raw = float(rec.get("CashEarningsDistribution") or 0)
+            stock_raw = float(rec.get("StockEarningsDistribution") or 0)
+            fetch_rows.append((code, yr, cash_raw, stock_raw, "finmind"))
+        time.sleep(0.35)
+    if fetch_rows:
+        _upsert_div_history(db_path, fetch_rows)
+    return len(to_fetch)
+
+
+
+def _run_manual_selection(
+    price_df: pd.DataFrame,      # 來自 pipeline 的股價資料 [股票代號, 股價, ...]
+    revenue_df: pd.DataFrame,     # 來自 pipeline 的營收資料 [股票代號, 累計營收YoY(%), ...]
+    eps_df: pd.DataFrame,         # 來自 pipeline 的 EPS 資料 [股票代號, EPS本期, ...]
+    filters: dict,
+    top_n: int = 500,
+) -> pd.DataFrame:
+    """
+    根據 filters 條件，從已知的市場股票中篩選並回傳結果。
+
+    filters 格式：
+        {
+            "min_rev_yoy": 10.0,          # 累計營收 YoY >= 此值（None = skip）
+            "min_pe": None,                # PE <= 此值（None = skip）
+            "min_price": None,             # 現價 >= 此值（None = skip）
+            "min_volume": None,            # 成交量(張) >= 此值（None = skip）
+            "min_bvps": None,             # 淨值 >= 此值（None = skip，暫不支援）
+            "min_cash_div": None,          # 今年現金股利 >= 此值（None = skip）
+            "min_stock_div": None,         # 今年股票股利 >= 此值（None = skip）
+            "min_last_cash_div": None,     # 去年現金股利 >= 此值（None = skip）
+            "min_last_stock_div": None,    # 去年股票股利 >= 此值（None = skip）
+            "sort_by": ["rev_yoy", "stock_div", "cash_div", "pe"],
+        }
+    """
+    # 1. 取得全市場股票代號與名稱
+    # 優先用 pipeline 的 price_df；若為空才 fallback 抓全市場名單
+    price_df = price_df.copy() if price_df is not None else pd.DataFrame()
+    if price_df.empty:
+        base = _fetch_market_stock_list()
+    else:
+        if "公司名稱_來源" in price_df.columns:
+            name_col = "公司名稱_來源"
+        else:
+            name_col = [c for c in price_df.columns if "名稱" in c or "name" in c.lower()]
+            name_col = name_col[0] if name_col else None
+
+        price_cols = ["股票代號"]
+        if name_col:
+            price_cols.append(name_col)
+        # 如果 cache 也有「股價」或「現價」也一起拉進來
+        for cc in ["股價", "現價", "成交量", "成交量_張", "漲跌"]:
+            if cc in price_df.columns and cc not in price_cols:
+                price_cols.append(cc)
+        base = price_df[price_cols].drop_duplicates("股票代號").copy()
+        base["股票代號"] = base["股票代號"].astype(str).str.strip()
+        if name_col:
+            base = base.rename(columns={name_col: "股票名稱"})
+        else:
+            base["股票名稱"] = ""
+        # 統一欄位名：「股價」→「現價」、「成交量_張」不變
+        if "股價" in base.columns and "現價" not in base.columns:
+            base = base.rename(columns={"股價": "現價"})
+
+    # 2. 取得現價：若 base 已有「現價」就用 cache，不抓 FinMind
+    if "現價" in base.columns:
+        # 已有現價（來自 cache），不重抓 FinMind
+        # cache 不一定有成交量，若沒有則先移除「成交量」條件
+        if "成交量_張" not in base.columns:
+            base["成交量_張"] = None  # None 表示 cache 沒資料
+        # 「漲跌」欄位只在 cache 才有，移到後面
+    else:
+        all_codes = base["股票代號"].tolist()
+        price_finmind = _fetch_finmind_prices_batch(all_codes)
+        if not price_finmind.empty:
+            base = base.merge(price_finmind, on="股票代號", how="left")
+        else:
+            base["現價"] = None
+            base["成交量_張"] = 0
+
+    # 3. 合併營收 YoY（容錯：空 df 跳過）
+    if not revenue_df.empty and "股票代號" in revenue_df.columns:
+        revenue_df = revenue_df.copy()
+        revenue_df["股票代號"] = revenue_df["股票代號"].astype(str).str.strip()
+        rev_cols = ["股票代號", "營收YoY(%)"]
+        rev_cols = [c for c in rev_cols if c in revenue_df.columns]
+        if len(rev_cols) == 2:
+            base = base.merge(revenue_df[rev_cols].drop_duplicates("股票代號"),
+                              on="股票代號", how="left")
+    if "營收YoY(%)" not in base.columns:
+        base["營收YoY(%)"] = None
+
+    # 4. 合併 EPS（容錯：空 df 跳過）
+    if not eps_df.empty and "股票代號" in eps_df.columns:
+        eps_df = eps_df.copy()
+        eps_df["股票代號"] = eps_df["股票代號"].astype(str).str.strip()
+        eps_cols = ["股票代號", "EPS本期"]
+        eps_cols = [c for c in eps_cols if c in eps_df.columns]
+        if len(eps_cols) == 2:
+            base = base.merge(eps_df[eps_cols].drop_duplicates("股票代號"),
+                              on="股票代號", how="left")
+    if "EPS本期" not in base.columns:
+        base["EPS本期"] = None
+
+    # 5. 計算 PE
+    base["PE"] = None
+    pe_mask = (base["現價"].notna()) & (base["EPS本期"].notna()) & (base["EPS本期"] > 0)
+    base.loc[pe_mask, "PE"] = (base.loc[pe_mask, "現價"] / base.loc[pe_mask, "EPS本期"]).round(2)
+
+    # 6. 抓 FinMind 股利（會用 DB 快取，只在 DB 沒有的才抓 FinMind）
+    all_codes = base["股票代號"].tolist()
+    div_df = _fetch_finmind_dividend(all_codes)
+    if not div_df.empty:
+        base = base.merge(div_df, on="股票代號", how="left")
+    else:
+        cy = datetime.now().year
+        for suf in [f"{cy}現金股利", f"{cy}股票股利",
+                    f"{cy - 1}現金股利", f"{cy - 1}股票股利",
+                    f"{cy - 2}現金股利", f"{cy - 2}股票股利"]:
+            if suf not in base.columns:
+                base[suf] = None
+
+    # 7. 今年/去年現金股利欄位（干擾名稱，用固定名）
+    # 重要：FinMind `TaiwanStockDividend` 的 year 欄位是「會計年度」
+    #       ex: year=2025 = 2025 年度盈餘的股利，在 2026 年除息發放
+    #   台灣人說「今年現金股利」= 當年除息 = DB year=cy-1
+    #   因此正確對應是 cy-1=今年、cy-2=去年、cy-3=前年
+    #   （不要直接用 cy，因為 DB 通常還沒抓當年度的決公告資料）
+    cy = datetime.now().year
+    base["今年現金股利"] = base.get(f"{cy - 1}現金股利", None)
+    base["今年股票股利"] = base.get(f"{cy - 1}股票股利", None)
+    base["去年現金股利"] = base.get(f"{cy - 2}現金股利", None)
+    base["去年股票股利"] = base.get(f"{cy - 2}股票股利", None)
+    # 前年度（保留給 UI 顯示）
+    base["前年現金股利"] = base.get(f"{cy - 3}現金股利", None)
+    base["前年股票股利"] = base.get(f"{cy - 3}股票股利", None)
+
+    # 8. 今年現金殖利率 = 今年現金股利 / 現價
+    # 註：現金股利若為 0（該公司該年未配息），殖利率應為 None 而不是 0
+    base["今年現金殖利率(%)"] = None
+    yld_mask = (base["現價"].notna()) & (base["現價"] > 0) & (base["今年現金股利"].notna()) & (base["今年現金股利"] > 0)
+    base.loc[yld_mask, "今年現金殖利率(%)"] = (
+        base.loc[yld_mask, "今年現金股利"] / base.loc[yld_mask, "現價"] * 100
+    ).round(2)
+
+    # 9. 去年現金殖利率
+    # 註：現金股利若為 0，殖利率應為 None
+    base["去年現金殖利率(%)"] = None
+    yld2_mask = (base["現價"].notna()) & (base["現價"] > 0) & (base["去年現金股利"].notna()) & (base["去年現金股利"] > 0)
+    base.loc[yld2_mask, "去年現金殖利率(%)"] = (
+        base.loc[yld2_mask, "去年現金股利"] / base.loc[yld2_mask, "現價"] * 100
+    ).round(2)
+
+    # 10. 應用篩選條件
+    mask = pd.Series([True] * len(base), index=base.index)
+
+    if filters.get("min_rev_yoy") is not None:
+        mask &= base["營收YoY(%)"].fillna(-9999) >= filters["min_rev_yoy"]
+
+    if filters.get("min_pe") is not None:
+        mask &= base["PE"].fillna(9999) <= filters["min_pe"]
+
+    if filters.get("min_price") is not None:
+        mask &= base["現價"].fillna(0) >= filters["min_price"]
+
+    if filters.get("min_volume") is not None:
+        # 成交量為 None（cache 沒資料）視為跳過
+        is_na = base["成交量_張"].isna()
+        vol = base["成交量_張"].fillna(0)
+        mask &= is_na | (vol >= filters["min_volume"])
+
+    if filters.get("min_cash_div") is not None:
+        mask &= base["今年現金股利"].fillna(0) >= filters["min_cash_div"]
+
+    if filters.get("min_stock_div") is not None:
+        mask &= base["今年股票股利"].fillna(0) >= filters["min_stock_div"]
+
+    if filters.get("min_last_cash_div") is not None:
+        mask &= base["去年現金股利"].fillna(0) >= filters["min_last_cash_div"]
+
+    if filters.get("min_last_stock_div") is not None:
+        mask &= base["去年股票股利"].fillna(0) >= filters["min_last_stock_div"]
+
+    # 殖利率（UI 用 min_cash_div_yld / min_last_cash_yld）
+    # 注：殖利率 None（没股利資料）視為「跳過」該條件（不排除）
+    # 殖利率 = 0（有資料但股利率為 0）才視為「不達標」
+    if filters.get("min_cash_div_yld") is not None:
+        yld = base["今年現金殖利率(%)"].fillna(0)  # None -> 0
+        # None 仍然表示沒資料，這裡用一個標記：原本是 None 的，自動視為「達標」
+        is_na = base["今年現金殖利率(%)"].isna()
+        mask &= is_na | (yld >= filters["min_cash_div_yld"])
+
+    if filters.get("min_last_cash_yld") is not None:
+        yld = base["去年現金殖利率(%)"].fillna(0)
+        is_na = base["去年現金殖利率(%)"].isna()
+        mask &= is_na | (yld >= filters["min_last_cash_yld"])
+
+    result = base[mask].copy()
+
+    # 11. 排序：營收YoY > 今年股票股利 > 今年現金殖利率 > PE（後兩者以殖利率高分為佳，PE 低分為佳）
+    # PE 越小越好 → 排序時用 -PE
+    # 註：實際欄位是「累計營收YoY(%)」（不是「營收YoY(%)」）
+    result["_sort_pe"] = -result["PE"].fillna(9999)
+    result["_sort_rev"] = result["營收YoY(%)"].fillna(-9999)
+    result["_sort_stock"] = result["今年股票股利"].fillna(0)
+    result["_sort_cash_yld"] = result["今年現金殖利率(%)"].fillna(-9999)
+
+    # 先依「主要欄位」排序（None 視為極小值）
+    result = result.sort_values(
+        ["_sort_rev", "_sort_stock", "_sort_cash_yld", "_sort_pe"],
+        ascending=[False, False, False, False]
+    ).reset_index(drop=True)
+    # 再把「無營收」股票（營收YoY = None）排到最後，但保留 top_n 內
+    none_rev_mask = result["營收YoY(%)"].isna()
+    if none_rev_mask.any():
+        no_rev = result[none_rev_mask]
+        with_rev = result[~none_rev_mask]
+        # 合併：有營收的在前（依原本排序），無營收的接在後面
+        result = pd.concat([with_rev, no_rev], ignore_index=True)
+    result = result.head(top_n).reset_index(drop=True)
+
+    # 12. 整理輸出欄位
+    out_cols = ["股票代號", "股票名稱", "現價", "營收YoY(%)",
+                "今年股票股利", "今年現金殖利率(%)", "PE",
+                "成交量_張", "今年現金股利",
+                "去年現金股利", "去年股票股利", "去年現金殖利率(%)", "EPS本期",
+                f"{cy}現金股利", f"{cy - 1}現金股利", f"{cy - 2}現金股利"]
+    out_cols = [c for c in out_cols if c in result.columns]
+    # 整理重複的現金股利（保留乾淨的今年/去年/前年）
+    result = result[out_cols].rename(columns={
+        "成交量_張": "成交量(張)",
+        f"{cy}現金股利": "今年現金股利_原始",
+        f"{cy - 1}現金股利": "去年現金股利_原始",
+        f"{cy - 2}現金股利": "前年現金股利_原始",
+    })
+    # 還原乾淨名稱
+    result = result.rename(columns={
+        "今年現金股利_原始": "今年現金股利_原始",
+    })
+    # 重新整理輸出（最終顯示欄位）
+    # 先把「營收YoY(%)」改名為「累計營收YoY(%)」供 Treeview 顯示
+    result = result.rename(columns={"營收YoY(%)": "累計營收YoY(%)"})
+    final_cols = ["股票代號", "股票名稱", "現價", "累計營收YoY(%)",
+                  "今年股票股利", "今年現金股利", "今年現金殖利率(%)",
+                  "去年股票股利", "去年現金股利", "去年現金殖利率(%)",
+                  "PE", "成交量(張)", "EPS本期"]
+    final_cols = [c for c in final_cols if c in result.columns]
+    return result[final_cols].rename(columns={
+        "今年現金股利": "今年現金股利_原始",
+        "去年現金股利": "去年現金股利_原始",
+    }).rename(columns={
+        "今年現金股利_原始": "今年現金股利(元)",
+        "去年現金股利_原始": "去年現金股利(元)",
+        "今年股票股利": "今年股票股利(元)",
+        "去年股票股利": "去年股票股利(元)",
+    })
+
+
+# ==========================================================
+# 通用工具
+# ==========================================================
 
 def format_for_output(df: pd.DataFrame, sort_by_code: bool = True) -> pd.DataFrame:
     if df is None or df.empty:
@@ -2293,6 +2877,11 @@ class StrategyGUI(tk.Tk):
         self.notebook.add(self.portfolio_tab, text="📒 買賣記錄")
         self._build_portfolio_tab(self.portfolio_tab)
 
+        # Tab 3：手動選股（V0.9.5 新增）
+        self.manual_select_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.manual_select_tab, text="🔍 手動選股")
+        self._build_manual_select_tab(self.manual_select_tab)
+
         # 綁定 Tab 切換 → 切到買賣記錄時自動 refresh
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
@@ -2816,6 +3405,502 @@ class StrategyGUI(tk.Tk):
         ttk.Button(btn_frame, text="🔄 重新整理", command=self._refresh_portfolio_view).pack(side="left", padx=2)
         ttk.Button(btn_frame, text="✏️ 編輯", command=self._open_edit_tx_dialog).pack(side="left", padx=2)  # V0.9.4 phase2.3
         ttk.Button(btn_frame, text="📤 匯出 Excel", command=self._export_portfolio_excel).pack(side="right", padx=2)
+
+    # ==========================================================
+    # V0.9.5: 手動選股 Tab
+    # ==========================================================
+    def _build_manual_select_tab(self, parent):
+        """建立「手動選股」Tab 的 UI"""
+        # ---- 上方：狀態列 ----
+        status_frame = ttk.Frame(parent)
+        status_frame.pack(fill="x", padx=8, pady=(6, 0))
+        self._ms_status = tk.StringVar(value="請先執行一次「策略回測」以載入市場資料，或直接點「選股」從 FinMind 抓取最新資料")
+        ttk.Label(status_frame, textvariable=self._ms_status,
+                  foreground="#555555", font=("Helvetica", 9)).pack(anchor="w")
+
+        # 進度條（默認隱藏，選股中才顯示）
+        self._ms_progress = ttk.Progressbar(status_frame, mode='determinate', length=200)
+        self._ms_progress.pack(anchor="w", pady=(2, 0))
+        self._ms_progress.pack_forget()
+
+        # ---- 主區：左側條件 + 右側結果 ----
+        paned = ttk.PanedWindow(parent, orient="horizontal")
+        paned.pack(fill="both", expand=True, padx=6, pady=6)
+
+        # ── 左面板：篩選條件 + Preset ──
+        left_frame = ttk.LabelFrame(paned, text="🔎 篩選條件", padding=8)
+        paned.add(left_frame, weight=0)
+
+        # Preset 管理
+        preset_top = ttk.Frame(left_frame)
+        preset_top.pack(fill="x", pady=(0, 8))
+        ttk.Label(preset_top, text="Preset：", font=("Helvetica", 9, "bold")).pack(side="left")
+        self._ms_preset_var = tk.StringVar(value="")
+        self._ms_preset_combo = ttk.Combobox(preset_top, textvariable=self._ms_preset_var,
+                                             state="readonly", width=14)
+        self._ms_preset_combo.pack(side="left", padx=4)
+        self._ms_preset_combo.bind("<<ComboboxSelected>>", lambda e: self._ms_load_preset())
+        ttk.Button(preset_top, text="💾 儲存", width=5,
+                   command=self._ms_save_preset).pack(side="left", padx=1)
+        ttk.Button(preset_top, text="🗑 刪", width=4,
+                   command=self._ms_delete_preset).pack(side="left", padx=1)
+
+        # 篩選條件 Entry（每列：[checkbox] [label] [Entry]）
+        # 格式：(label_text, config_key, default_value, skip_value, unit)
+        self._ms_filter_vars = {}
+        self._ms_filter_defaults = {
+            "min_rev_yoy":      (10.0,  None,  "% YoY"),
+            "min_stock_div":    (0.0,   None,  "元/股"),
+            "min_cash_div_yld": (1.0,   None,  "%殖利率"),
+            "min_pe":           (30.0,  None,  "倍"),
+            "min_price":        (10.0,  None,  "元"),
+            "min_volume":       (100.0, None,  "張/月均"),
+            "min_last_stock_div":(0.0,  None,  "元/股"),
+            "min_last_cash_yld":(1.0,   None,  "%殖利率"),
+        }
+        filter_labels = {
+            "min_rev_yoy":      "累計營收 YoY ≥",
+            "min_stock_div":    "今年股票股利 ≥",
+            "min_cash_div_yld": "今年現金殖利率 ≥",
+            "min_pe":           "本益比 (PE) ≤",
+            "min_price":        "現價 ≥",
+            "min_volume":       "月均成交量 ≥",
+            "min_last_stock_div":"去年股票股利 ≥",
+            "min_last_cash_yld":"去年現金殖利率 ≥",
+        }
+
+        def _add_filter_row(parent, label, key, default_val, skip_val, unit):
+            row = ttk.Frame(parent)
+            row.pack(fill="x", pady=2)
+            var = tk.BooleanVar(value=False)
+            cb = ttk.Checkbutton(row, variable=var)
+            cb.pack(side="left")
+            ttk.Label(row, text=label, width=20).pack(side="left")
+            entry_var = tk.DoubleVar(value=default_val)
+            ttk.Entry(row, textvariable=entry_var, width=8).pack(side="left")
+            ttk.Label(row, text=unit, width=7).pack(side="left")
+            self._ms_filter_vars[key] = (var, entry_var, skip_val)
+
+        for key, (default, skip, unit) in self._ms_filter_defaults.items():
+            _add_filter_row(left_frame, filter_labels[key], key, default, skip, unit)
+
+        # 結果上限
+        limit_row = ttk.Frame(left_frame)
+        limit_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(limit_row, text="結果上限：", width=20).pack(side="left")
+        self._ms_limit_var = tk.IntVar(value=500)
+        ttk.Entry(limit_row, textvariable=self._ms_limit_var, width=8).pack(side="left")
+        ttk.Label(limit_row, text="檔", width=7).pack(side="left")
+
+        # 按鈕
+        btn_row = ttk.Frame(left_frame)
+        btn_row.pack(fill="x", pady=(12, 0))
+        ttk.Button(btn_row, text="🔍 開始選股",
+                   command=self._ms_run_selection).pack(fill="x", pady=1)
+        ttk.Button(btn_row, text="📋 全選",
+                   command=self._ms_select_all).pack(fill="x", pady=1)
+        ttk.Button(btn_row, text="☐ 全不選",
+                   command=self._ms_select_none).pack(fill="x", pady=1)
+        ttk.Button(btn_row, text="📤 匯出 Excel",
+                   command=self._ms_export_excel).pack(fill="x", pady=1)
+
+        # ── 右面板：結果列表 ──
+        right_frame = ttk.LabelFrame(paned, text="📊 篩選結果", padding=4)
+        paned.add(right_frame, weight=1)
+
+        # Treeview with checkbox
+        cols = ("勾選","代號","名稱","現價","累計YoY%",
+                "今股票","今現金殖%","PE","成交量(張)",
+                "去年股票","去年現金殖%")
+        self._ms_tree = ttk.Treeview(right_frame, columns=cols, show="headings",
+                                     selectmode="none", height=25)
+        col_widths = (40, 60, 100, 70, 70, 65, 80, 50, 80, 65, 80)
+        for col, w in zip(cols, col_widths):
+            self._ms_tree.heading(col, text=col)
+            self._ms_tree.column(col, width=w, anchor="center")
+
+        ms_scroll_y = ttk.Scrollbar(right_frame, orient="vertical", command=self._ms_tree.yview)
+        ms_scroll_x = ttk.Scrollbar(right_frame, orient="horizontal", command=self._ms_tree.xview)
+        self._ms_tree.configure(yscrollcommand=ms_scroll_y.set, xscrollcommand=ms_scroll_x.set)
+        self._ms_tree.pack(fill="both", expand=True)
+        ms_scroll_y.pack(side="right", fill="y")
+        ms_scroll_x.pack(side="bottom", fill="x")
+
+        # Click to toggle checkbox
+        self._ms_tree.bind("<Button-1>", self._ms_toggle_check)
+
+        # 右鍵選單
+        self._ms_tree.bind("<Button-3>", self._ms_show_context_menu)
+
+        # 初始化：載入上次 preset + 讀取 pipeline 資料狀態
+        self._ms_load_preset()
+        self._ms_refresh_pipeline_status()
+
+    def _ms_refresh_pipeline_status(self):
+        """更新狀態列：顯示 pipeline 資料是否已載入"""
+        has_price = hasattr(self, '_price_df') and self._price_df is not None and not self._price_df.empty
+        has_revenue = hasattr(self, '_revenue_df') and self._revenue_df is not None and not self._revenue_df.empty
+        has_eps = hasattr(self, '_eps_df') and self._eps_df is not None and not self._eps_df.empty
+
+        status = []
+        if has_price: status.append(f"股價({len(self._price_df)}筆)")
+        if has_revenue: status.append(f"營收({len(self._revenue_df)}筆)")
+        if has_eps: status.append(f"EPS({len(self._eps_df)}筆)")
+
+        if status:
+            self._ms_status.set("✅ Pipeline 資料已就緒：" + " / ".join(status) +
+                               "｜可直接選股，或點「選股」從 FinMind 實時抓取")
+        else:
+            self._ms_status.set("⚠️ Pipeline 尚未執行｜點「選股」將從 FinMind 即時抓取市場資料")
+
+    def _ms_get_filters(self) -> dict:
+        """從 UI 讀取目前的篩選條件，回傳 dict。"""
+        f = {}
+        for key, (cb_var, entry_var, skip_val) in self._ms_filter_vars.items():
+            if cb_var.get():  # 有勾選
+                f[key] = entry_var.get()
+            else:
+                f[key] = skip_val  # None = skip
+        f["top_n"] = self._ms_limit_var.get()
+        return f
+
+    def _ms_run_selection(self):
+        """點「選股」：抓取資料 → 篩選 → 顯示結果"""
+        filters = self._ms_get_filters()
+        top_n = filters.pop("top_n", 500)
+
+        # 顯示進度條
+        self._ms_progress.pack(anchor="w", pady=(2, 0))
+        self._ms_progress["value"] = 0
+        self._ms_status.set("🔄 抓取資料中，請稍候...")
+        self._ms_tree.delete(*self._ms_tree.get_children())
+        self.update_idletasks()
+
+        # 啟動進度輪詢 timer
+        self._ms_poll_running = True
+        self._ms_poll_progress()
+
+        def _do():
+            try:
+                # 優先用 pipeline 快取
+                price_df = getattr(self, '_price_df', None)
+                revenue_df = getattr(self, '_revenue_df', None)
+                eps_df = getattr(self, '_eps_df', None)
+
+                # fallback 1：若 GUI 沒記、但 cache/ 有 → 讀 cache
+                # 注：讀 cache 前先檢查 last_update；若 != today 就走 get_or_fetch 重抓
+                #     （避免六日不開盤下「last_update 是昨天 = today」就誤判過期）
+                from datetime import datetime as _dt
+                _today = _dt.now().strftime("%Y-%m-%d")
+                def _is_cache_fresh(path):
+                    try:
+                        _meta = pd.read_excel(path, sheet_name="meta", engine="openpyxl")
+                        _last = str(_meta.loc[0, "last_update"])
+                        return _last >= _today   # 含今天（避免跨交易日誤判）
+                    except Exception:
+                        return False
+                if price_df is None or price_df.empty:
+                    for p in ["cache/price.xlsx", "source/cache/price.xlsx"]:
+                        if os.path.exists(p):
+                            if _is_cache_fresh(p):
+                                try:
+                                    price_df = pd.read_excel(p, sheet_name="data", engine="openpyxl")
+                                    print(f"✅ 讀 price cache (last_update={pd.read_excel(p, sheet_name='meta', engine='openpyxl').loc[0, 'last_update']}): {len(price_df)} 筆")
+                                    break
+                                except Exception:
+                                    pass
+                            else:
+                                # cache 過期 → 走 get_or_fetch 重抓（會自動寫回 cache）
+                                try:
+                                    _s = build_session()
+                                    price_df = get_or_fetch("price", lambda: fetch_prices(_s, self.cfg), self.logger)
+                                    print(f"♻️ price cache 過期 → 重抓 {len(price_df)} 筆")
+                                    break
+                                except Exception as _e:
+                                    print(f"⚠️ price 重抓失敗：{_e} → fallback 讀舊 cache")
+                                    try:
+                                        price_df = pd.read_excel(p, sheet_name="data", engine="openpyxl")
+                                        print(f"✅ 讀 price cache (舊): {len(price_df)} 筆")
+                                        break
+                                    except Exception:
+                                        pass
+                if revenue_df is None or revenue_df.empty:
+                    for p in ["cache/revenue.xlsx", "source/cache/revenue.xlsx"]:
+                        if os.path.exists(p):
+                            try:
+                                revenue_df = pd.read_excel(p, sheet_name="data", engine="openpyxl")
+                                print(f"✅ 讀 revenue cache: {len(revenue_df)} 筆")
+                                break
+                            except Exception:
+                                pass
+                if eps_df is None or eps_df.empty:
+                    for p in ["cache/eps.xlsx", "source/cache/eps.xlsx"]:
+                        if os.path.exists(p):
+                            try:
+                                eps_df = pd.read_excel(p, sheet_name="data", engine="openpyxl")
+                                print(f"✅ 讀 eps cache: {len(eps_df)} 筆")
+                                break
+                            except Exception:
+                                pass
+
+                result = _run_manual_selection(
+                    price_df=price_df if (price_df is not None and not price_df.empty) else pd.DataFrame(),
+                    revenue_df=revenue_df if (revenue_df is not None and not revenue_df.empty) else pd.DataFrame(),
+                    eps_df=eps_df if (eps_df is not None and not eps_df.empty) else pd.DataFrame(),
+                    filters=filters,
+                    top_n=top_n,
+                )
+                self._ms_result_df = result
+                self._ms_poll_running = False
+                self.after(0, lambda: self._ms_display_results(result))
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                # 完整訊息寫到主 console（背景 thread 也能輸出）
+                print(f"[手動選股失敗] {e}\n{tb}")
+                err_msg = f"❌ 選股失敗：{e}\n{tb.splitlines()[-1] if tb else ''}"
+                self._ms_poll_running = False
+                self.after(0, lambda msg=err_msg: self._ms_status.set(msg))
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _ms_poll_progress(self):
+        """每 0.5 秒更新狀態列 + 進度條"""
+        if not getattr(self, '_ms_poll_running', False):
+            self._ms_progress.pack_forget()
+            return
+        stage = _MS_PROGRESS.get("stage", "")
+        done = _MS_PROGRESS.get("done", 0)
+        total = _MS_PROGRESS.get("total", 0)
+        if total > 0:
+            pct = min(100, int(done / total * 100))
+            self._ms_progress["value"] = pct
+            self._ms_status.set(f"🔄 抓取{stage}中... {done}/{total} ({pct}%)")
+        else:
+            self._ms_status.set(f"🔄 準備抓取{stage}...")
+        self.after(500, self._ms_poll_progress)
+
+    def _ms_display_results(self, result):
+        """把 DataFrame 顯示在 Treeview 上"""
+        self._ms_tree.delete(*self._ms_tree.get_children())
+        if result.empty:
+            self._ms_status.set("⚠️ 沒有符合條件的股票")
+            return
+
+        # 快取勾選狀態（股票代號 → 是否勾選）
+        self._ms_checked = {}
+
+        for _, row in result.iterrows():
+            code = str(row.get("股票代號", "")).strip()
+            name = str(row.get("股票名稱", "")).strip()
+            price = row.get("現價")
+            price_str = f"{price:.1f}" if price and str(price) not in ("nan","None") else "—"
+            rev = row.get("累計營收YoY(%)")
+            rev_str = f"{rev:.1f}" if rev and str(rev) not in ("nan","None") else "—"
+            stock_div = row.get("今年股票股利(元)", "—")
+            stock_str = f"{stock_div:.2f}" if isinstance(stock_div, float) and str(stock_div) not in ("nan","None") else "—"
+            cash_yld = row.get("今年現金殖利率(%)")
+            cash_str = f"{cash_yld:.2f}" if cash_yld and str(cash_yld) not in ("nan","None") else "—"
+            pe = row.get("PE")
+            pe_str = f"{pe:.1f}" if pe and str(pe) not in ("nan","None") else "—"
+            vol = row.get("成交量(張)")
+            vol_str = f"{int(vol):,}" if vol and str(vol) not in ("nan","None") else "—"
+            last_stock = row.get("去年股票股利(元)")
+            last_stock_str = f"{last_stock:.2f}" if isinstance(last_stock, float) and str(last_stock) not in ("nan","None") else "—"
+            last_cash = row.get("去年現金殖利率(%)")
+            last_cash_str = f"{last_cash:.2f}" if last_cash and str(last_cash) not in ("nan","None") else "—"
+
+            tag = "checked" if self._ms_checked.get(code, False) else "unchecked"
+            self._ms_tree.insert("", "end", iid=code, values=(
+                "☑" if self._ms_checked.get(code, False) else "☐",
+                code, name, price_str, rev_str,
+                stock_str, cash_str, pe_str, vol_str,
+                last_stock_str, last_cash_str
+            ), tags=(tag,))
+
+        self._ms_status.set(f"✅ 符合條件：{len(result)} 檔（上限 {self._ms_limit_var.get()} 檔）｜排序：營收YoY > 今年股票 > 今年現金殖% > PE")
+
+    def _ms_toggle_check(self, event):
+        """點 Treeview 任一列 → toggle 勾選狀態"""
+        region = self._ms_tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        column = self._ms_tree.identify_column(event.x)
+        if column != "#1":  # 只有第一欄（勾選欄）可以 toggle
+            return
+        item_id = self._ms_tree.identify_row(event.y)
+        if not item_id:
+            return
+
+        current = self._ms_checked.get(item_id, False)
+        self._ms_checked[item_id] = not current
+        vals = list(self._ms_tree.item(item_id, "values"))
+        vals[0] = "☑" if not current else "☐"
+        self._ms_tree.item(item_id, values=vals,
+                           tags=("checked" if not current else "unchecked",))
+
+    def _ms_select_all(self):
+        for item in self._ms_tree.get_children():
+            self._ms_checked[item] = True
+            vals = list(self._ms_tree.item(item, "values"))
+            vals[0] = "☑"
+            self._ms_tree.item(item, values=vals, tags=("checked",))
+
+    def _ms_select_none(self):
+        for item in self._ms_tree.get_children():
+            self._ms_checked[item] = False
+            vals = list(self._ms_tree.item(item, "values"))
+            vals[0] = "☐"
+            self._ms_tree.item(item, values=vals, tags=("unchecked",))
+
+    def _ms_show_context_menu(self, event):
+        """右鍵：全選 / 全不選"""
+        menu = tk.Menu(self.manual_select_tab, tearoff=0)
+        menu.add_command(label="☑ 全選", command=self._ms_select_all)
+        menu.add_command(label="☐ 全不選", command=self._ms_select_none)
+        menu.post(event.x_root, event.y_root)
+
+    def _ms_export_excel(self):
+        """匯出選中的股票到 Excel"""
+        if not hasattr(self, '_ms_result_df') or self._ms_result_df is None or self._ms_result_df.empty:
+            messagebox.showwarning("無資料", "請先執行「選股」")
+            return
+
+        checked = [code for code, v in self._ms_checked.items() if v]
+        if not checked:
+            messagebox.showwarning("未勾選", "請先勾選要匯出的股票")
+            return
+
+        result = self._ms_result_df[
+            self._ms_result_df["股票代號"].astype(str).str.strip().isin(checked)
+        ].copy()
+
+        # 加入「使用者設定的篩選門檻值」當備註欄
+        filters = self._ms_get_filters()
+        for key, (cb_var, entry_var, skip_val) in self._ms_filter_vars.items():
+            label_map = {
+                "min_rev_yoy": "篩_累計營收YoY%",
+                "min_stock_div": "篩_今年股票股利元",
+                "min_cash_div_yld": "篩_今年現金殖利率%",
+                "min_pe": "篩_PE上限",
+                "min_price": "篩_現價下限",
+                "min_volume": "篩_成交量下限張",
+                "min_last_stock_div": "篩_去年股票股利元",
+                "min_last_cash_yld": "篩_去年現金殖利率%",
+            }
+            col_name = label_map.get(key, key)
+            val = entry_var.get() if cb_var.get() else "不限"
+            result[col_name] = val
+
+        filepath = filedialog.asksaveasfilename(
+            title="匯出手動選股結果",
+            defaultextension=".xlsx",
+            filetypes=["Excel 活頁簿 (*.xlsx)"],
+            initialfile=f"手動選股_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        )
+        if not filepath:
+            return
+
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment
+
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "手動選股"
+
+            headers = list(result.columns)
+            ws.append(headers)
+
+            header_fill = PatternFill("solid", fgColor="4472C4")
+            header_font = Font(color="FFFFFF", bold=True)
+            for cell in ws[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center")
+
+            for row_data in result.values.tolist():
+                ws.append(row_data)
+
+            for col in ws.columns:
+                max_len = max(len(str(cell.value or "")) for cell in col)
+                ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 30)
+
+            wb.save(filepath)
+            messagebox.showinfo("匯出成功", f"已匯出 {len(result)} 檔\n→ {filepath}")
+        except Exception as e:
+            messagebox.showerror("匯出失敗", str(e))
+
+    # ── Preset 管理 ──
+    def _ms_get_presets(self) -> dict:
+        raw = self.cfg.to_dict().get("manual_select_presets", {})
+        return raw if isinstance(raw, dict) else {}
+
+    def _ms_save_preset(self):
+        """彈出對話框，輸入 preset 名稱，儲存當前條件"""
+        name = simpledialog.askstring("儲存 Preset", "請輸入Preset名稱：",
+                                      initialvalue="我的篩選")
+        if not name:
+            return
+        name = name.strip()
+        filters = self._ms_get_filters()
+        presets = self._ms_get_presets()
+        presets[name] = filters
+        self.cfg.update_from_dict({"manual_select_presets": presets,
+                                   "manual_select_last_preset": name})
+        save_config(self.cfg.to_dict())
+        self._ms_refresh_preset_list()
+        self._ms_preset_var.set(name)
+        messagebox.showinfo("已儲存", f"Preset「{name}」已儲存")
+
+    def _ms_load_preset(self):
+        """根據目前選中的 preset 名稱，載入條件到 UI"""
+        name = self._ms_preset_var.get().strip()
+        presets = self._ms_get_presets()
+        data = presets.get(name, {})
+        if not data:
+            return
+
+        # 還原 top_n
+        if "top_n" in data:
+            self._ms_limit_var.set(int(data["top_n"]))
+
+        # 還原各 filter（跳過 top_n key）
+        for key, val in data.items():
+            if key == "top_n":
+                continue
+            if key in self._ms_filter_vars:
+                cb_var, entry_var, skip_val = self._ms_filter_vars[key]
+                cb_var.set(val is not None and val != skip_val)
+                if val is not None:
+                    entry_var.set(float(val))
+
+    def _ms_delete_preset(self):
+        name = self._ms_preset_var.get().strip()
+        if not name:
+            return
+        if not messagebox.askyesno("確認刪除", f"刪除 Preset「{name}」？"):
+            return
+        presets = self._ms_get_presets()
+        presets.pop(name, None)
+        last = self.cfg.to_dict().get("manual_select_last_preset")
+        self.cfg.update_from_dict({"manual_select_presets": presets})
+        if last == name:
+            self.cfg.update_from_dict({"manual_select_last_preset": None})
+        save_config(self.cfg.to_dict())
+        self._ms_refresh_preset_list()
+        self._ms_preset_var.set("")
+        messagebox.showinfo("已刪除", f"Preset「{name}」已刪除")
+
+    def _ms_refresh_preset_list(self):
+        """重新整理 preset 下拉選項，並自動選中上次"""
+        presets = list(self._ms_get_presets().keys())
+        self._ms_preset_combo["values"] = presets
+        last = self.cfg.to_dict().get("manual_select_last_preset")
+        if last and last in presets:
+            self._ms_preset_var.set(last)
+        elif presets:
+            self._ms_preset_var.set(presets[0])
 
     def _on_position_selected(self, event):
         """持倉明細任一列被點擊 → 顯示該股票完整統計"""

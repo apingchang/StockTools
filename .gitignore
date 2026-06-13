@@ -29,3 +29,16 @@ cache/
 # 系統
 .DS_Store
 Thumbs.db
+
+# V0.9.5+ manual select DBs (auto-generated)
+dividend_history.db
+dividend_history.db-journal
+eps_history.db
+eps_history.db-journal
+source/dividend_history.db
+source/dividend_history.db-journal
+source/eps_history.db
+source/eps_history.db-journal
+
+# Test artifacts
+.pytest_cache/
