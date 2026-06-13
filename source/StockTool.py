@@ -885,8 +885,15 @@ def _run_manual_selection(
         base["EPS本期"] = None
 
     # 5. 計算 PE
+    # 注：EPS 接近 0 會讓 PE 爆炸（ex: EPS=0.01、股價=24 → PE=2400）
+    #     設 PE = None 讓使用者看到 --，比看到「3000 倍 PE」合理
+    # 門檻：EPS >= 0.05 元視為有意義的獲利能力（低於 0.05 視為雞蛋水餃股）
+    PE_MIN_EPS = 0.05
     base["PE"] = None
-    pe_mask = (base["現價"].notna()) & (base["EPS本期"].notna()) & (base["EPS本期"] > 0)
+    pe_mask = (
+        (base["現價"].notna()) & (base["現價"] > 0)
+        & (base["EPS本期"].notna()) & (base["EPS本期"] >= PE_MIN_EPS)
+    )
     base.loc[pe_mask, "PE"] = (base.loc[pe_mask, "現價"] / base.loc[pe_mask, "EPS本期"]).round(2)
 
     # 6. 抓 FinMind 股利（會用 DB 快取，只在 DB 沒有的才抓 FinMind）
@@ -2861,6 +2868,12 @@ class StrategyGUI(tk.Tk):
         self._poll_log_queue()
         self._load_config_to_ui()
 
+        # V0.9.5: 啟動時背景重抓股價（若 cache 過期就重抓、今天就跳過）
+        # 用 flag 避免和「手動重抓股價」按鈕重複觸發
+        self._bg_price_fetching = False
+        self._price_last_update: Optional[datetime] = None
+        self.after(800, self._startup_bg_fetch_price)
+
     def _build_ui(self):
         self.geometry("1280x720")
 
@@ -3497,6 +3510,12 @@ class StrategyGUI(tk.Tk):
         btn_row.pack(fill="x", pady=(12, 0))
         ttk.Button(btn_row, text="🔍 開始選股",
                    command=self._ms_run_selection).pack(fill="x", pady=1)
+        # V0.9.5: 手動重抓股價（背景跑中就跳過）
+        ttk.Button(btn_row, text="🔄 重新抓股價",
+                   command=self._ms_force_refresh_price).pack(fill="x", pady=1)
+        self._ms_price_status = tk.StringVar(value="股價未抓取")
+        ttk.Label(btn_row, textvariable=self._ms_price_status,
+                  font=("Helvetica", 8), foreground="#666666").pack(anchor="w", pady=(0, 4))
         ttk.Button(btn_row, text="📋 全選",
                    command=self._ms_select_all).pack(fill="x", pady=1)
         ttk.Button(btn_row, text="☐ 全不選",
@@ -3564,8 +3583,94 @@ class StrategyGUI(tk.Tk):
         f["top_n"] = self._ms_limit_var.get()
         return f
 
+    # ==========================================================
+    # V0.9.5: 背景重抓股價（啟動時 + 手動按鈕）
+    # ==========================================================
+    def _startup_bg_fetch_price(self):
+        """App 啟動 0.8s 後背景重抓股價（跳過選項：pipeline 剛抓過且是今天）
+        - 用 get_or_fetch：meta last_update == today → 用 cache、不抓
+        - 反之走 fetch_prices 重抓、寫回 cache
+        - 重抓中使用者點「重新抓股價」按鈕 → 旗標判斷跳過
+        """
+        if self._bg_price_fetching:
+            return
+        self._bg_price_fetching = True
+        self._ms_price_status.set("🔄 背景抓取股價中（啟動時自動）...")
+        self._ms_status.set("🔄 背景重抓股價中（啟動時自動、跳過今天已抓的 cache）...")
+
+        def _bg_worker():
+            try:
+                _s = build_session()
+                # get_or_fetch 內部會判斷 meta last_update == today
+                df = get_or_fetch("price", lambda: fetch_prices(_s, self.cfg), self.logger)
+                self.after(0, lambda: self._on_bg_price_done(df, source="啟動時自動"))
+            except Exception as e:
+                self.after(0, lambda err=str(e): self._on_bg_price_err(err, source="啟動時自動"))
+
+        threading.Thread(target=_bg_worker, daemon=True).start()
+
+    def _ms_force_refresh_price(self):
+        """手動選股 Tab「🔄 重新抓股價」按鈕
+        - 若背景正在抓 → 跳過、提示使用者（避免重複打 FinMind）
+        - 反之強制重抓（不走 cache）
+        """
+        if self._bg_price_fetching:
+            self._ms_status.set("⏳ 背景抓取股價中｜按鈕已跳過、請稍候...")
+            self.logger.log("⏳ 背景抓股價中，手動按鈕跳過（避免重複打 FinMind）")
+            return
+
+        self._bg_price_fetching = True
+        self._ms_status.set("🔄 手動重抓股價中（強制重抓、不走 cache）...")
+        self._ms_price_status.set("🔄 抓取中...")
+
+        def _force_worker():
+            try:
+                _s = build_session()
+                # 強制重抓：直接呼叫 fetch_prices（不查 cache）
+                df = fetch_prices(_s, self.cfg)
+                # 寫回 cache（更新 meta last_update = today）
+                save_cache(get_cache_file("price"), df)
+                self.after(0, lambda: self._on_bg_price_done(df, source="手動重抓"))
+            except Exception as e:
+                self.after(0, lambda err=str(e): self._on_bg_price_err(err, source="手動重抓"))
+
+        threading.Thread(target=_force_worker, daemon=True).start()
+
+    def _on_bg_price_done(self, df, source: str = ""):
+        """背景重抓股價完成（不論啟動或手動）→ 更新 GUI"""
+        self._bg_price_fetching = False
+        if df is not None and not df.empty:
+            self._price_df = df
+            self._price_last_update = datetime.now()
+            self._update_price_status_label()
+            self._ms_status.set(f"✅ 股價資料就緒（{source}、{len(df)} 筆）｜可點「選股」")
+            self.logger.log(f"✅ {source}股價完成：{len(df)} 筆")
+        else:
+            self._ms_status.set(f"⚠️ {source}股價完成但無資料")
+            self.logger.log(f"⚠️ {source}股價完成但無資料")
+
+    def _on_bg_price_err(self, err: str, source: str = ""):
+        """背景重抓股價失敗 → log + 更新狀態列（不阻擋使用者）"""
+        self._bg_price_fetching = False
+        self._ms_price_status.set(f"⚠️ {source}失敗：{err[:40]}")
+        self._ms_status.set(f"⚠️ {source}股價失敗：{err}（可手動重試）")
+        self.logger.log(f"⚠️ {source}股價失敗：{err}")
+
+    def _update_price_status_label(self):
+        """更新手動選股 Tab 的「股價更新時間」label"""
+        if self._price_last_update:
+            self._ms_price_status.set(
+                f"股價更新：{self._price_last_update.strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+
     def _ms_run_selection(self):
         """點「選股」：抓取資料 → 篩選 → 顯示結果"""
+        # V0.9.5: 背景抓股價中→跳過避免重複打 FinMind
+        if self._bg_price_fetching:
+            self._ms_status.set("⏳ 背景抓股價中，請稍候再點「選股」...")
+            self.logger.log("⏳ 背景抓股價中，「選股」跳過（避免重複打 FinMind）")
+            return
+
         filters = self._ms_get_filters()
         top_n = filters.pop("top_n", 500)
 
