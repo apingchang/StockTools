@@ -761,10 +761,12 @@ def _fetch_finmind_dividend(stock_ids: List[str],
                  f"{current_year - 1}現金股利", f"{current_year - 1}股票股利",
                  f"{current_year - 2}現金股利", f"{current_year - 2}股票股利"])
 
-def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = "dividend_history.db") -> int:
+def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = "dividend_history.db",
+                                  progress_callback=None) -> int:
     """
     背景抓取全市場股利寫入 DB（手動啟動用）。
-    回傳實際新增的股數。
+    回傳實際「新增寫入 DB」的股數（原本沒資料的）。
+    注：進度以「拿過 FinMind 的股數」計，不以「DB 新增 row 數」計。
     """
     _init_div_history_db(db_path)
     cached = _query_div_history(db_path, [str(c).strip() for c in stock_ids])
@@ -775,7 +777,8 @@ def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = "dividen
     start_date = f"{current_year - 2}-01-01"
     end_date = f"{current_year}-12-31"
     fetch_rows: list = []
-    for code in to_fetch:
+    total = len(to_fetch)
+    for i, code in enumerate(to_fetch):
         data = _finmind_get("TaiwanStockDividend", code, start_date, end_date)
         for rec in data:
             yr = _parse_roc_year(rec.get("year", ""))
@@ -785,6 +788,11 @@ def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = "dividen
             stock_raw = float(rec.get("StockEarningsDistribution") or 0)
             fetch_rows.append((code, yr, cash_raw, stock_raw, "finmind"))
         time.sleep(0.35)
+        if progress_callback:
+            try:
+                progress_callback(i + 1, total)
+            except Exception:
+                pass
     if fetch_rows:
         _upsert_div_history(db_path, fetch_rows)
     return len(to_fetch)
@@ -3516,6 +3524,12 @@ class StrategyGUI(tk.Tk):
         self._ms_price_status = tk.StringVar(value="股價未抓取")
         ttk.Label(btn_row, textvariable=self._ms_price_status,
                   font=("Helvetica", 8), foreground="#666666").pack(anchor="w", pady=(0, 4))
+        # V0.9.5: 一次性補抓全部股利（避免每次選股都打 FinMind）
+        ttk.Button(btn_row, text="💰 補抓全部股利 (一次性)",
+                   command=self._ms_fetch_all_dividend).pack(fill="x", pady=1)
+        self._ms_dividend_status = tk.StringVar(value="股利 DB: 計算中...")
+        ttk.Label(btn_row, textvariable=self._ms_dividend_status,
+                  font=("Helvetica", 8), foreground="#666666").pack(anchor="w", pady=(0, 4))
         ttk.Button(btn_row, text="📋 全選",
                    command=self._ms_select_all).pack(fill="x", pady=1)
         ttk.Button(btn_row, text="☐ 全不選",
@@ -3554,6 +3568,7 @@ class StrategyGUI(tk.Tk):
         # 初始化：載入上次 preset + 讀取 pipeline 資料狀態
         self._ms_load_preset()
         self._ms_refresh_pipeline_status()
+        self._ms_refresh_dividend_status()
 
     def _ms_refresh_pipeline_status(self):
         """更新狀態列：顯示 pipeline 資料是否已載入"""
@@ -3663,12 +3678,131 @@ class StrategyGUI(tk.Tk):
                 f"股價更新：{self._price_last_update.strftime('%Y-%m-%d %H:%M:%S')}"
             )
 
+    # ==========================================================
+    # V0.9.5: 一次性補抓全部股利（避免每次選股都打 FinMind）
+    # ==========================================================
+    def _ms_refresh_dividend_status(self):
+        """更新股利 DB 狀態 label：顯示「股利 DB: 351/2374 檔（缺漏 2023）」"""
+        try:
+            _init_div_history_db("dividend_history.db")
+            price_df = getattr(self, "_price_df", None)
+            if price_df is None or price_df.empty:
+                # fallback: 從 price cache 讀
+                for p in ["cache/price.xlsx", "source/cache/price.xlsx"]:
+                    if os.path.exists(p):
+                        try:
+                            price_df = pd.read_excel(p, sheet_name="data", engine="openpyxl")
+                            break
+                        except Exception:
+                            pass
+            if price_df is None or price_df.empty:
+                self._ms_dividend_status.set("股利 DB: 無法計算（未抓到股價名單）")
+                return
+            all_codes = price_df["股票代號"].astype(str).str.strip().tolist()
+            cached = _query_div_history("dividend_history.db", all_codes)
+            in_db = len(cached)
+            total = len(all_codes)
+            missing = total - in_db
+            if missing == 0:
+                self._ms_dividend_status.set(f"股利 DB: ✅ {in_db}/{total} 檔（全部就絡）")
+            else:
+                self._ms_dividend_status.set(f"股利 DB: {in_db}/{total} 檔（缺漏 {missing}）")
+        except Exception as e:
+            self._ms_dividend_status.set(f"股利 DB: 查詢失敗 {str(e)[:30]}")
+
+    def _ms_fetch_all_dividend(self):
+        """手動選股 Tab「💰 補抓全部股利」按鈕
+        - 從 price_df 取所有股票代號
+        - 比對 DB，補抓缺漏的（一次性，預計 10+ 分鐘）
+        - 抓完寫入 DB，之後所有查詢直接用 DB
+        """
+        # 避免重複
+        if getattr(self, "_ms_dividend_fetching", False):
+            self._ms_status.set("⏳ 補抓股利中，請稍候...")
+            return
+
+        # 計算缺漏數
+        self._ms_refresh_dividend_status()
+        cur = self._ms_dividend_status.get()
+        if "缺漏 0" in cur or "全部就絡" in cur:
+            self._ms_status.set("✅ 股利 DB 完整、無需補抓")
+            return
+
+        # 確認
+        if not messagebox.askyesno(
+            "確認補抓股利",
+            f"將從 FinMind 補抓全部缺漏的股利資料到本地 DB。\n\n"
+            f"目前狀態：{cur}\n\n"
+            f"⚠️ 預計需要 10-20 分鐘（取決於缺漏數量）。\n"
+            f"⚠️ 需保持網路連線、中途不要開啟其他 FinMind 工具。\n\n"
+            f"按「Yes」開始，期間可按「取消」中斷。",
+        ):
+            return
+
+        self._ms_dividend_fetching = True
+        self._ms_status.set("🔄 補抓全部股利中（背景跑、請勿關 App）...")
+
+        # 取得所有股票代號
+        price_df = getattr(self, "_price_df", None)
+        if price_df is None or price_df.empty:
+            for p in ["cache/price.xlsx", "source/cache/price.xlsx"]:
+                if os.path.exists(p):
+                    try:
+                        price_df = pd.read_excel(p, sheet_name="data", engine="openpyxl")
+                        break
+                    except Exception:
+                        pass
+        if price_df is None or price_df.empty:
+            self._ms_dividend_fetching = False
+            self._ms_status.set("❌ 補抓失敗：未取得股價名單（請先點「重抓股價」）")
+            return
+        all_codes = price_df["股票代號"].astype(str).str.strip().tolist()
+
+        def _fetch_worker():
+            try:
+                # 背景補抓：給 progress_callback 讓 UI 更新
+                def _progress(done, total):
+                    self.after(0, lambda d=done, t=total: self._ms_status.set(
+                        f"🔄 補抓股利中... {d}/{t}（{int(d/t*100)}%）"
+                    ))
+
+                added = _background_fetch_all_dividend(
+                    all_codes, db_path="dividend_history.db", progress_callback=_progress,
+                )
+                self.after(0, lambda: self._on_dividend_fetch_done(added))
+            except Exception as e:
+                self.after(0, lambda err=str(e): self._on_dividend_fetch_err(err))
+
+        threading.Thread(target=_fetch_worker, daemon=True).start()
+
+    def _on_dividend_fetch_done(self, added: int):
+        """補抓股利完成"""
+        self._ms_dividend_fetching = False
+        self._ms_refresh_dividend_status()
+        self._ms_status.set(
+            f"✅ 補抓股利完成：新增 {added} 檔｜{self._ms_dividend_status.get()}"
+        )
+        self.logger.log(f"✅ 補抓股利完成：新增 {added} 檔")
+        # 自動重跑選股（讓使用者直接看到補抓後的結果）
+        self._ms_run_selection()
+
+    def _on_dividend_fetch_err(self, err: str):
+        """補抓股利失敗"""
+        self._ms_dividend_fetching = False
+        self._ms_status.set(f"❌ 補抓股利失敗：{err}（可重試）")
+        self.logger.log(f"❌ 補抓股利失敗：{err}")
+
     def _ms_run_selection(self):
         """點「選股」：抓取資料 → 篩選 → 顯示結果"""
         # V0.9.5: 背景抓股價中→跳過避免重複打 FinMind
         if self._bg_price_fetching:
             self._ms_status.set("⏳ 背景抓股價中，請稍候再點「選股」...")
             self.logger.log("⏳ 背景抓股價中，「選股」跳過（避免重複打 FinMind）")
+            return
+        # V0.9.5: 背景補抓股利中→跳過
+        if getattr(self, "_ms_dividend_fetching", False):
+            self._ms_status.set("⏳ 補抓股利中，請稍候再點「選股」...")
+            self.logger.log("⏳ 補抓股利中，「選股」跳過")
             return
 
         filters = self._ms_get_filters()
