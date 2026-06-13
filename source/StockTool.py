@@ -3559,6 +3559,9 @@ class StrategyGUI(tk.Tk):
         # V0.9.5: 一次性補抓全部股利（避免每次選股都打 FinMind）
         ttk.Button(btn_row, text="💰 補抓全部股利 (一次性)",
                    command=self._ms_fetch_all_dividend).pack(fill="x", pady=1)
+        # V0.9.5: 指定股補抓（Free tier 適用：手動輸入股號、只要用少數 API 額度）
+        ttk.Button(btn_row, text="🎯 指定股補抓 (推薦 Free tier)",
+                   command=self._ms_fetch_specific_dividend).pack(fill="x", pady=1)
         self._ms_dividend_status = tk.StringVar(value="股利 DB: 計算中...")
         ttk.Label(btn_row, textvariable=self._ms_dividend_status,
                   font=("Helvetica", 8), foreground="#666666").pack(anchor="w", pady=(0, 4))
@@ -3765,8 +3768,9 @@ class StrategyGUI(tk.Tk):
             "確認補抓股利",
             f"將從 FinMind 補抓全部缺漏的股利資料到本地 DB。\n\n"
             f"目前狀態：{cur}\n\n"
-            f"⚠️ 預計需要 10-20 分鐘（取決於缺漏數量）。\n"
-            f"⚠️ 需保持網路連線、中途不要開啟其他 FinMind 工具。\n\n"
+            f"⚠️ 預計需要 {int(missing * 0.4) + 1} 秒、{missing} 筆 API 額度。\n"
+            f"⚠️ Free tier 額度限制 300-1000 筆/月，缺漏太多會 402 失敗。\n"
+            f"⚠️ 推薦用「🎯 指定股補抓」只抓你關心的個股。\n\n"
             f"按「Yes」開始，期間可按「取消」中斷。",
         ):
             return
@@ -3831,6 +3835,79 @@ class StrategyGUI(tk.Tk):
         self._ms_dividend_fetching = False
         self._ms_status.set(f"❌ 補抓股利失敗：{err}（可重試）")
         self.logger.log(f"❌ 補抓股利失敗：{err}")
+
+    def _ms_fetch_specific_dividend(self):
+        """手動選股 Tab「🎯 指定股補抓」按鈕
+
+        適用情境：FinMind Free tier 額度不夠一次抓全部
+        流程：
+          1. 跳出輸入框（多行、可貼上「2330, 2454, 2317」這類格式）
+          2. 解析股號、只抓那些
+          3. 寫入 DB、狀態列顯示進度
+        """
+        if getattr(self, "_ms_dividend_fetching", False):
+            self._ms_status.set("⏳ 補抓股利中，請稍候...")
+            return
+
+        # 對話框：可輸入多行股號（逗號、空格、換行分隔）
+        from tkinter import simpledialog
+        default = "2330, 2454, 2317"  # 台積電、聯發科、鴻海
+        codes_raw = simpledialog.askstring(
+            "指定股補抓股利",
+            "請輸入要補抓的股號（可貼上）：\n"
+            "格式：「2330, 2454, 2317」或一行一個\n"
+            "限 1-100 檔（超過 100 不收）",
+            initialvalue=default,
+            parent=self.manual_select_tab,
+        )
+        if not codes_raw:
+            return
+
+        # 解析
+        import re as _re_codes
+        codes = [c.strip() for c in _re_codes.split(r"[\s,，]+", codes_raw) if c.strip()]
+        # 限 100 檔
+        if len(codes) > 100:
+            messagebox.showwarning("超過限制", f"只取前 100 檔（你輸入 {len(codes)} 檔）")
+            codes = codes[:100]
+        if not codes:
+            messagebox.showwarning("無股號", "請至少輸入 1 個股號")
+            return
+
+        # 看哪些不在 DB
+        _init_div_history_db("dividend_history.db")
+        cached = _query_div_history("dividend_history.db", codes)
+        to_fetch = [c for c in codes if c not in cached]
+        if not to_fetch:
+            messagebox.showinfo("無需補抓", f"這 {len(codes)} 檔都已在 DB 中，無需補抓")
+            return
+
+        if not messagebox.askyesno(
+            "確認補抓",
+            f"將補抓 {len(to_fetch)} 檔股利到本地 DB。\n"
+            f"（{len(codes) - len(to_fetch)} 檔已在 DB 跳過）\n\n"
+            f"預計需要 {int(len(to_fetch) * 0.4) + 1} 秒、{len(to_fetch)} 筆 API 額度。",
+        ):
+            return
+
+        self._ms_dividend_fetching = True
+        self._ms_status.set(f"🔄 指定股補抓中（{len(to_fetch)} 檔）...")
+
+        def _fetch_worker():
+            try:
+                def _progress(done, total):
+                    self.after(0, lambda d=done, t=total: self._ms_status.set(
+                        f"🔄 指定股補抓中... {d}/{t}（{int(d/t*100)}%）"
+                    ))
+
+                added = _background_fetch_all_dividend(
+                    to_fetch, db_path="dividend_history.db", progress_callback=_progress,
+                )
+                self.after(0, lambda: self._on_dividend_fetch_done(added))
+            except Exception as e:
+                self.after(0, lambda err=str(e): self._on_dividend_fetch_err(err))
+
+        threading.Thread(target=_fetch_worker, daemon=True).start()
 
     def _ms_run_selection(self):
         """點「選股」：抓取資料 → 篩選 → 顯示結果"""
