@@ -536,7 +536,7 @@ def _eps_history_stats(db_path: str) -> dict:
 FINMIND_BASE = "https://api.finmindtrade.com/api/v4/data"
 
 # 手動選股進度（背景 thread 寫、UI thread 讀）
-_MS_PROGRESS = {"stage": "", "done": 0, "total": 0, "msg": ""}
+_MS_PROGRESS = {"stage": "", "done": 0, "total": 0, "msg": "", "error": ""}
 
 
 def _fetch_market_stock_list() -> pd.DataFrame:
@@ -593,7 +593,12 @@ _FINMIND_DIVIDEND_CACHE = {}  # {stock_id: {year: {cash, stock}}}
 
 
 def _finmind_get(dataset: str, stock_id: str, start: str, end: str, retry: int = 2) -> list:
-    """統一的 FinMind API 呼叫（含 429 回退）。"""
+    """統一的 FinMind API 呼叫（含 429 回退、402 額度檢查）。
+
+    重要：402 Payment Required 表示 FinMind plan 額度用完
+          此時應規舉到上层、不要 silently 回傳空 list
+    （空 list 會讓 caller 誤以為「該股沒股利」而不是「API 額度不夠」）
+    """
     for attempt in range(retry + 1):
         try:
             r = requests.get(FINMIND_BASE, params={
@@ -605,8 +610,18 @@ def _finmind_get(dataset: str, stock_id: str, start: str, end: str, retry: int =
             if r.status_code == 429:
                 time.sleep(61)
                 continue
+            if r.status_code == 402:
+                # FinMind plan 額度用完 → 拋例外（不再 silently 回傳空）
+                raise RuntimeError(
+                    "FinMind 額度已用完（status 402）｜請升級 plan 或等下月重置"
+                    f"｜URL: {r.url}"
+                )
+            r.raise_for_status()
             d = r.json()
             return d.get("data", []) or []
+        except RuntimeError:
+            # 402 額度錯誤直接往上拋
+            raise
         except Exception:
             if attempt < retry:
                 time.sleep(2)
@@ -694,47 +709,54 @@ def _fetch_finmind_dividend(stock_ids: List[str],
     fetch_rows: list = []
     _MS_PROGRESS["stage"] = "股利"
     _MS_PROGRESS["total"] = len(to_fetch)
-    for i, code in enumerate(to_fetch):
-        _MS_PROGRESS["done"] = i
-        data = _finmind_get("TaiwanStockDividend", code, start_date, end_date)
-        by_year: Dict[int, Dict[str, float]] = {}
-        import re as _re_div
-        for rec in data:
-            year_str = rec.get("year", "")
-            cash_raw = float(rec.get("CashEarningsDistribution") or 0)
-            stock_raw = float(rec.get("StockEarningsDistribution") or 0)
-            m_q = _re_div.match(r"(\d+)年第(\d+)季", year_str)
-            m_h1 = _re_div.match(r"(\d+)年前半年度", year_str)
-            m_h2 = _re_div.match(r"(\d+)年後半年度", year_str)
-            m_y = _re_div.match(r"^(\d+)年$", year_str)  # 純年（無季/半年度）
-            if m_q:
-                yr = int(m_q.group(1)) + 1911
-                by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
-                by_year[yr]["cash"] = max(by_year[yr]["cash"], cash_raw)
-                by_year[yr]["stock"] = max(by_year[yr]["stock"], stock_raw)
-            elif m_h1:
-                yr = int(m_h1.group(1)) + 1911
-                by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
-                by_year[yr]["cash"] += cash_raw
-                by_year[yr]["stock"] += stock_raw
-            elif m_h2:
-                yr = int(m_h2.group(1)) + 1911
-                by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
-                by_year[yr]["cash"] += cash_raw
-                by_year[yr]["stock"] += stock_raw
-            elif m_y:
-                yr = int(m_y.group(1)) + 1911
-                by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
-                by_year[yr]["cash"] = max(by_year[yr]["cash"], cash_raw)
-                by_year[yr]["stock"] = max(by_year[yr]["stock"], stock_raw)
-            else:
-                continue
-        # 寫入 DB
-        for yr, d in by_year.items():
-            fetch_rows.append((code, yr, d["cash"], d["stock"], "finmind"))
-        if (i + 1) % 10 == 0 and progress_callback:
-            progress_callback(i + 1, len(to_fetch))
-        time.sleep(0.35)
+    _MS_PROGRESS["error"] = ""  # 重設錯誤狀態
+    import re as _re_div
+    try:
+        for i, code in enumerate(to_fetch):
+            _MS_PROGRESS["done"] = i
+            data = _finmind_get("TaiwanStockDividend", code, start_date, end_date)
+            by_year: Dict[int, Dict[str, float]] = {}
+            for rec in data:
+                year_str = rec.get("year", "")
+                cash_raw = float(rec.get("CashEarningsDistribution") or 0)
+                stock_raw = float(rec.get("StockEarningsDistribution") or 0)
+                m_q = _re_div.match(r"(\d+)年第(\d+)季", year_str)
+                m_h1 = _re_div.match(r"(\d+)年前半年度", year_str)
+                m_h2 = _re_div.match(r"(\d+)年後半年度", year_str)
+                m_y = _re_div.match(r"^(\d+)年$", year_str)  # 純年（無季/半年度）
+                if m_q:
+                    yr = int(m_q.group(1)) + 1911
+                    by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
+                    by_year[yr]["cash"] = max(by_year[yr]["cash"], cash_raw)
+                    by_year[yr]["stock"] = max(by_year[yr]["stock"], stock_raw)
+                elif m_h1:
+                    yr = int(m_h1.group(1)) + 1911
+                    by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
+                    by_year[yr]["cash"] += cash_raw
+                    by_year[yr]["stock"] += stock_raw
+                elif m_h2:
+                    yr = int(m_h2.group(1)) + 1911
+                    by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
+                    by_year[yr]["cash"] += cash_raw
+                    by_year[yr]["stock"] += stock_raw
+                elif m_y:
+                    yr = int(m_y.group(1)) + 1911
+                    by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
+                    by_year[yr]["cash"] = max(by_year[yr]["cash"], cash_raw)
+                    by_year[yr]["stock"] = max(by_year[yr]["stock"], stock_raw)
+                else:
+                    continue
+            # 寫入 DB
+            for yr, d in by_year.items():
+                fetch_rows.append((code, yr, d["cash"], d["stock"], "finmind"))
+            if (i + 1) % 10 == 0 and progress_callback:
+                progress_callback(i + 1, len(to_fetch))
+            time.sleep(0.35)
+    except RuntimeError as e:
+        # FinMind 402 額度已用完 → 記下錯誤、跳出 loop
+        # 保留已抓到的 fetch_rows（不丢）
+        _MS_PROGRESS["error"] = str(e)
+        print(f"❌ FinMind 額度錯誤：{e}（已抓 {len(fetch_rows)} 筆、部分寫入 DB）")
     if fetch_rows:
         _upsert_div_history(db_path, fetch_rows)
         # 重新讀一次 DB 拿新資料
@@ -778,8 +800,15 @@ def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = "dividen
     end_date = f"{current_year}-12-31"
     fetch_rows: list = []
     total = len(to_fetch)
+    quota_exceeded = False
     for i, code in enumerate(to_fetch):
-        data = _finmind_get("TaiwanStockDividend", code, start_date, end_date)
+        try:
+            data = _finmind_get("TaiwanStockDividend", code, start_date, end_date)
+        except RuntimeError as e:
+            # FinMind 402 額度用完 → 停止 loop、保留已抓的
+            print(f"❌ {e}")
+            quota_exceeded = True
+            break
         for rec in data:
             yr = _parse_roc_year(rec.get("year", ""))
             if yr == 0:
@@ -795,6 +824,9 @@ def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = "dividen
                 pass
     if fetch_rows:
         _upsert_div_history(db_path, fetch_rows)
+    # 用「負值」表示 FinMind 額度錯誤（讓 caller 知道不是完成）
+    if quota_exceeded:
+        return -1
     return len(to_fetch)
 
 
@@ -3779,6 +3811,14 @@ class StrategyGUI(tk.Tk):
         """補抓股利完成"""
         self._ms_dividend_fetching = False
         self._ms_refresh_dividend_status()
+        if added == -1:
+            # FinMind 額度用完（_background_fetch_all_dividend 回傳 -1）
+            self._ms_status.set(
+                "❌ 補抓中斷：FinMind 額度用完（status 402）｜"
+                "請升級 plan 或等下月重置｜已補抓的資料已寫入 DB"
+            )
+            self.logger.log("❌ 補抓股利中斷：FinMind 額度用完（status 402）")
+            return
         self._ms_status.set(
             f"✅ 補抓股利完成：新增 {added} 檔｜{self._ms_dividend_status.get()}"
         )
@@ -3911,7 +3951,11 @@ class StrategyGUI(tk.Tk):
         stage = _MS_PROGRESS.get("stage", "")
         done = _MS_PROGRESS.get("done", 0)
         total = _MS_PROGRESS.get("total", 0)
-        if total > 0:
+        err = _MS_PROGRESS.get("error", "")
+        if err:
+            # FinMind 402 額度錯誤 → 在狀態列明顯提示
+            self._ms_status.set(f"❌ {err[:80]}")
+        elif total > 0:
             pct = min(100, int(done / total * 100))
             self._ms_progress["value"] = pct
             self._ms_status.set(f"🔄 抓取{stage}中... {done}/{total} ({pct}%)")

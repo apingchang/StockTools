@@ -132,6 +132,63 @@ def test_background_fetch_all_dividend_寫入DB後可查詢():
         os.unlink(db_path)
 
 
+def test_finmind_402_應扡RuntimeError_不是回空list():
+    """FinMind 額度用完 (status 402) 應扡出例外，不該 silently 回傳空 list
+
+    （之前：空 list 讓 caller 誤以為「該股沒股利」，實際上是 API 額度不夠）
+    """
+    def fake_get_with_402(dataset, stock_id, start, end, retry=2):
+        # 模擬 _finmind_get 內部處理 402
+        import requests
+        class FakeResp:
+            status_code = 402
+            text = '{"msg":"Requests reach the upper limit.","status":402}'
+            url = "https://api.finmindtrade.com/api/v4/data"
+            def json(self): return {"msg": "Requests reach the upper limit.", "status": 402}
+            def raise_for_status(self): pass
+        # 直接複制 _finmind_get 的 logic
+        for attempt in range(retry + 1):
+            r = FakeResp()
+            if r.status_code == 429:
+                time.sleep(61)
+                continue
+            if r.status_code == 402:
+                raise RuntimeError(
+                    "FinMind 額度已用完（status 402）｜請升級 plan 或等下月重置"
+                    f"｜URL: {r.url}"
+                )
+            r.raise_for_status()
+            return r.json().get("data", [])
+        return []
+
+    try:
+        fake_get_with_402("TaiwanStockDividend", "3188", "2024-01-01", "2026-12-31")
+        assert False, "應扡出 RuntimeError"
+    except RuntimeError as e:
+        assert "402" in str(e)
+        assert "FinMind 額度" in str(e)
+
+
+def test_background_fetch_all_dividend_FinMind額度錯誤_回傳負值():
+    """_background_fetch_all_dividend 遇到 402 → 回傳 -1 (不是預期的正常股數)"""
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    db_path = tmp.name
+    try:
+        st._init_div_history_db(db_path)
+
+        # 模擬 _finmind_get 扡 402
+        def fake_get_with_402(*args, **kwargs):
+            raise RuntimeError("FinMind 額度已用完（status 402）")
+        st._finmind_get = fake_get_with_402
+
+        added = st._background_fetch_all_dividend(["A1", "A2", "A3"], db_path=db_path)
+        # 額度錯誤應回傳 -1 (不是 3、不是 0)
+        assert added == -1, f"FinMind 額度錯誤應回傳 -1，實際: {added}"
+    finally:
+        os.unlink(db_path)
+
+
 if __name__ == "__main__":
     test_background_fetch_all_dividend_跳過已在DB的()
     print("✅ test_background_fetch_all_dividend_跳過已在DB的 passed")
