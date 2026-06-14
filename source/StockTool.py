@@ -38,6 +38,13 @@ Python 版本: 3.8+
 - 新加 _query_div_history_with_fetched 函數（用 fetched_at 判斷過期）
 - 強化 402 額度訊息（已完成 X/Y 檔｜請下月重置或升級 plan）
 
+【手動選股 Tab 升級】（Phase 5：「即時抓股價」checkbox）
+- 跑選股前可勾選「🔄 即時抓股價」→ 重新抓 price_df 全部股票的最新股價
+- 預設不勾（用 cache 背景抓的版本、較快）
+- 設計原因：背景重抓股價的時間跟使用者看見的時間可能有差
+  → 勾選後跑選股前會用最新股價（但會等股價抓完、較慢）
+- 順手加 CLI 手動覆寫工具（fetch_dividend.py update）
+
 【pytest】59 個 test 全部通過 ✅
 - test_dividend_year_mapping.py（5 個）
 - test_pe_filter.py（5 個）
@@ -3692,6 +3699,12 @@ class StrategyGUI(tk.Tk):
         btn_row.pack(fill="x", pady=(12, 0))
         ttk.Button(btn_row, text="🔍 開始選股",
                    command=self._ms_run_selection).pack(fill="x", pady=1)
+        # V0.9.5+: 跑選股前是否重抓股價（預設不勾、用 cache）
+        self._ms_refresh_price_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            btn_row, text="🔄 即時抓股價（跑前重抓全部股票，較慢）",
+            variable=self._ms_refresh_price_var
+        ).pack(anchor="w")
         # V0.9.5: 手動重抓股價（背景跑中就跳過）
         ttk.Button(btn_row, text="🔄 重新抓股價",
                    command=self._ms_force_refresh_price).pack(fill="x", pady=1)
@@ -4121,6 +4134,36 @@ class StrategyGUI(tk.Tk):
                 price_df = getattr(self, '_price_df', None)
                 revenue_df = getattr(self, '_revenue_df', None)
                 eps_df = getattr(self, '_eps_df', None)
+
+                # V0.9.5+: 「即時抓股價」checkbox → 跑選股前重抓 price_df 全部股票的最新股價
+                # 背景重抓的股價可能跟使用者看到的時間不同
+                # 勾選後會走 FinMind price API 重抓全部（可能需要 30-60 秒）
+                if getattr(self, '_ms_refresh_price_var', None) and self._ms_refresh_price_var.get():
+                    if price_df is not None and not price_df.empty:
+                        all_codes = price_df["股票代號"].astype(str).str.strip().tolist()
+                        print(f"🔄 即時抓股價中... {len(all_codes)} 檔")
+                        try:
+                            fresh = _fetch_finmind_prices_batch(all_codes)
+                            if not fresh.empty and "現價" in fresh.columns:
+                                # merge：新價覆蓋舊價、沒抓到的保持原值
+                                fresh_small = fresh[["股票代號"]].copy()
+                                if "現價" in fresh.columns:
+                                    fresh_small["現價"] = fresh["現價"]
+                                if "成交量_張" in fresh.columns:
+                                    fresh_small["成交量_張"] = fresh["成交量_張"]
+                                # 用股票代號對齊覆蓋
+                                price_df = price_df.merge(
+                                    fresh_small, on="股票代號", how="left", suffixes=("", "_fresh")
+                                )
+                                if "現價_fresh" in price_df.columns:
+                                    price_df["現價"] = price_df["現價_fresh"].fillna(price_df["現價"])
+                                    price_df = price_df.drop(columns=["現價_fresh"])
+                                if "成交量_張_fresh" in price_df.columns:
+                                    price_df["成交量_張"] = price_df["成交量_張_fresh"].fillna(price_df["成交量_張"])
+                                    price_df = price_df.drop(columns=["成交量_張_fresh"])
+                                print(f"✅ 即時股價完成：覆蓋 {len(fresh)} 檔")
+                        except Exception as _e:
+                            print(f"⚠️ 即時抓股價失敗：{_e}（用原 cache 繼續）")
 
                 # fallback 1：若 GUI 沒記、但 cache/ 有 → 讀 cache
                 # 注：讀 cache 前先檢查 last_update；若 != today 就走 get_or_fetch 重抓
