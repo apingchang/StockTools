@@ -1,14 +1,52 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║                          台灣股市量化選股系統 v0.9.4                             ║
+║                          台灣股市量化選股系統 v0.9.5-alpha                       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-V0.9.4
+V0.9.5-alpha
 【版本資訊】
-Version: v0.9.4
-最後更新: 2026-06-11 (Asia/Taipei)
+Version: v0.9.5-alpha
+最後更新: 2026-06-14 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-alpha 更新內容】2026-06-14
+════════════════════════════════════════════════════════════════════════════════
+【手動選股 Tab 升級】（Phase 1：背景重抓股價 + PE 過濾）
+- App 啟動時背景重抓股價（跳過今天已抓的 cache）
+- 手動選股 Tab「🔄 重新抓股價」按鈕
+- Race condition 防呆（_bg_price_fetching flag）
+- PE 接近 0 過濾（EPS < 0.05 → PE = None，解決大城地產 PE=300 爆炸值）
+
+【手動選股 Tab 升級】（Phase 2：股利DB + 修殖利率年份對應 bug）
+- 股利歷史庫 dividend_history.db（同 eps_history 風格）
+- 修 Bug：殖利率年份對應錯誤（cy-1=今年、cy-2=去年、cy-3=前年）
+
+【手動選股 Tab 升級】（Phase 3：補抓股利 + 100檔/次分批）
+- 「💰 補抓全部股利 (一次性)」→「💰 掃描全部股票 (100檔/次)」
+- 新增「🎯 指定股補抓 (推薦 Free tier)」按鈕
+- 每次只抓 100 檔、可分散跑（Free tier 300-1000 筆/月額度友善）
+- 新增 scripts/fetch_dividend.py（CLI 補抓介面、對話中也能跑）
+
+【手動選股 Tab 升級】（Phase 4：B 邏輯篩選 + DB cache 過期）
+- 改用 pass_score (達標) + data_score (有資料) 雙計分
+- 殖利率 None 不再被視為達標、None 排到結果後面
+- 至少要有一個條件有資料才納入結果
+- 沒結果 → 「❌ 這次篩選沒有合格股票」+ 可能原因提示
+- DB cache 過期（> 30 天）→ 自動重抓 FinMind
+- 新加 _query_div_history_with_fetched 函數（用 fetched_at 判斷過期）
+- 強化 402 額度訊息（已完成 X/Y 檔｜請下月重置或升級 plan）
+
+【pytest】59 個 test 全部通過 ✅
+- test_dividend_year_mapping.py（5 個）
+- test_pe_filter.py（5 個）
+- test_dividend_specific.py（10 個）
+- test_dividend_fetch_all.py（6 個）
+- test_dividend_scan_batch.py（8 個）
+- test_fetch_dividend_cli.py（10 個）
+- test_filter_b_logic.py（7 個）
+- test_div_cache_expiry.py（8 個）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.4 更新內容】2026-06-11
@@ -296,7 +334,7 @@ class GuiLogger:
 def build_session() -> requests.Session:
     s = requests.Session()
     s.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.9.4-GUI",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.9.5-alpha",
         "Accept": "application/json,text/plain,*/*"
     })
     return s
@@ -2336,7 +2374,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     s = build_session()
 
     logger.log("=" * 60)
-    logger.log("🚀 StockTool v0.9.4 開始執行")
+    logger.log("🚀 StockTool v0.9.5-alpha 開始執行")
     logger.log(f"   評分系統: {'多因子評分' if cfg.use_enhanced_score else '簡易評分'}")
     logger.log(f"   技術指標: 強化版 (MTF={cfg.use_mtf_confirmation}, 背離={cfg.use_divergence_detection})")
     logger.log("=" * 60)
@@ -3003,7 +3041,7 @@ class _CalendarDialog:
 class StrategyGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("StockTool v0.9.4-GUI (Multi-Factor + Top10 Backtest + Portfolio)")
+        self.title("StockTool v0.9.5-alpha (Multi-Factor + Top10 Backtest + Portfolio)")
 
         self.log_queue = queue.Queue()
         self.logger = GuiLogger(self.log_queue)
@@ -5130,7 +5168,7 @@ class StrategyGUI(tk.Tk):
     def _on_run(self):
         self.run_btn.config(state="disabled")
         self.console.insert("end", "=" * 60 + "\n")
-        self.console.insert("end", "🚀 StockTool v0.9.4 開始執行\n")
+        self.console.insert("end", "🚀 StockTool v0.9.5-alpha 開始執行\n")
         self.console.insert("end", "=" * 60 + "\n")
         self.console.see("end")
 
