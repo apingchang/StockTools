@@ -442,6 +442,29 @@ def _query_div_history(db_path: str, codes: list) -> dict:
         result[str(code).strip()][year] = {"cash": cash or 0.0, "stock": stock or 0.0}
     return result
 
+
+def _query_div_history_with_fetched(db_path: str, codes: list) -> dict:
+    """查詢多檔股票的股利 + fetched_at → {code: {"_fetched_at": iso_str, "years": {year: {cash, stock}}}}
+
+    V0.9.5+ 用來判斷 DB 資料是否過期（> cache_max_age_days 天）
+    """
+    import sqlite3
+    if not codes:
+        return {}
+    with sqlite3.connect(db_path) as conn:
+        placeholders = ",".join("?" * len(codes))
+        rows = conn.execute(
+            f"SELECT stock_id, year, cash, stock, fetched_at FROM dividend_history WHERE stock_id IN ({placeholders})",
+            codes,
+        ).fetchall()
+    result: Dict[str, Dict] = {}
+    for code, year, cash, stock, fetched_at in rows:
+        code = str(code).strip()
+        if code not in result:
+            result[code] = {"_fetched_at": fetched_at, "years": {}}
+        result[code]["years"][year] = {"cash": cash or 0.0, "stock": stock or 0.0}
+    return result
+
 def _div_history_stats(db_path: str) -> dict:
     import sqlite3
     if not os.path.exists(db_path):
@@ -685,10 +708,13 @@ def _fetch_finmind_prices_batch(stock_ids: List[str],
 def _fetch_finmind_dividend(stock_ids: List[str],
                              db_path: str = "dividend_history.db",
                              progress_callback=None,
-                             skip_remote: bool = False) -> pd.DataFrame:
+                             skip_remote: bool = False,
+                             cache_max_age_days: int = 30) -> pd.DataFrame:
     """
-    取得近 3 年股利（先查 DB，沒有的才即時抓 FinMind 並寫回 DB）。
+    取得近 3 年股利（先查 DB，沒有的、或過期的才即時抓 FinMind 並寫回 DB）。
     - skip_remote=True: DB 沒有的回 None，不抓 FinMind（避免 rate limit）
+    - cache_max_age_days：DB 資料超過 N 天視為過期（預設 30 天）→ 重抓 FinMind
+      （避免 DB 過期→使用者誤以為沒額度問題是 DB 缺漏）
     - 第一次跑：會 FinMind 抓一批 + 寫 DB
     - 之後跑：只查 DB，不打網路
     """
@@ -697,12 +723,31 @@ def _fetch_finmind_dividend(stock_ids: List[str],
     start_date = f"{current_year - 2}-01-01"
     end_date = f"{current_year}-12-31"
 
-    # 1. 先查 DB
+    # 1. 先查 DB（含 fetched_at 用來判斷過期）
     _init_div_history_db(db_path)
+    cached_with_fetched = _query_div_history_with_fetched(
+        db_path, [str(c).strip() for c in stock_ids]
+    )
     cached = _query_div_history(db_path, [str(c).strip() for c in stock_ids])
 
     # 2. 區分「DB 有的」跟「要即時抓的」
-    to_fetch = [str(c).strip() for c in stock_ids if str(c).strip() not in cached]
+    #    - DB 沒有的 → 抓
+    #    - DB 有但過期的（> cache_max_age_days）→ 抓
+    #    - DB 有且新鮮的 → 跳過
+    #    - cache_max_age_days < 0 視為「永不過期」→ 保持原本行為（向後相容）
+    from datetime import datetime as _dt, timedelta as _td
+    if cache_max_age_days < 0:
+        threshold_iso = None  # 永不過期
+    else:
+        threshold_iso = (_dt.now() - _td(days=cache_max_age_days)).isoformat()
+    to_fetch = []
+    for c in [str(c).strip() for c in stock_ids]:
+        if c not in cached_with_fetched:
+            to_fetch.append(c)
+        elif threshold_iso is not None:
+            fetched_at = cached_with_fetched[c].get("_fetched_at", "")
+            if fetched_at and fetched_at < threshold_iso:
+                to_fetch.append(c)  # 過期
     if skip_remote:
         # 跳過 FinMind 抓取：DB 沒有的回 None（避免 rate limit）
         to_fetch = []
@@ -1000,72 +1045,121 @@ def _run_manual_selection(
         base.loc[yld2_mask, "去年現金股利"] / base.loc[yld2_mask, "現價"] * 100
     ).round(2)
 
-    # 10. 應用篩選條件
-    mask = pd.Series([True] * len(base), index=base.index)
+    # 10. 應用篩選條件（V0.9.5+ B 邏輯）
+    #     改動：原本是「AND mask」直接排除，這版改成「每檔股票計分」
+    #     - pass_score：達標的條件數（有資料且值 >= 門檻）
+    #     - data_score：有資料的條件數（有值，不管是否達標）
+    #     - 至少要有一個被勾選的條件「有資料」才納入結果（_data_score > 0）
+    #     - None 的股票不視為「達標」、排到結果後面（但仍可見在 top_n 後段）
+    #     - 沒結果會在 caller 判斷並提示「這次篩選沒有合格股票」
+    pass_score = pd.Series([0] * len(base), index=base.index)
+    data_score = pd.Series([0] * len(base), index=base.index)
 
+    # 累計營收 YoY ≥ X
     if filters.get("min_rev_yoy") is not None:
-        mask &= base["營收YoY(%)"].fillna(-9999) >= filters["min_rev_yoy"]
+        rev = base["營收YoY(%)"]
+        has_data = rev.notna()
+        passes = has_data & (rev >= filters["min_rev_yoy"])
+        data_score = data_score + has_data.astype(int)
+        pass_score = pass_score + passes.astype(int)
 
+    # PE ≤ X（注意：filters key 是 min_pe 但語意是「PE 不超過」）
     if filters.get("min_pe") is not None:
-        mask &= base["PE"].fillna(9999) <= filters["min_pe"]
+        pe = base["PE"]
+        has_data = pe.notna()
+        passes = has_data & (pe <= filters["min_pe"])
+        data_score = data_score + has_data.astype(int)
+        pass_score = pass_score + passes.astype(int)
 
+    # 現價 ≥ X
     if filters.get("min_price") is not None:
-        mask &= base["現價"].fillna(0) >= filters["min_price"]
+        price = base["現價"]
+        has_data = price.notna() & (price > 0)
+        passes = has_data & (price >= filters["min_price"])
+        data_score = data_score + has_data.astype(int)
+        pass_score = pass_score + passes.astype(int)
 
+    # 月均成交量 ≥ X
     if filters.get("min_volume") is not None:
-        # 成交量為 None（cache 沒資料）視為跳過
-        is_na = base["成交量_張"].isna()
-        vol = base["成交量_張"].fillna(0)
-        mask &= is_na | (vol >= filters["min_volume"])
+        vol = base["成交量_張"]
+        has_data = vol.notna()
+        passes = has_data & (vol >= filters["min_volume"])
+        data_score = data_score + has_data.astype(int)
+        pass_score = pass_score + passes.astype(int)
 
+    # 今年現金股利 ≥ X（元）
     if filters.get("min_cash_div") is not None:
-        mask &= base["今年現金股利"].fillna(0) >= filters["min_cash_div"]
+        cd = base["今年現金股利"]
+        has_data = cd.notna()
+        passes = has_data & (cd >= filters["min_cash_div"])
+        data_score = data_score + has_data.astype(int)
+        pass_score = pass_score + passes.astype(int)
 
+    # 今年股票股利 ≥ X（元）
     if filters.get("min_stock_div") is not None:
-        mask &= base["今年股票股利"].fillna(0) >= filters["min_stock_div"]
+        sd = base["今年股票股利"]
+        has_data = sd.notna()
+        passes = has_data & (sd >= filters["min_stock_div"])
+        data_score = data_score + has_data.astype(int)
+        pass_score = pass_score + passes.astype(int)
 
+    # 去年現金股利 ≥ X（元）
     if filters.get("min_last_cash_div") is not None:
-        mask &= base["去年現金股利"].fillna(0) >= filters["min_last_cash_div"]
+        cd = base["去年現金股利"]
+        has_data = cd.notna()
+        passes = has_data & (cd >= filters["min_last_cash_div"])
+        data_score = data_score + has_data.astype(int)
+        pass_score = pass_score + passes.astype(int)
 
+    # 去年股票股利 ≥ X（元）
     if filters.get("min_last_stock_div") is not None:
-        mask &= base["去年股票股利"].fillna(0) >= filters["min_last_stock_div"]
+        sd = base["去年股票股利"]
+        has_data = sd.notna()
+        passes = has_data & (sd >= filters["min_last_stock_div"])
+        data_score = data_score + has_data.astype(int)
+        pass_score = pass_score + passes.astype(int)
 
-    # 殖利率（UI 用 min_cash_div_yld / min_last_cash_yld）
-    # 注：殖利率 None（没股利資料）視為「跳過」該條件（不排除）
-    # 殖利率 = 0（有資料但股利率為 0）才視為「不達標」
+    # 今年現金殖利率 ≥ X%
+    # V0.9.5+ B 邏輯重點：殖利率 None 不視為「達標」、要當「未達標」記錄
     if filters.get("min_cash_div_yld") is not None:
-        yld = base["今年現金殖利率(%)"].fillna(0)  # None -> 0
-        # None 仍然表示沒資料，這裡用一個標記：原本是 None 的，自動視為「達標」
-        is_na = base["今年現金殖利率(%)"].isna()
-        mask &= is_na | (yld >= filters["min_cash_div_yld"])
+        yld = base["今年現金殖利率(%)"]
+        has_data = yld.notna()
+        passes = has_data & (yld >= filters["min_cash_div_yld"])
+        data_score = data_score + has_data.astype(int)
+        pass_score = pass_score + passes.astype(int)
 
+    # 去年現金殖利率 ≥ X%
     if filters.get("min_last_cash_yld") is not None:
-        yld = base["去年現金殖利率(%)"].fillna(0)
-        is_na = base["去年現金殖利率(%)"].isna()
-        mask &= is_na | (yld >= filters["min_last_cash_yld"])
+        yld = base["去年現金殖利率(%)"]
+        has_data = yld.notna()
+        passes = has_data & (yld >= filters["min_last_cash_yld"])
+        data_score = data_score + has_data.astype(int)
+        pass_score = pass_score + passes.astype(int)
 
-    result = base[mask].copy()
+    # 過濾：至少要有一個被勾選的條件「有資料」（_data_score > 0）
+    # 注：如果是「什麼都沒勾」的情況、_data_score 全 0、則不過濾（保留全部）
+    if (data_score > 0).any():
+        result = base[data_score > 0].copy()
+        result["_pass_score"] = pass_score[data_score > 0]
+        result["_data_score"] = data_score[data_score > 0]
+    else:
+        result = base.copy()
+        result["_pass_score"] = pass_score
+        result["_data_score"] = data_score
 
-    # 11. 排序：營收YoY > 今年股票股利 > 今年現金殖利率 > PE（後兩者以殖利率高分為佳，PE 低分為佳）
-    # PE 越小越好 → 排序時用 -PE
-    # 註：實際欄位是「累計營收YoY(%)」（不是「營收YoY(%)」）
-    result["_sort_pe"] = -result["PE"].fillna(9999)
+    # 11. 排序：通過分數多 > 資料分數多 > 殖利率有值 > 殖利率高 > 股票股利高 > 營收 YoY 高 > PE 低
+    # 這樣可以達到「B 邏輯：None 排後面、至少一項過、達標多的排前面」
+    result["_yld_has_data"] = result["今年現金殖利率(%)"].notna().astype(int)
+    result["_sort_yld"] = -result["今年現金殖利率(%)"].fillna(-9999)  # 殖利率高在前（None 排最後）
     result["_sort_rev"] = result["營收YoY(%)"].fillna(-9999)
     result["_sort_stock"] = result["今年股票股利"].fillna(0)
-    result["_sort_cash_yld"] = result["今年現金殖利率(%)"].fillna(-9999)
+    result["_sort_pe"] = result["PE"].fillna(9999)
 
-    # 先依「主要欄位」排序（None 視為極小值）
     result = result.sort_values(
-        ["_sort_rev", "_sort_stock", "_sort_cash_yld", "_sort_pe"],
-        ascending=[False, False, False, False]
+        ["_pass_score", "_data_score", "_yld_has_data", "_sort_yld", "_sort_stock", "_sort_rev", "_sort_pe"],
+        ascending=[False, False, False, False, False, False, True]
     ).reset_index(drop=True)
-    # 再把「無營收」股票（營收YoY = None）排到最後，但保留 top_n 內
-    none_rev_mask = result["營收YoY(%)"].isna()
-    if none_rev_mask.any():
-        no_rev = result[none_rev_mask]
-        with_rev = result[~none_rev_mask]
-        # 合併：有營收的在前（依原本排序），無營收的接在後面
-        result = pd.concat([with_rev, no_rev], ignore_index=True)
+
     result = result.head(top_n).reset_index(drop=True)
 
     # 12. 整理輸出欄位
@@ -4087,8 +4181,14 @@ class StrategyGUI(tk.Tk):
         total = _MS_PROGRESS.get("total", 0)
         err = _MS_PROGRESS.get("error", "")
         if err:
-            # FinMind 402 額度錯誤 → 在狀態列明顯提示
-            self._ms_status.set(f"❌ {err[:80]}")
+            # V0.9.5+ 強化 402 額度提示
+            if "402" in err or "額度" in err:
+                self._ms_status.set(
+                    f"❌ FinMind 額度用完（status 402）｜已完成 {done}/{total} 檔｜"
+                    f"已寫入的資料已保存｜💡 請下月重置後再跑或升級 plan"
+                )
+            else:
+                self._ms_status.set(f"❌ {err[:80]}")
         elif total > 0:
             pct = min(100, int(done / total * 100))
             self._ms_progress["value"] = pct
@@ -4101,7 +4201,13 @@ class StrategyGUI(tk.Tk):
         """把 DataFrame 顯示在 Treeview 上"""
         self._ms_tree.delete(*self._ms_tree.get_children())
         if result.empty:
-            self._ms_status.set("⚠️ 沒有符合條件的股票")
+            # V0.9.5+ 强化提示：可能原因
+            self._ms_status.set(
+                "❌ 這次篩選沒有合格股票｜可能原因："
+                "(1) 條件太嚴格、(2) DB 缺漏（殖利率/股利為 None 的股票已被排除）、"
+                "(3) 可按「💰 掃描全部股票 (100檔/次)」補抓股利"
+            )
+            self.logger.log("❌ 篩選無結果（可能條件太嚴格或 DB 缺漏）")
             return
 
         # 快取勾選狀態（股票代號 → 是否勾選）
