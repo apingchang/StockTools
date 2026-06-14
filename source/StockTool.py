@@ -784,17 +784,37 @@ def _fetch_finmind_dividend(stock_ids: List[str],
                  f"{current_year - 2}現金股利", f"{current_year - 2}股票股利"])
 
 def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = "dividend_history.db",
-                                  progress_callback=None) -> int:
+                                  progress_callback=None, batch_size: Optional[int] = None) -> int:
     """
     背景抓取全市場股利寫入 DB（手動啟動用）。
-    回傳實際「新增寫入 DB」的股數（原本沒資料的）。
-    注：進度以「拿過 FinMind 的股數」計，不以「DB 新增 row 數」計。
+
+    Parameters
+    ----------
+    stock_ids : List[str]
+        股票代號清單
+    db_path : str
+        DB 路徑
+    progress_callback : callable
+        進度回呼 (done, total)
+    batch_size : int | None
+        - None = 一次抓全部缺漏（舊行為）
+        - 100  = 只抓缺漏中的前 N 檔（V0.9.5+ 推薦用，Free tier 額度友善）
+
+    Returns
+    -------
+    int
+        這次實際抓的股數（原本沒資料的）
+        -1 = FinMind 402 額度錯誤
+         0 = 沒缺漏、沒抓
     """
     _init_div_history_db(db_path)
     cached = _query_div_history(db_path, [str(c).strip() for c in stock_ids])
     to_fetch = [c for c in stock_ids if str(c).strip() not in cached]
     if not to_fetch:
         return 0
+    # V0.9.5+: 批次切片（Free tier 額度友善、可分散跑）
+    if batch_size is not None and batch_size > 0 and len(to_fetch) > batch_size:
+        to_fetch = to_fetch[:batch_size]
     current_year = datetime.now().year
     start_date = f"{current_year - 2}-01-01"
     end_date = f"{current_year}-12-31"
@@ -3556,12 +3576,13 @@ class StrategyGUI(tk.Tk):
         self._ms_price_status = tk.StringVar(value="股價未抓取")
         ttk.Label(btn_row, textvariable=self._ms_price_status,
                   font=("Helvetica", 8), foreground="#666666").pack(anchor="w", pady=(0, 4))
-        # V0.9.5: 一次性補抓全部股利（避免每次選股都打 FinMind）
-        ttk.Button(btn_row, text="💰 補抓全部股利 (一次性)",
-                   command=self._ms_fetch_all_dividend).pack(fill="x", pady=1)
-        # V0.9.5: 指定股補抓（Free tier 適用：手動輸入股號、只要用少數 API 額度）
+        # V0.9.5+: 指定股補抓（Free tier 適用：手動輸入股號、只要用少數 API 額度）
+        # 順序放在 💰 上面（推薦用法：只抓關心的）
         ttk.Button(btn_row, text="🎯 指定股補抓 (推薦 Free tier)",
                    command=self._ms_fetch_specific_dividend).pack(fill="x", pady=1)
+        # V0.9.5+: 掃描全部股票 (100檔/次) — 一個月一個月慢慢補、按次分批避免 Free tier 爆 402
+        ttk.Button(btn_row, text="💰 掃描全部股票 (100檔/次)",
+                   command=self._ms_fetch_all_dividend).pack(fill="x", pady=1)
         self._ms_dividend_status = tk.StringVar(value="股利 DB: 計算中...")
         ttk.Label(btn_row, textvariable=self._ms_dividend_status,
                   font=("Helvetica", 8), foreground="#666666").pack(anchor="w", pady=(0, 4))
@@ -3745,15 +3766,19 @@ class StrategyGUI(tk.Tk):
         except Exception as e:
             self._ms_dividend_status.set(f"股利 DB: 查詢失敗 {str(e)[:30]}")
 
+    # V0.9.5+: 「💰 掃描全部股票」分批參數
+    _MS_SCAN_BATCH = 100  # 每批 100 檔（Free tier 300-1000 筆/月額度友善）
+
     def _ms_fetch_all_dividend(self):
-        """手動選股 Tab「💰 補抓全部股利」按鈕
+        """手動選股 Tab「💰 掃描全部股票 (100檔/次)」按鈕
         - 從 price_df 取所有股票代號
-        - 比對 DB，補抓缺漏的（一次性，預計 10+ 分鐘）
-        - 抓完寫入 DB，之後所有查詢直接用 DB
+        - 比對 DB，只補抓缺漏中的「前 100 檔」
+        - 一個月一個月慢慢補：跑完停、下次再按繼續抓下一批
+        - 全部抓完後股利 DB 完整、可發現關注清單外的標的
         """
         # 避免重複
         if getattr(self, "_ms_dividend_fetching", False):
-            self._ms_status.set("⏳ 補抓股利中，請稍候...")
+            self._ms_status.set("⏳ 掃描股利中，請稍候...")
             return
 
         # 計算缺漏數
@@ -3763,20 +3788,35 @@ class StrategyGUI(tk.Tk):
             self._ms_status.set("✅ 股利 DB 完整、無需補抓")
             return
 
+        # 解析缺漏數（從 status label 抓數字）
+        import re as _re_scan
+        m = _re_scan.search(r"缺漏\s*(\d+)", cur)
+        missing = int(m.group(1)) if m else 0
+        if missing <= 0:
+            self._ms_status.set("✅ 股利 DB 完整、無需補抓")
+            return
+
+        # 分批計算
+        batch = self._MS_SCAN_BATCH
+        this_batch = min(batch, missing)
+        runs_left_total = (missing + batch - 1) // batch  # 含這次
+
         # 確認
         if not messagebox.askyesno(
-            "確認補抓股利",
-            f"將從 FinMind 補抓全部缺漏的股利資料到本地 DB。\n\n"
+            "確認掃描股利",
+            f"這次會從 FinMind 掃描補抓 {this_batch} 檔股利寫入本地 DB。\n\n"
             f"目前狀態：{cur}\n\n"
-            f"⚠️ 預計需要 {int(missing * 0.4) + 1} 秒、{missing} 筆 API 額度。\n"
-            f"⚠️ Free tier 額度限制 300-1000 筆/月，缺漏太多會 402 失敗。\n"
-            f"⚠️ 推薦用「🎯 指定股補抓」只抓你關心的個股。\n\n"
+            f"📦 分批設定：{batch} 檔/次\n"
+            f"⏱️ 預計 {int(this_batch * 0.4) + 1} 秒、{this_batch} 筆 API 額度\n"
+            f"🔁 全部補完約需再按 {runs_left_total} 次（可分散在不同天）\n\n"
+            f"💡 Free tier 額度 300-1000 筆/月，建議一天最多跑 1-2 次\n"
+            f"💡 想只抓關注個股可用「🎯 指定股補抓」更省額度\n\n"
             f"按「Yes」開始，期間可按「取消」中斷。",
         ):
             return
 
         self._ms_dividend_fetching = True
-        self._ms_status.set("🔄 補抓全部股利中（背景跑、請勿關 App）...")
+        self._ms_status.set(f"🔄 掃描股利中（{this_batch}/{missing} 檔、請勿關 App）...")
 
         # 取得所有股票代號
         price_df = getattr(self, "_price_df", None)
@@ -3790,7 +3830,7 @@ class StrategyGUI(tk.Tk):
                         pass
         if price_df is None or price_df.empty:
             self._ms_dividend_fetching = False
-            self._ms_status.set("❌ 補抓失敗：未取得股價名單（請先點「重抓股價」）")
+            self._ms_status.set("❌ 掃描失敗：未取得股價名單（請先點「重抓股價」）")
             return
         all_codes = price_df["股票代號"].astype(str).str.strip().tolist()
 
@@ -3799,11 +3839,12 @@ class StrategyGUI(tk.Tk):
                 # 背景補抓：給 progress_callback 讓 UI 更新
                 def _progress(done, total):
                     self.after(0, lambda d=done, t=total: self._ms_status.set(
-                        f"🔄 補抓股利中... {d}/{t}（{int(d/t*100)}%）"
+                        f"🔄 掃描股利中... {d}/{t}（{int(d/t*100)}%）"
                     ))
 
                 added = _background_fetch_all_dividend(
-                    all_codes, db_path="dividend_history.db", progress_callback=_progress,
+                    all_codes, db_path="dividend_history.db",
+                    progress_callback=_progress, batch_size=batch,
                 )
                 self.after(0, lambda: self._on_dividend_fetch_done(added))
             except Exception as e:
@@ -3812,21 +3853,37 @@ class StrategyGUI(tk.Tk):
         threading.Thread(target=_fetch_worker, daemon=True).start()
 
     def _on_dividend_fetch_done(self, added: int):
-        """補抓股利完成"""
+        """補抓股利完成（💰 掃描全部股票 / 🎯 指定股補抓 共用）
+        - 重新 refresh DB 狀態 → 算出剩餘缺漏
+        - 顯示「這次 +X 檔｜剩 Y 檔（再 N 次可補完）」
+        """
         self._ms_dividend_fetching = False
         self._ms_refresh_dividend_status()
+        cur = self._ms_dividend_status.get()
         if added == -1:
             # FinMind 額度用完（_background_fetch_all_dividend 回傳 -1）
             self._ms_status.set(
                 "❌ 補抓中斷：FinMind 額度用完（status 402）｜"
-                "請升級 plan 或等下月重置｜已補抓的資料已寫入 DB"
+                "已補抓的資料已寫入 DB"
             )
             self.logger.log("❌ 補抓股利中斷：FinMind 額度用完（status 402）")
             return
-        self._ms_status.set(
-            f"✅ 補抓股利完成：新增 {added} 檔｜{self._ms_dividend_status.get()}"
-        )
-        self.logger.log(f"✅ 補抓股利完成：新增 {added} 檔")
+        # 從 cur 抓剩餘缺漏（regex）
+        import re as _re_done
+        m = _re_done.search(r"缺漏\s*(\d+)", cur)
+        remaining = int(m.group(1)) if m else 0
+        if remaining == 0:
+            # 全部完成
+            self._ms_status.set(f"✅ 補抓股利完成：新增 {added} 檔｜{cur}")
+            self.logger.log(f"✅ 補抓股利完成：新增 {added} 檔（全部就絡）")
+        else:
+            # 還有缺漏、告訴使用者還要按幾次
+            batch = self._MS_SCAN_BATCH
+            runs_left = (remaining + batch - 1) // batch
+            self._ms_status.set(
+                f"✅ 這次補 {added} 檔｜剩 {remaining} 檔（再按 {runs_left} 次可補完）｜{cur}"
+            )
+            self.logger.log(f"✅ 補抓股利：這次 +{added}｜剩 {remaining} 檔（{runs_left} 次可補完）")
         # 自動重跑選股（讓使用者直接看到補抓後的結果）
         self._ms_run_selection()
 
