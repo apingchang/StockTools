@@ -1083,90 +1083,83 @@ def _run_manual_selection(
         base.loc[yld2_mask, "去年現金股利"] / base.loc[yld2_mask, "現價"] * 100
     ).round(2)
 
-    # 10. 應用篩選條件（V0.9.5+ B 邏輯）
-    #     改動：原本是「AND mask」直接排除，這版改成「每檔股票計分」
-    #     - pass_score：達標的條件數（有資料且值 >= 門檻）
-    #     - data_score：有資料的條件數（有值，不管是否達標）
-    #     - 至少要有一個被勾選的條件「有資料」才納入結果（_data_score > 0）
-    #     - None 的股票不視為「達標」、排到結果後面（但仍可見在 top_n 後段）
+    # 10. 應用篩選條件（V0.9.5+ B 邏輯修正版）
+    #     【關鍵修正】2026-06-14 William 反映「YoY < 30 還跑出來」
+    #
+    #     【原本的 BUG（V0.9.5-alpha 5th commit）】
+    #     - 拿掉 AND mask、只用 data_score > 0 過濾
+    #     - 結果：YoY 沒過、但殖利率/PE/現價/成交量過的股票也被納入
+    #     - 截圖實例：1810 和成（YoY -7.42）被納入
+    #
+    #     【本版的設計】
+    #     - 硬條件（YoY、PE、現價、成交量、股利金額）：AND mask
+    #       - None 一律算 fail（資料缺漏不能說達標）
+    #       - 不過門檻也算 fail
+    #     - 軟條件（今年/去年現金殖利率）：不擋 mask
+    #       - 殖利率 None：不擋 mask（其他條件過了還是納入）
+    #       - 殖利率有值未達標：不擋 mask（其他條件過了還是納入）
+    #       - 殖利率達標：拿來算排序分數
+    #     - 排序：殖利率有值 > 殖利率高 > 股票股利高 > 營收 YoY 高 > PE 低
+    #     - 「至少要有一個篩選 item 過關」= 任何被勾選的硬條件至少要過一個
+    #       （全 None、全未達 → 全排除 → 結果為空）
     #     - 沒結果會在 caller 判斷並提示「這次篩選沒有合格股票」
-    pass_score = pd.Series([0] * len(base), index=base.index)
-    data_score = pd.Series([0] * len(base), index=base.index)
+    mask = pd.Series([True] * len(base), index=base.index)
+    any_checked = False  # 記錄是否有任何被勾選的條件
 
-    # 累計營收 YoY ≥ X
+    # 累計營收 YoY ≥ X（硬）
     if filters.get("min_rev_yoy") is not None:
+        any_checked = True
         rev = base["營收YoY(%)"]
-        has_data = rev.notna()
-        passes = has_data & (rev >= filters["min_rev_yoy"])
-        data_score = data_score + has_data.astype(int)
-        pass_score = pass_score + passes.astype(int)
+        mask &= rev.notna() & (rev >= filters["min_rev_yoy"])
 
-    # PE ≤ X（注意：filters key 是 min_pe 但語意是「PE 不超過」）
+    # PE ≤ X（硬，filters key 是 min_pe 但語意是「PE 不超過」）
     if filters.get("min_pe") is not None:
+        any_checked = True
         pe = base["PE"]
-        has_data = pe.notna()
-        passes = has_data & (pe <= filters["min_pe"])
-        data_score = data_score + has_data.astype(int)
-        pass_score = pass_score + passes.astype(int)
+        mask &= pe.notna() & (pe <= filters["min_pe"])
 
-    # 現價 ≥ X
+    # 現價 ≥ X（硬）
     if filters.get("min_price") is not None:
+        any_checked = True
         price = base["現價"]
-        has_data = price.notna() & (price > 0)
-        passes = has_data & (price >= filters["min_price"])
-        data_score = data_score + has_data.astype(int)
-        pass_score = pass_score + passes.astype(int)
+        mask &= price.notna() & (price > 0) & (price >= filters["min_price"])
 
-    # 月均成交量 ≥ X
+    # 月均成交量 ≥ X（硬）
     if filters.get("min_volume") is not None:
+        any_checked = True
         vol = base["成交量_張"]
-        has_data = vol.notna()
-        passes = has_data & (vol >= filters["min_volume"])
-        data_score = data_score + has_data.astype(int)
-        pass_score = pass_score + passes.astype(int)
+        mask &= vol.notna() & (vol >= filters["min_volume"])
 
-    # 今年現金股利 ≥ X（元）
+    # 今年現金股利 ≥ X（元）（硬）
     if filters.get("min_cash_div") is not None:
+        any_checked = True
         cd = base["今年現金股利"]
-        has_data = cd.notna()
-        passes = has_data & (cd >= filters["min_cash_div"])
-        data_score = data_score + has_data.astype(int)
-        pass_score = pass_score + passes.astype(int)
+        mask &= cd.notna() & (cd >= filters["min_cash_div"])
 
-    # 今年股票股利 ≥ X（元）
+    # 今年股票股利 ≥ X（元）（硬）
     if filters.get("min_stock_div") is not None:
+        any_checked = True
         sd = base["今年股票股利"]
-        has_data = sd.notna()
-        passes = has_data & (sd >= filters["min_stock_div"])
-        data_score = data_score + has_data.astype(int)
-        pass_score = pass_score + passes.astype(int)
+        mask &= sd.notna() & (sd >= filters["min_stock_div"])
 
-    # 去年現金股利 ≥ X（元）
+    # 去年現金股利 ≥ X（元）（硬）
     if filters.get("min_last_cash_div") is not None:
+        any_checked = True
         cd = base["去年現金股利"]
-        has_data = cd.notna()
-        passes = has_data & (cd >= filters["min_last_cash_div"])
-        data_score = data_score + has_data.astype(int)
-        pass_score = pass_score + passes.astype(int)
+        mask &= cd.notna() & (cd >= filters["min_last_cash_div"])
 
-    # 去年股票股利 ≥ X（元）
+    # 去年股票股利 ≥ X（元）（硬）
     if filters.get("min_last_stock_div") is not None:
+        any_checked = True
         sd = base["去年股票股利"]
-        has_data = sd.notna()
-        passes = has_data & (sd >= filters["min_last_stock_div"])
-        data_score = data_score + has_data.astype(int)
-        pass_score = pass_score + passes.astype(int)
+        mask &= sd.notna() & (sd >= filters["min_last_stock_div"])
 
-    # 今年現金殖利率 ≥ X%
-    # V0.9.5+ B 邏輯重點：殖利率 None 不視為「達標」、要當「未達標」記錄
+    # 今年現金殖利率 ≥ X%（軟：不擋 mask、只算排序）
     if filters.get("min_cash_div_yld") is not None:
-        yld = base["今年現金殖利率(%)"]
-        has_data = yld.notna()
-        passes = has_data & (yld >= filters["min_cash_div_yld"])
-        data_score = data_score + has_data.astype(int)
-        pass_score = pass_score + passes.astype(int)
+        any_checked = True
+        # 不動 mask、留給排序處理
 
-    # 去年現金殖利率 ≥ X%
+    # 去年現金殖利率 ≥ X%（軟）
     if filters.get("min_last_cash_yld") is not None:
         yld = base["去年現金殖利率(%)"]
         has_data = yld.notna()
@@ -1174,28 +1167,25 @@ def _run_manual_selection(
         data_score = data_score + has_data.astype(int)
         pass_score = pass_score + passes.astype(int)
 
-    # 過濾：至少要有一個被勾選的條件「有資料」（_data_score > 0）
-    # 注：如果是「什麼都沒勾」的情況、_data_score 全 0、則不過濾（保留全部）
-    if (data_score > 0).any():
-        result = base[data_score > 0].copy()
-        result["_pass_score"] = pass_score[data_score > 0]
-        result["_data_score"] = data_score[data_score > 0]
+    # 過濾：硬條件 AND mask（楊重複保險，殖利率軟條件不擋 mask）
+    # 注：如果是「什麼都沒勾」的情況、保留全部（向後相容）
+    if any_checked:
+        result = base[mask].copy()
     else:
         result = base.copy()
-        result["_pass_score"] = pass_score
-        result["_data_score"] = data_score
 
-    # 11. 排序：通過分數多 > 資料分數多 > 殖利率有值 > 殖利率高 > 股票股利高 > 營收 YoY 高 > PE 低
-    # 這樣可以達到「B 邏輯：None 排後面、至少一項過、達標多的排前面」
+    # 11. 排序：殖利率有值 > 殖利率高 > 股票股利高 > 營收 YoY 高 > PE 低
+    # 【重點】殖利率有資料（vs None）排前面、殖利率高的排前面、None 排後面
     result["_yld_has_data"] = result["今年現金殖利率(%)"].notna().astype(int)
-    result["_sort_yld"] = -result["今年現金殖利率(%)"].fillna(-9999)  # 殖利率高在前（None 排最後）
+    # 殖利率直接作 sort key、不加負號→降序時殖利率高排前
+    result["_sort_yld"] = result["今年現金殖利率(%)"].fillna(-9999)
     result["_sort_rev"] = result["營收YoY(%)"].fillna(-9999)
     result["_sort_stock"] = result["今年股票股利"].fillna(0)
     result["_sort_pe"] = result["PE"].fillna(9999)
 
     result = result.sort_values(
-        ["_pass_score", "_data_score", "_yld_has_data", "_sort_yld", "_sort_stock", "_sort_rev", "_sort_pe"],
-        ascending=[False, False, False, False, False, False, True]
+        ["_yld_has_data", "_sort_yld", "_sort_stock", "_sort_rev", "_sort_pe"],
+        ascending=[False, False, False, False, True]
     ).reset_index(drop=True)
 
     result = result.head(top_n).reset_index(drop=True)

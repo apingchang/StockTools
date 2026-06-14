@@ -1,21 +1,31 @@
 """
 test_filter_b_logic.py
-驗證 V0.9.5+ 「B 邏輯」篩選器：None 排後面、至少一項有資料、達標多的排前面。
+驗證 V0.9.5+ 「B 邏輯」篩選器：硬條件 AND + 殖利率軟條件排序。
 
-【動機】
-原本 V0.9.5-alpha 的篩選邏輯：
-  is_na | (yld >= filters["min_cash_div_yld"])
-→ 殖利率 None 的股票被視為「達標」、誤導使用者（截圖中 127 檔殖利率都是 --）
-→ 應該改為「B 邏輯」：None 排後面、至少一項過、達標多的排前面
+【V0.9.5-alpha 5th commit 實作錯誤】
+- 拿掉 AND mask、只用 data_score > 0 過濾
+- 結果：YoY < 30 仍會出現（截圖實例：1810 和成 -7.42 卻被納入）
+- 因為只要 PE/現價/成交量其中一個有過，data_score > 0 就被納入
 
-【新邏輯】
-- 每個被勾選的條件：計算 pass_score (達標) 和 data_score (有資料)
-- 至少要有一個條件有資料（data_score > 0）才納入結果
-- 排序：pass_score 多 > data_score 多 > 殖利率有值 > 殖利率高 > ...
+【V0.9.5-alpha 6th commit 修正】
+把篩選條件分兩類：
+- 硬條件（AND mask）：YoY、PE、現價、成交量、股利金額
+  - None 一律算 fail（資料缺漏不能說達標）
+  - 未達門檻也算 fail
+- 軟條件（不擋 mask、只算排序）：今年/去年現金殖利率
+  - 殖利率 None：不擋 mask（其他硬條件過了還是納入）
+  - 殖利率有值未達標：不擋 mask（其他硬條件過了還是納入）
+  - 殖利率達標：拿來算排序分數（排前面）
+
+【為什麼殖利率是「軟條件」】
+- DB 缺漏的股票（2023 檔沒資料）殖利率都是 None
+- 如果殖利率算硬、會誤殺很多本來該納入的股票
+- 殖利率不重要到要擋下其他硬條件都過的股票
+- 但殖利率資料「有」比「沒有」更有用 → 用排序表達
 
 【測試重要提醒】
 _run_manual_selection 內部邏輯：
-1. price_df 參數只取「股票代號、現價、成交量_張」4 欄（其他欄位會被丟掉）
+1. price_df 參數只取「股票代號、現價、成交量_張」3 欄（其他欄位會被丟掉）
 2. 用 _fetch_finmind_dividend 從 DB 拿股利 → mock 必須回傳帶年份欄位的 df
 3. 用「今年現金股利 / 現價」重算「今年現金殖利率(%)」
 """
@@ -68,62 +78,162 @@ def _build_price_df(rows: list) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_殖利率None_不再被視為達標():
-    """原本：殖利率 None 視為達標 → 誤導
-    新邏輯：殖利率 None 不算 pass_score、但不排除（有其他資料的話）
-    
-    Case: A1 (殖利率 2% 達標) vs A2 (殖利率 None、但營收達標)
-    → 兩者都應納入（data_score 都 ≥ 1）
-    → A1 排前、A2 排後
+# ==========================================================
+# 【B 邏輯核心】硬條件 AND mask
+# ==========================================================
+
+def test_硬條件YoY沒過_該股票被排除():
+    """【V0.9.5-alpha 5th commit 的 bug】YoY < 30 仍被納入 → 修正
+    Case: A1 YoY 50% ✓, A2 YoY 10% ✗
+    其他硬條件都過的情況下，A2 仍該被排除
     """
     _setup_mock({
-        "A1": {"this_cash": 1.0, "last_cash": 0.5},   # 殖利率 2%
+        "A1": {"this_cash": 1.0, "last_cash": 0.5},
+        "A2": {"this_cash": 1.0, "last_cash": 0.5},
+    })
+    price_df = _build_price_df([
+        {"股票代號": "A1", "股票名稱": "A1", "現價": 50.0,
+         "營收YoY(%)": 50.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
+        {"股票代號": "A2", "股票名稱": "A2", "現價": 50.0,
+         "營收YoY(%)": 10.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
+    ])
+    revenue_df = pd.DataFrame([
+        {"股票代號": "A1", "營收YoY(%)": 50.0},
+        {"股票代號": "A2", "營收YoY(%)": 10.0},
+    ])
+    filters = {"min_rev_yoy": 30.0}
+    result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=10)
+    assert "A1" in result["股票代號"].values, f"A1 應納入，實際: {result['股票代號'].tolist()}"
+    assert "A2" not in result["股票代號"].values, \
+        f"A2 不應納入（YoY 沒過），實際: {result['股票代號'].tolist()}"
+
+
+def test_硬條件YoY為None_該股票被排除():
+    """硬條件 None = 資料缺漏 → 算 fail、排除"""
+    _setup_mock({
+        "A1": {"this_cash": 1.0, "last_cash": 0.5},
+    })
+    price_df = _build_price_df([
+        {"股票代號": "A1", "股票名稱": "A1", "現價": 50.0,
+         "營收YoY(%)": None, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
+    ])
+    filters = {"min_rev_yoy": 30.0}
+    result = st._run_manual_selection(price_df, pd.DataFrame(), pd.DataFrame(), filters, top_n=10)
+    assert "A1" not in result["股票代號"].values, \
+        f"A1 不應納入（YoY 為 None、無法判斷），實際: {result['股票代號'].tolist()}"
+
+
+# ==========================================================
+# 【B 邏輯核心】殖利率軟條件不擋 mask
+# ==========================================================
+
+def test_殖利率None_但其他硬條件都過_仍納入():
+    """【關鍵 case】殖利率 None 不擋 mask
+    Case: A1 殖利率 5%（達標）vs A2 殖利率 None
+    只要 YoY、PE、現價、成交量都過 → 兩者都納入
+    """
+    _setup_mock({
+        "A1": {"this_cash": 2.5, "last_cash": 0.5},   # 殖利率 5%
         "A2": {"this_cash": None, "last_cash": None},  # 殖利率 None
     })
     price_df = _build_price_df([
         {"股票代號": "A1", "股票名稱": "A1", "現價": 50.0,
          "營收YoY(%)": 30.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
         {"股票代號": "A2", "股票名稱": "A2", "現價": 50.0,
-         "營收YoY(%)": 30.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 2.0},
+         "營收YoY(%)": 30.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
     ])
     revenue_df = pd.DataFrame([
         {"股票代號": "A1", "營收YoY(%)": 30.0},
         {"股票代號": "A2", "營收YoY(%)": 30.0},
     ])
-    # 勾兩個條件：殖利率 + 營收
-    # A1: 殖利率 2% 達標 + 營收 30% 達標 → pass=2, data=2
-    # A2: 殖利率 None + 營收 30% 達標 → pass=1 (營收), data=2 (兩個都有資料)
-    filters = {"min_cash_div_yld": 1.0, "min_rev_yoy": 20.0}
+    filters = {"min_rev_yoy": 30.0, "min_cash_div_yld": 1.0}
+    result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=10)
+    # 兩檔都應納入（殖利率是軟條件）
+    assert "A1" in result["股票代號"].values, f"A1 應納入，實際: {result['股票代號'].tolist()}"
+    assert "A2" in result["股票代號"].values, \
+        f"A2 應納入（殖利率軟不擋 mask），實際: {result['股票代號'].tolist()}"
+
+
+def test_殖利率有值但未達標_不擋mask():
+    """殖利率 0.5%（未達 1%）不擋 mask、只影響排序（排到殖利率達標後面）"""
+    _setup_mock({
+        "A1": {"this_cash": 2.5, "last_cash": 0.5},   # 殖利率 5%（達標）
+        "A2": {"this_cash": 0.25, "last_cash": 0.5},  # 殖利率 0.5%（未達標）
+    })
+    price_df = _build_price_df([
+        {"股票代號": "A1", "股票名稱": "A1", "現價": 50.0,
+         "營收YoY(%)": 30.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
+        {"股票代號": "A2", "股票名稱": "A2", "現價": 50.0,
+         "營收YoY(%)": 30.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
+    ])
+    revenue_df = pd.DataFrame([
+        {"股票代號": "A1", "營收YoY(%)": 30.0},
+        {"股票代號": "A2", "營收YoY(%)": 30.0},
+    ])
+    filters = {"min_rev_yoy": 30.0, "min_cash_div_yld": 1.0}
     result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=10)
     # 兩檔都應納入
-    assert "A1" in result["股票代號"].values, f"A1 應納入，實際: {result['股票代號'].tolist()}"
-    assert "A2" in result["股票代號"].values, f"A2 應納入（data_score ≥ 1），實際: {result['股票代號'].tolist()}"
-    # A1 排前面（pass=2 > A2 pass=1）
+    assert "A1" in result["股票代號"].values
+    assert "A2" in result["股票代號"].values
+    # A1 (5%) 排前
     a1_idx = result.index[result["股票代號"] == "A1"][0]
     a2_idx = result.index[result["股票代號"] == "A2"][0]
-    assert a1_idx < a2_idx, f"A1 (pass=2) 應在 A2 (pass=1) 前面，實際: A1={a1_idx}, A2={a2_idx}"
+    assert a1_idx < a2_idx, f"A1 (5%) 應在 A2 (0.5%) 前面，實際: A1={a1_idx}, A2={a2_idx}"
 
 
-def test_至少要有一個條件有資料():
-    """如果所有被勾選的條件該股票都 None → 排除（data_score = 0）"""
+# ==========================================================
+# 【B 邏輯】排序邏輯
+# ==========================================================
+
+def test_殖利率有值_排殖利率None前面():
+    """殖利率有值（vs None）排前面"""
     _setup_mock({
-        "A1": {"this_cash": 1.0, "last_cash": None},   # 殖利率 2%
+        "A1": {"this_cash": 0.5, "last_cash": 0.0},   # 殖利率 1%（達標邊緣）
         "A2": {"this_cash": None, "last_cash": None},  # 殖利率 None
     })
     price_df = _build_price_df([
-        # A1: 殖利率有值 → 納入
         {"股票代號": "A1", "股票名稱": "A1", "現價": 50.0,
-         "營收YoY(%)": None, "成交量_張": None, "PE": None, "EPS本期": None},
-        # A2: 殖利率也 None → 排除（data_score = 0）
-        {"股票代號": "A2", "股票名稱": "A2", "現價": None,
-         "營收YoY(%)": None, "成交量_張": None, "PE": None, "EPS本期": None},
+         "營收YoY(%)": 30.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
+        {"股票代號": "A2", "股票名稱": "A2", "現價": 50.0,
+         "營收YoY(%)": 30.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
     ])
-    filters = {"min_cash_div_yld": 1.0}  # 只勾殖利率
-    result = st._run_manual_selection(price_df, pd.DataFrame(), pd.DataFrame(), filters, top_n=10)
-    assert "A1" in result["股票代號"].values, f"A1 應納入，實際: {result['股票代號'].tolist()}"
-    assert "A2" not in result["股票代號"].values, \
-        f"A2 不應納入（所有被勾選條件都 None），實際: {result['股票代號'].tolist()}"
+    revenue_df = pd.DataFrame([
+        {"股票代號": "A1", "營收YoY(%)": 30.0},
+        {"股票代號": "A2", "營收YoY(%)": 30.0},
+    ])
+    filters = {"min_rev_yoy": 30.0}
+    result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=10)
+    a1_idx = result.index[result["股票代號"] == "A1"][0]
+    a2_idx = result.index[result["股票代號"] == "A2"][0]
+    assert a1_idx < a2_idx, f"A1 (殖利率有值) 應在 A2 (殖利率 None) 前面，實際: A1={a1_idx}, A2={a2_idx}"
 
+
+def test_殖利率達標_排殖利率未達標前面():
+    """殖利率達標（5%）排前、殖利率未達標（0.5%）排後"""
+    _setup_mock({
+        "A1": {"this_cash": 2.5, "last_cash": 0.5},   # 殖利率 5%
+        "A2": {"this_cash": 0.25, "last_cash": 0.5},  # 殖利率 0.5%
+    })
+    price_df = _build_price_df([
+        {"股票代號": "A1", "股票名稱": "A1", "現價": 50.0,
+         "營收YoY(%)": 30.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
+        {"股票代號": "A2", "股票名稱": "A2", "現價": 50.0,
+         "營收YoY(%)": 30.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
+    ])
+    revenue_df = pd.DataFrame([
+        {"股票代號": "A1", "營收YoY(%)": 30.0},
+        {"股票代號": "A2", "營收YoY(%)": 30.0},
+    ])
+    filters = {"min_rev_yoy": 30.0}
+    result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=10)
+    a1_idx = result.index[result["股票代號"] == "A1"][0]
+    a2_idx = result.index[result["股票代號"] == "A2"][0]
+    assert a1_idx < a2_idx, f"A1 (5%) 應在 A2 (0.5%) 前面，實際: A1={a1_idx}, A2={a2_idx}"
+
+
+# ==========================================================
+# 【B 邏輯】什麼都沒勾的向後相容
+# ==========================================================
 
 def test_什麼都沒勾_保留全部():
     """filters 是空 dict → 沒過濾"""
@@ -141,134 +251,61 @@ def test_什麼都沒勾_保留全部():
     assert len(result) == 2, f"沒勾條件時應保留全部 2 檔，實際: {len(result)}"
 
 
-def test_通過分數多_排前面():
-    """A1 通過 2 個條件、A2 通過 1 個條件 → A1 排前面"""
-    _setup_mock({
-        "A1": {"this_cash": 1.0, "last_cash": 0.5},   # 殖利率 2%
-        "A2": {"this_cash": 1.0, "last_cash": 0.5},   # 殖利率 2%
-    })
-    price_df = _build_price_df([
-        # A1: 殖利率 2% + 營收 50%（pass=2）
-        {"股票代號": "A1", "股票名稱": "A1", "現價": 50.0,
-         "營收YoY(%)": 50.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
-        # A2: 殖利率 2% + 營收 10%（pass=1，營收未達標）
-        {"股票代號": "A2", "股票名稱": "A2", "現價": 50.0,
-         "營收YoY(%)": 10.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
-    ])
-    revenue_df = pd.DataFrame([
-        {"股票代號": "A1", "累計營收YoY(%)": 50.0},
-        {"股票代號": "A2", "累計營收YoY(%)": 10.0},
-    ])
-    filters = {"min_rev_yoy": 30.0, "min_cash_div_yld": 1.0}
-    result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=10)
-    a1_idx = result.index[result["股票代號"] == "A1"][0]
-    a2_idx = result.index[result["股票代號"] == "A2"][0]
-    assert a1_idx < a2_idx, f"A1 (pass=2) 應在 A2 (pass=1) 前面，實際: A1={a1_idx}, A2={a2_idx}"
+# ==========================================================
+# 【典型情境】William 22:10 截圖
+# ==========================================================
 
-
-def test_殖利率有值_排殖利率None前面():
-    """A1 殖利率 0.5%（未達標但有值）、A2 殖利率 None
-    → 需要勾另一個條件讓 A2 data_score > 0
-    → 兩者都 pass=0（殖利率都未達 1%），但 A1 殖利率有值 → 排前面
+def test_William截圖情境_YoY小於30不該出現():
+    """【關鍵守護】模擬 William 22:10 截圖看到的問題
+    - 條件：YoY >= 30
+    - 應排除：YoY < 30 的股票（即使其他條件都過）
+    - 简化版：只勾 YoY 條件，專注驗證「YoY 沒過就排除」這件事
     """
     _setup_mock({
-        "A1": {"this_cash": 0.25, "last_cash": 0.5},  # 殖利率 0.5%
-        "A2": {"this_cash": None, "last_cash": None},  # 殖利率 None
+        "3188": {"this_cash": 3.196, "last_cash": 1.8},   # 鑫龍騰
+        "1810": {"this_cash": 0.18, "last_cash": 0.05},   # 和成
+        "1817": {"this_cash": 0.99, "last_cash": 0.5},    # 凱撒衛
     })
     price_df = _build_price_df([
-        {"股票代號": "A1", "股票名稱": "A1", "現價": 50.0,
-         "營收YoY(%)": 50.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
-        {"股票代號": "A2", "股票名稱": "A2", "現價": 50.0,
-         "營收YoY(%)": 50.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
+        # 鑫龍騰 YoY 880% → 過
+        {"股票代號": "3188", "股票名稱": "鑫龍騰", "現價": 24.95,
+         "營收YoY(%)": 880.0, "成交量_張": 1000.0, "PE": 10.94, "EPS本期": 2.0},
+        # 和成 YoY -7.42% → 不該出現
+        {"股票代號": "1810", "股票名稱": "和成", "現價": 20.55,
+         "營收YoY(%)": -7.42, "成交量_張": 1000.0, "PE": 5.65, "EPS本期": 3.0},
+        # 凱撒衛 YoY -7.42% → 不該出現
+        {"股票代號": "1817", "股票名稱": "凱撒衛", "現價": 39.60,
+         "營收YoY(%)": -7.42, "成交量_張": 1000.0, "PE": 32.73, "EPS本期": 1.0},
     ])
     revenue_df = pd.DataFrame([
-        {"股票代號": "A1", "營收YoY(%)": 50.0},
-        {"股票代號": "A2", "營收YoY(%)": 50.0},
+        {"股票代號": "3188", "營收YoY(%)": 880.0},
+        {"股票代號": "1810", "營收YoY(%)": -7.42},
+        {"股票代號": "1817", "營收YoY(%)": -7.42},
     ])
-    # 勾兩個：殖利率 + 營收
-    # A1: 殖利率 0.5%（未達） + 營收 50%（達）→ pass=1, data=2
-    # A2: 殖利率 None + 營收 50%（達）→ pass=1, data=1
-    filters = {"min_cash_div_yld": 1.0, "min_rev_yoy": 30.0}
-    result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=10)
-    a1_idx = result.index[result["股票代號"] == "A1"][0]
-    a2_idx = result.index[result["股票代號"] == "A2"][0]
-    # A1 data=2 應在 A2 data=1 前面（data_score 排序）
-    assert a1_idx < a2_idx, f"A1 (data=2) 應在 A2 (data=1) 前面，實際: A1={a1_idx}, A2={a2_idx}"
-
-
-def test_殖利率達標_排殖利率未達標前面():
-    """A1 殖利率 5%（達標）、A2 殖利率 0.5%（有值未達標）→ A1 排前面"""
-    _setup_mock({
-        "A1": {"this_cash": 2.5, "last_cash": 0.5},   # 殖利率 5%
-        "A2": {"this_cash": 0.25, "last_cash": 0.5},  # 殖利率 0.5%
-    })
-    price_df = _build_price_df([
-        {"股票代號": "A1", "股票名稱": "A1", "現價": 50.0,
-         "營收YoY(%)": 50.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
-        {"股票代號": "A2", "股票名稱": "A2", "現價": 50.0,
-         "營收YoY(%)": 50.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0},
-    ])
-    filters = {"min_cash_div_yld": 1.0}
-    result = st._run_manual_selection(price_df, pd.DataFrame(), pd.DataFrame(), filters, top_n=10)
-    a1_idx = result.index[result["股票代號"] == "A1"][0]
-    a2_idx = result.index[result["股票代號"] == "A2"][0]
-    assert a1_idx < a2_idx, f"A1 (5%) 應在 A2 (0.5%) 前面，實際: A1={a1_idx}, A2={a2_idx}"
-
-
-def test_典型情境_殖利率None_加營收高的會排前面():
-    """模擬 William 11:28 看到的 127 檔情境：
-    - 127 檔殖利率都 None（DB 缺漏）
-    - 營收 YoY 都有值
-    - 使用者勾選「殖利率 ≥ 1%」+「營收 YoY ≥ 30%」
-    - 預期：殖利率有值的排最前，殖利率 None 排後面
-    """
-    divs = {
-        "N0": {"this_cash": None}, "N1": {"this_cash": None},
-        "N2": {"this_cash": None}, "N3": {"this_cash": None}, "N4": {"this_cash": None},
-        "Y1": {"this_cash": 2.5},    # 殖利率 5%（達標）
-        "Y2": {"this_cash": 0.25},   # 殖利率 0.5%（有值未達標、避免被 line 989 的 >0 mask 排成 None）
-    }
-    _setup_mock(divs)
-    rows = []
-    # 5 檔殖利率 None 但營收達標
-    for i in range(5):
-        rows.append({
-            "股票代號": f"N{i}", "股票名稱": f"None{i}", "現價": 50.0,
-            "營收YoY(%)": 50.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0,
-        })
-    rows.append({"股票代號": "Y1", "股票名稱": "Y1", "現價": 50.0,
-                 "營收YoY(%)": 50.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0})
-    rows.append({"股票代號": "Y2", "股票名稱": "Y2", "現價": 50.0,
-                 "營收YoY(%)": 50.0, "成交量_張": 1000.0, "PE": 15.0, "EPS本期": 3.0})
-    price_df = _build_price_df(rows)
-    revenue_df = pd.DataFrame([{"股票代號": r["股票代號"], "營收YoY(%)": 50.0} for r in rows])
-    filters = {"min_rev_yoy": 30.0, "min_cash_div_yld": 1.0}
-    result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=10)
-    # 全部 7 檔都應納入（都有營收資料）
-    assert len(result) == 7, f"應納入 7 檔，實際: {len(result)}"
-    # Y1 應在最前（殖利率 5% 達標）
-    y1_idx = result.index[result["股票代號"] == "Y1"][0]
-    assert y1_idx == 0, f"Y1 應排第 1，實際: {y1_idx}"
-    # N0..N4 應在 Y1、Y2 後面（殖利率 None）
-    n0_idx = result.index[result["股票代號"] == "N0"][0]
-    y2_idx = result.index[result["股票代號"] == "Y2"][0]
-    assert y1_idx < y2_idx < n0_idx, \
-        f"排序應為 Y1 < Y2 < N0，實際: Y1={y1_idx}, Y2={y2_idx}, N0={n0_idx}"
+    # 简化：只勾 YoY 條件（這是問題的關鍵）
+    filters = {"min_rev_yoy": 30.0}
+    result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=500)
+    codes = result["股票代號"].tolist()
+    assert "3188" in codes, f"3188 應納入（YoY 過），實際: {codes}"
+    assert "1810" not in codes, f"1810 不該納入（YoY -7.42 < 30），實際: {codes}"
+    assert "1817" not in codes, f"1817 不該納入（YoY -7.42 < 30），實際: {codes}"
 
 
 if __name__ == "__main__":
-    test_殖利率None_不再被視為達標()
-    print("✅ test_殖利率None_不再被視為達標 passed")
-    test_至少要有一個條件有資料()
-    print("✅ test_至少要有一個條件有資料 passed")
-    test_什麼都沒勾_保留全部()
-    print("✅ test_什麼都沒勾_保留全部 passed")
-    test_通過分數多_排前面()
-    print("✅ test_通過分數多_排前面 passed")
+    test_硬條件YoY沒過_該股票被排除()
+    print("✅ test_硬條件YoY沒過_該股票被排除 passed")
+    test_硬條件YoY為None_該股票被排除()
+    print("✅ test_硬條件YoY為None_該股票被排除 passed")
+    test_殖利率None_但其他硬條件都過_仍納入()
+    print("✅ test_殖利率None_但其他硬條件都過_仍納入 passed")
+    test_殖利率有值但未達標_不擋mask()
+    print("✅ test_殖利率有值但未達標_不擋mask passed")
     test_殖利率有值_排殖利率None前面()
     print("✅ test_殖利率有值_排殖利率None前面 passed")
     test_殖利率達標_排殖利率未達標前面()
     print("✅ test_殖利率達標_排殖利率未達標前面 passed")
-    test_典型情境_殖利率None_加營收高的會排前面()
-    print("✅ test_典型情境_殖利率None_加營收高的會排前面 passed")
+    test_什麼都沒勾_保留全部()
+    print("✅ test_什麼都沒勾_保留全部 passed")
+    test_William截圖情境_YoY小於30不該出現()
+    print("✅ test_William截圖情境_YoY小於30不該出現 passed")
     print("\n🎉 All B-logic tests passed!")
