@@ -63,7 +63,30 @@ Python 版本: 3.8+
   - test_去年殖利率有值但未達標_不擋mask
   - test_只勾選去年現金殖利率_仍可運行
 
-【pytest】74 個 test 全部通過 ✅
+【手動選股 Tab 升級】（Phase 7：股價時段邏輯 + Preset 開機自動載入）2026-06-15
+- 【新規則】股價時段邏輯（William 09:56）
+  - 09:00 後到 13:30 收盤前：股價會一直變 → 任何需要現價的功能都要 refresh
+  - 13:30 收盤後：股價固定 → 一天只 refresh 一次（last_update == today 用 cache）
+  - 週末：不開盤 → 用上週五收盤價、一天只 refresh 一次
+- 【實作】新增 _is_market_hours() 工具函式
+  - 判斷：週一~五 09:00 ~ 13:30 為台股盤中
+  - 套用在 get_or_fetch：當 name == "price" 且盤中 → 強制 refresh、不限次數
+  - revenue/eps 不受時段影響（仍用原本 last_update == today 判斷）
+- 【UX 改善】Preset 開機自動載入
+  - 修 Bug：儲存 preset 後重開 App、preset 下拉是空的、UI 條件沒還原
+  - 根因：_ms_preset_var 預設空字串、_ms_load_preset 拿空字串會早退
+  - 修法：開機時先呼叫 _ms_refresh_preset_list() 把 manual_select_last_preset
+    設進 var、再呼叫 _ms_load_preset() 載入條件
+  - 表現：開機自動套用上次的 Preset、checkbox / entry 還原成儲存時的狀態
+- pytest 新增 test_market_hours.py（16 個）：_is_market_hours() 邊界守護
+- pytest 新增 test_get_or_fetch_market_hours.py（5 個）：
+  - test_price_盤中_即使cache是今天也強制refresh（核心守護）
+  - test_price_盤後_用cache不refresh
+  - test_price_盤後_cache是昨天_走正常refresh路徑
+  - test_revenue_盤中_不強制refresh_走原本邏輯
+  - test_eps_盤中_不強制refresh_走原本邏輯
+
+【pytest】95 個 test 全部通過 ✅
 - test_dividend_year_mapping.py（5 個）
 - test_pe_filter.py（5 個）
 - test_dividend_specific.py（10 個）
@@ -75,6 +98,8 @@ Python 版本: 3.8+
 - test_ms_refresh_price.py（3 個）
 - test_filter_last_yld_unbound.py（4 個）
 - test_fetch_dividend_update.py（8 個）
+- test_market_hours.py（16 個）
+- test_get_or_fetch_market_hours.py（5 個）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.4 更新內容】2026-06-11
@@ -400,6 +425,32 @@ def load_cache(file_path):
     return df, meta.loc[0, "last_update"]
 
 
+def _is_market_hours(now: Optional[datetime] = None) -> bool:
+    """判斷是否在台股盤中時段（週一~五 09:00 ~ 13:30）
+
+    V0.9.5+ Phase 7 新規則（William 2026-06-15 09:56）：
+    - 09:00 開盤後到 13:30 收盤前：股價會一直變 → 任何需要現價的功能都要 refresh
+    - 13:30 收盤後到隔天 09:00 開盤前：股價已固定 → 一天只要 refresh 一次
+    - 週末（週六、週日）：不開盤 → 用上週五收盤價、一天只要 refresh 一次
+
+    Returns
+    -------
+    bool
+        True = 盤中（強制 refresh 股價）
+        False = 盤前/盤後/週末（一天只 refresh 一次、靠 cache 判斷）
+
+    用途：get_or_fetch 內判斷「price 類 cache」是否要走強制 refresh 路徑
+    """
+    now = now or datetime.now()
+    # 週末（週六=5、週日=6）不開盤
+    if now.weekday() >= 5:
+        return False
+    # 平日 09:00 ~ 13:30 為台股盤中
+    market_open = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    market_close = now.replace(hour=13, minute=30, second=0, microsecond=0)
+    return market_open <= now <= market_close
+
+
 def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
     file_path = get_cache_file(name)
     today = datetime.today().strftime("%Y-%m-%d")
@@ -409,6 +460,17 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
         save_cache(file_path, df)
         return df
     df, last_update = load_cache(file_path)
+
+    # V0.9.5+ Phase 7（William 2026-06-15 09:56）：
+    # 股價 (price) 在盤中會一直變 → 強制 refresh、不限次數
+    # 盤後/盤前/週末 → 一天只 refresh 一次（last_update == today → 用 cache）
+    # 注：revenue/eps 不適用本規則、仍用原本「last_update == today」判斷
+    if name == "price" and _is_market_hours():
+        logger.log(f"🔄 [{name}] 盤中時段 → 強制 refresh 股價")
+        df = fetch_func()
+        save_cache(file_path, df)
+        return df
+
     if last_update == today:
         logger.log(f"✅ [{name}] 使用快取資料")
         return df
@@ -3781,7 +3843,12 @@ class StrategyGUI(tk.Tk):
         # 右鍵選單
         self._ms_tree.bind("<Button-3>", self._ms_show_context_menu)
 
-        # 初始化：載入上次 preset + 讀取 pipeline 資料狀態
+        # 初始化：先 refresh preset 下拉（自動選中上次的）、再載入
+        # 【V0.9.5+ Phase 7 修 Bug】2026-06-15 William 反映：
+        #   儲存 preset 後重開 App 找不到儲存資料
+        #   根因：_ms_preset_var 預設空字串、_ms_load_preset 拿空字串會早退
+        #   修法：先呼叫 _ms_refresh_preset_list 把 manual_select_last_preset 設進 var
+        self._ms_refresh_preset_list()
         self._ms_load_preset()
         self._ms_refresh_pipeline_status()
         self._ms_refresh_dividend_status()
