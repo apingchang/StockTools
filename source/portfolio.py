@@ -276,11 +276,23 @@ def fetch_stock_info(stock_id: str,
 
 
 def fetch_prices_batch(stock_ids: List[str],
-                       session: Optional[requests.Session] = None) -> Dict[str, Dict[str, Any]]:
+                       session: Optional[requests.Session] = None,
+                       progress_callback=None) -> Dict[str, Dict[str, Any]]:
     """
     批次抓多檔股票的現價 + 名稱
 
-    Returns:
+    Parameters
+    ----------
+    stock_ids : List[str]
+        股票代號清單
+    session : requests.Session, optional
+    progress_callback : callable, optional
+        進度回呼 (done_idx, total, current_sid) → 給 UI 顯示「正在抓 XXX」
+        ex: progress_callback(3, 8, "2330") 表示「第 3 檔 / 共 8 檔、正在抓 2330」
+
+    Returns
+    -------
+    Dict[str, Dict[str, Any]]
         {stock_id: {info dict}}
     """
     if session is None:
@@ -288,7 +300,13 @@ def fetch_prices_batch(stock_ids: List[str],
         session.headers.update(HTTP_HEADERS)
 
     out: Dict[str, Dict[str, Any]] = {}
-    for sid in stock_ids:
+    total = len(stock_ids)
+    for idx, sid in enumerate(stock_ids, 1):
+        if progress_callback:
+            try:
+                progress_callback(idx, total, sid)
+            except Exception:
+                pass
         info = fetch_stock_info(sid, session=session)
         out[sid] = info
     return out

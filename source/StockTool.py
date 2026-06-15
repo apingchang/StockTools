@@ -137,7 +137,35 @@ Python 版本: 3.8+
   - test_apply_fetched_prices_fallback也更新
   - test_apply_fetched_prices_price為0仍然跳過
 
-【pytest】119 個 test 全部通過 ✅
+【手動選股 Tab + 買賣記錄 Tab】（Phase 10：去年現金殖利率算法 + 30 秒 polling 動態顯示）2026-06-15
+- 【修 Bug + 改善】去年現金殖利率應除以「去年除息日收盤價」不是現價（William 11:39）
+  - 原本：除以現價 → 譯導（殖利率看似高、實際上是用現價算的）
+  - 修正：除以「去年除息日收盤價」→ 真正表示「拿去年現金股利、除以當時除息日的股價」
+- 【實作】
+  - DB schema migration：加 ex_date（除息日）、ex_date_close（除息日收盤價）兩個欄位
+    - 重複 init 安全（漏了加也不會爆）
+  - _fetch_finmind_dividend 保留 FinMind 的 date 欄位、寫入 DB
+  - 新增 _fetch_ex_date_close(stock_id, ex_date)：
+    - 抓 ex_date ±3 天的股價（避免除息日是假日沒資料）
+    - 額度用完 / 沒資料 / close=0 → silently 回 None
+  - 新增 _update_ex_date_close()：寫入 DB 緩存、避免下次重抓
+  - 改寫 _run_manual_selection 去年現金殖利率算法：
+    - 優先用 ex_date_close（DB 緩存優先 → 沒有才打 FinMind → 寫回 DB）
+    - fallback：沒 ex_date_close → 用現價（避免 DB 還沒建完、殖利率全 None）
+- 【動態顯示】30 秒 polling 看不到進行狀態（William 11:39 反映）
+  - 修法：fetch_prices_batch 加 progress_callback
+  - _auto_fetch_positions_prices 用 callback 動態 log：
+    - 「⏰ 下次 refresh HH:MM:SS」起動提示
+    - 「🔄 [3/8] 抓 2330 中... (37%)」每一檔進度
+    - 「✅ refresh 完成：5.2 秒抓完 5 檔」結束報告
+- pytest 新增 test_ex_date_yield.py（15 個）：
+  - DB schema migration：test_db_init_加ex_date欄位、test_db_init_重複跑不爆
+  - _upsert_div_history：test_upsert_7tuple_含ex_date寫入、test_upsert_5tuple向後相容
+  - _update_ex_date_close：test_update_ex_date_close寫入緩存
+  - _fetch_ex_date_close：6 個（正常、假日、空字串、額度、沒資料、close=0）
+  - _run_manual_selection 整合：4 個（用 ex_date_close 不是現價、沒 ex_date、現金=0、自動 fetch 緩存）
+
+【pytest】134 個 test 全部通過 ✅
 - test_dividend_year_mapping.py（5 個）
 - test_pe_filter.py（5 個）
 - test_dividend_specific.py（10 個）
@@ -154,6 +182,7 @@ Python 版本: 3.8+
 - test_ms_display_div_columns.py（5 個）
 - test_portfolio_refresh_loop.py（10 個）
 - test_fetch_stock_info_fallback.py（9 個）
+- test_ex_date_yield.py（15 個）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.4 更新內容】2026-06-11
@@ -575,60 +604,65 @@ def roc_to_ad(roc_str: str):
 # 股利歷史庫（跟 eps_history 同一風格）
 DIV_HISTORY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS dividend_history (
-    stock_id    TEXT    NOT NULL,
-    year        INTEGER NOT NULL,
-    cash        REAL,
-    stock       REAL,
-    source      TEXT,
-    fetched_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    stock_id        TEXT    NOT NULL,
+    year            INTEGER NOT NULL,
+    cash            REAL,
+    stock           REAL,
+    source          TEXT,
+    fetched_at      TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    ex_date         TEXT,        -- V0.9.5+ Phase 10：除息日 (YYYY-MM-DD)
+    ex_date_close   REAL,        -- V0.9.5+ Phase 10：除息日收盤價（用來算 殖利率）
     PRIMARY KEY (stock_id, year)
 );
 CREATE INDEX IF NOT EXISTS idx_div_period ON dividend_history(year);
 """
 
+# V0.9.5+ Phase 10：DB migration for new columns
+#   既有 DB 沒有 ex_date / ex_date_close 欄位 → ALTER TABLE 動態加
+DIV_HISTORY_MIGRATIONS = [
+    "ALTER TABLE dividend_history ADD COLUMN ex_date TEXT",
+    "ALTER TABLE dividend_history ADD COLUMN ex_date_close REAL",
+]
+
 def _init_div_history_db(db_path: str):
     import sqlite3
     with sqlite3.connect(db_path) as conn:
         conn.executescript(DIV_HISTORY_SCHEMA)
+        # V0.9.5+ Phase 10：自動 migration 加新欄位（漏了加也不會爆）
+        for col_sql in DIV_HISTORY_MIGRATIONS:
+            try:
+                conn.execute(col_sql)
+            except Exception:
+                pass  # 欄位已存在（重複 migration 安全）
         conn.commit()
 
 def _upsert_div_history(db_path: str, rows: list):
-    """rows: [(stock_id, year, cash, stock, source), ...]"""
+    """rows: [(stock_id, year, cash, stock, source, ex_date, ex_date_close), ...]
+    向後相容：如果 row 只有 5 個欄位、ex_date/ex_date_close 設 NULL。
+    """
     import sqlite3
     if not rows:
         return 0
+    # 補足欄位數（向後相容舊 code 5-tuple）
+    normalized = []
+    for r in rows:
+        if len(r) == 5:
+            normalized.append((r[0], r[1], r[2], r[3], r[4], None, None))
+        else:
+            normalized.append(r)
     with sqlite3.connect(db_path) as conn:
         conn.executemany(
             """INSERT OR REPLACE INTO dividend_history
-               (stock_id, year, cash, stock, source)
-               VALUES (?, ?, ?, ?, ?)""",
-            rows,
+               (stock_id, year, cash, stock, source, ex_date, ex_date_close)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            normalized,
         )
         conn.commit()
-    return len(rows)
+    return len(normalized)
 
 def _query_div_history(db_path: str, codes: list) -> dict:
-    """查詢多檔股票的所有年度股利 → {code: {year: {cash, stock}}}"""
-    import sqlite3
-    if not codes:
-        return {}
-    with sqlite3.connect(db_path) as conn:
-        placeholders = ",".join("?" * len(codes))
-        rows = conn.execute(
-            f"SELECT stock_id, year, cash, stock FROM dividend_history WHERE stock_id IN ({placeholders})",
-            codes,
-        ).fetchall()
-    result: Dict[str, Dict[int, Dict[str, float]]] = {}
-    for code, year, cash, stock in rows:
-        result.setdefault(str(code).strip(), {})
-        result[str(code).strip()][year] = {"cash": cash or 0.0, "stock": stock or 0.0}
-    return result
-
-
-def _query_div_history_with_fetched(db_path: str, codes: list) -> dict:
-    """查詢多檔股票的股利 + fetched_at → {code: {"_fetched_at": iso_str, "years": {year: {cash, stock}}}}
-
-    V0.9.5+ 用來判斷 DB 資料是否過期（> cache_max_age_days 天）
+    """查詢多檔股票的所有年度股利 → {code: {year: {cash, stock, ex_date}}}
+    V0.9.5+ Phase 10：多回傳 ex_date（除息日）、供去年現金殖利率算法使用
     """
     import sqlite3
     if not codes:
@@ -636,15 +670,48 @@ def _query_div_history_with_fetched(db_path: str, codes: list) -> dict:
     with sqlite3.connect(db_path) as conn:
         placeholders = ",".join("?" * len(codes))
         rows = conn.execute(
-            f"SELECT stock_id, year, cash, stock, fetched_at FROM dividend_history WHERE stock_id IN ({placeholders})",
+            f"SELECT stock_id, year, cash, stock, ex_date FROM dividend_history WHERE stock_id IN ({placeholders})",
+            codes,
+        ).fetchall()
+    result: Dict[str, Dict[int, Dict[str, Any]]] = {}
+    for code, year, cash, stock, ex_date in rows:
+        code = str(code).strip()
+        result.setdefault(code, {})
+        result[code][year] = {
+            "cash": cash or 0.0,
+            "stock": stock or 0.0,
+            "ex_date": ex_date or "",  # V0.9.5+ Phase 10：除息日（可能為空）
+        }
+    return result
+
+
+def _query_div_history_with_fetched(db_path: str, codes: list) -> dict:
+    """查詢多檔股票的股利 + fetched_at → {code: {"_fetched_at": iso_str, "years": {year: {cash, stock, ex_date, ex_date_close}}}}
+
+    V0.9.5+ 用來判斷 DB 資料是否過期（> cache_max_age_days 天）
+    V0.9.5+ Phase 10：多回傳 ex_date、ex_date_close（除息日 + 除息日收盤價）
+    """
+    import sqlite3
+    if not codes:
+        return {}
+    with sqlite3.connect(db_path) as conn:
+        placeholders = ",".join("?" * len(codes))
+        rows = conn.execute(
+            f"""SELECT stock_id, year, cash, stock, fetched_at, ex_date, ex_date_close
+                FROM dividend_history WHERE stock_id IN ({placeholders})""",
             codes,
         ).fetchall()
     result: Dict[str, Dict] = {}
-    for code, year, cash, stock, fetched_at in rows:
+    for code, year, cash, stock, fetched_at, ex_date, ex_date_close in rows:
         code = str(code).strip()
         if code not in result:
             result[code] = {"_fetched_at": fetched_at, "years": {}}
-        result[code]["years"][year] = {"cash": cash or 0.0, "stock": stock or 0.0}
+        result[code]["years"][year] = {
+            "cash": cash or 0.0,
+            "stock": stock or 0.0,
+            "ex_date": ex_date or "",
+            "ex_date_close": ex_date_close,  # None 也保留為 None
+        }
     return result
 
 def _div_history_stats(db_path: str) -> dict:
@@ -942,40 +1009,46 @@ def _fetch_finmind_dividend(stock_ids: List[str],
         for i, code in enumerate(to_fetch):
             _MS_PROGRESS["done"] = i
             data = _finmind_get("TaiwanStockDividend", code, start_date, end_date)
-            by_year: Dict[int, Dict[str, float]] = {}
+            by_year: Dict[int, Dict[str, Any]] = {}
             for rec in data:
                 year_str = rec.get("year", "")
                 cash_raw = float(rec.get("CashEarningsDistribution") or 0)
                 stock_raw = float(rec.get("StockEarningsDistribution") or 0)
+                # 【V0.9.5+ Phase 10】保留 ex_date（除息日）給後面算殖利率用
+                ex_date = rec.get("date", "") or ""
                 m_q = _re_div.match(r"(\d+)年第(\d+)季", year_str)
                 m_h1 = _re_div.match(r"(\d+)年前半年度", year_str)
                 m_h2 = _re_div.match(r"(\d+)年後半年度", year_str)
                 m_y = _re_div.match(r"^(\d+)年$", year_str)  # 純年（無季/半年度）
+                is_max_logic = False  # 記 year 該年 是用 max 還是 sum 邏輯
                 if m_q:
                     yr = int(m_q.group(1)) + 1911
-                    by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
-                    by_year[yr]["cash"] = max(by_year[yr]["cash"], cash_raw)
-                    by_year[yr]["stock"] = max(by_year[yr]["stock"], stock_raw)
+                    is_max_logic = True
                 elif m_h1:
                     yr = int(m_h1.group(1)) + 1911
-                    by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
-                    by_year[yr]["cash"] += cash_raw
-                    by_year[yr]["stock"] += stock_raw
                 elif m_h2:
                     yr = int(m_h2.group(1)) + 1911
-                    by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
-                    by_year[yr]["cash"] += cash_raw
-                    by_year[yr]["stock"] += stock_raw
                 elif m_y:
                     yr = int(m_y.group(1)) + 1911
-                    by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0})
-                    by_year[yr]["cash"] = max(by_year[yr]["cash"], cash_raw)
-                    by_year[yr]["stock"] = max(by_year[yr]["stock"], stock_raw)
+                    is_max_logic = True
                 else:
                     continue
-            # 寫入 DB
+                yd = by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0, "ex_date": ""})
+                if is_max_logic:
+                    # max 邏輯：保留 cash 大的、ex_date 跟著更新到該筆
+                    if cash_raw >= yd["cash"]:
+                        yd["cash"] = cash_raw
+                        yd["stock"] = stock_raw
+                        yd["ex_date"] = ex_date
+                else:
+                    # sum 邏輯（半年配/季度配）：累加、ex_date 取最後一筆
+                    yd["cash"] += cash_raw
+                    yd["stock"] += stock_raw
+                    if ex_date > yd["ex_date"]:
+                        yd["ex_date"] = ex_date
+            # 寫入 DB（V0.9.5+ Phase 10 加 ex_date欄位）
             for yr, d in by_year.items():
-                fetch_rows.append((code, yr, d["cash"], d["stock"], "finmind"))
+                fetch_rows.append((code, yr, d["cash"], d["stock"], "finmind", d["ex_date"], None))
             if (i + 1) % 10 == 0 and progress_callback:
                 progress_callback(i + 1, len(to_fetch))
             time.sleep(0.35)
@@ -1003,12 +1076,16 @@ def _fetch_finmind_dividend(stock_ids: List[str],
             f"{current_year - 1}股票股利": last_yr.get("stock", 0.0),
             f"{current_year - 2}現金股利": prev_yr.get("cash", 0.0),
             f"{current_year - 2}股票股利": prev_yr.get("stock", 0.0),
+            # V0.9.5+ Phase 10：回傳 ex_date / ex_date_close、供「去年現金殖利率」算法用
+            f"{current_year - 1}除息日": this_yr.get("ex_date", "") or "",
+            f"{current_year - 1}除息日收盤價": this_yr.get("ex_date_close"),
         })
 
     return pd.DataFrame(rows) if rows else pd.DataFrame(
         columns=["股票代號", f"{current_year}現金股利", f"{current_year}股票股利",
                  f"{current_year - 1}現金股利", f"{current_year - 1}股票股利",
-                 f"{current_year - 2}現金股利", f"{current_year - 2}股票股利"])
+                 f"{current_year - 2}現金股利", f"{current_year - 2}股票股利",
+                 f"{current_year - 1}除息日", f"{current_year - 1}除息日收盤價"])
 
 def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = "dividend_history.db",
                                   progress_callback=None, batch_size: Optional[int] = None) -> int:
@@ -1076,6 +1153,77 @@ def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = "dividen
         return -1
     return len(to_fetch)
 
+
+def _update_ex_date_close(db_path: str, stock_id: str, year: int,
+                          ex_date: str, ex_date_close: float) -> None:
+    """V0.9.5+ Phase 10：把「除息日 + 除息日收盤價」寫入 dividend_history 緩存
+    下次重跑手動選股時免打 FinMind
+    """
+    import sqlite3
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """UPDATE dividend_history
+                   SET ex_date = ?, ex_date_close = ?
+                   WHERE stock_id = ? AND year = ?""",
+                (ex_date, ex_date_close, stock_id, year),
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+
+def _fetch_ex_date_close(stock_id: str, ex_date: str) -> Optional[float]:
+    """V0.9.5+ Phase 10：抓除息日當天（或附近）的收盤價
+
+    William 11:39 反映：去年現金殖利率應除以「去年除息日收盤價」、不是現價
+    本函式供「手動選股」算去年現金殖利率時使用
+
+    Parameters
+    ----------
+    stock_id : str
+        股票代號
+    ex_date : str
+        除息日 (YYYY-MM-DD)、可能是空字串
+
+    Returns
+    -------
+    Optional[float]
+        除息日附近的收盤價（None = 抓不到）
+    """
+    if not ex_date or not stock_id:
+        return None
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        ed = _dt.strptime(ex_date, "%Y-%m-%d")
+        # 抓除息日 ±3 天的股價（避免假日沒資料）
+        start = (ed - _td(days=3)).strftime("%Y-%m-%d")
+        end = (ed + _td(days=3)).strftime("%Y-%m-%d")
+        data = _finmind_get("TaiwanStockPrice", stock_id, start, end)
+        if not data:
+            return None
+        # 找最接近 ex_date 的那一天
+        best = None
+        best_diff = None
+        for rec in data:
+            rec_date = rec.get("date", "")
+            try:
+                rd = _dt.strptime(rec_date, "%Y-%m-%d")
+            except (ValueError, TypeError):
+                continue
+            diff = abs((rd - ed).days)
+            if best_diff is None or diff < best_diff:
+                best = rec
+                best_diff = diff
+        if best:
+            close = float(best.get("close") or 0)
+            return close if close > 0 else None
+    except RuntimeError:
+        # FinMind 額度用完 → silently 回 None
+        return None
+    except Exception:
+        return None
+    return None
 
 
 def _run_manual_selection(
@@ -1192,7 +1340,8 @@ def _run_manual_selection(
         cy = datetime.now().year
         for suf in [f"{cy}現金股利", f"{cy}股票股利",
                     f"{cy - 1}現金股利", f"{cy - 1}股票股利",
-                    f"{cy - 2}現金股利", f"{cy - 2}股票股利"]:
+                    f"{cy - 2}現金股利", f"{cy - 2}股票股利",
+                    f"{cy - 1}除息日", f"{cy - 1}除息日收盤價"]:
             if suf not in base.columns:
                 base[suf] = None
 
@@ -1210,6 +1359,9 @@ def _run_manual_selection(
     # 前年度（保留給 UI 顯示）
     base["前年現金股利"] = base.get(f"{cy - 3}現金股利", None)
     base["前年股票股利"] = base.get(f"{cy - 3}股票股利", None)
+    # V0.9.5+ Phase 10：去年除息日 + 除息日收盤價（供去年現金殖利率算法用）
+    base["去年除息日"] = base.get(f"{cy - 1}除息日", None)
+    base["去年除息日收盤價"] = base.get(f"{cy - 1}除息日收盤價", None)
 
     # 8. 今年現金殖利率 = 今年現金股利 / 現價
     # 註：現金股利若為 0（該公司該年未配息），殖利率應為 None 而不是 0
@@ -1219,13 +1371,46 @@ def _run_manual_selection(
         base.loc[yld_mask, "今年現金股利"] / base.loc[yld_mask, "現價"] * 100
     ).round(2)
 
-    # 9. 去年現金殖利率
-    # 註：現金股利若為 0，殖利率應為 None
+    # 9. 去年現金殖利率（V0.9.5+ Phase 10 William 11:39 修正）
+    # 【原本】除以「現價」 → 譯導
+    # 【修正】除以「去年除息日收盤價」 → 真正表示「拿去年現金股利、除以當時除息日的股價」
+    #   - 現金股利 = 0 → 殖利率 None
+    #   - 除息日 ex_date 拿不到 → 除息日收盤價 None → 殖利率 None
+    #   - ex_date_close 有值 → 算殖利率
+    # 【V0.9.5+ Phase 10 fallback】若 ex_date 拿不到（DB 還沒抓）→ fallback 用現價
+    #   避免 DB 還沒建完、原本的手動選股結果變成殖利率全 None
+    #   DB 慢慢累積 ex_date_close 後、未來的 query 會自動越來越準
+    # 注：去年除息日 / 去年除息日收盤價 已在 line 1334 從 div_df merge 進來、
+    #     這裡不重新設為 None（避免變成「沒 ex_date」的誤判）
+    # 確保欄位存在（div_df 沒資料時的防呆）
+    for col in ["去年除息日", "去年除息日收盤價"]:
+        if col not in base.columns:
+            base[col] = None
     base["去年現金殖利率(%)"] = None
-    yld2_mask = (base["現價"].notna()) & (base["現價"] > 0) & (base["去年現金股利"].notna()) & (base["去年現金股利"] > 0)
-    base.loc[yld2_mask, "去年現金殖利率(%)"] = (
-        base.loc[yld2_mask, "去年現金股利"] / base.loc[yld2_mask, "現價"] * 100
-    ).round(2)
+    for idx in base.index:
+        cash = base.at[idx, "去年現金股利"]
+        if cash is None or cash <= 0 or pd.isna(cash):
+            continue
+        # 優先用 ex_date_close（準確）
+        ex_date = base.at[idx, "去年除息日"]
+        ex_close = base.at[idx, "去年除息日收盤價"]
+        if (ex_close is None or pd.isna(ex_close) or ex_close == 0) and ex_date and not pd.isna(ex_date):
+            # DB 沒 ex_date_close 但有 ex_date → fetch
+            ex_close = _fetch_ex_date_close(base.at[idx, "股票代號"], ex_date)
+            if ex_close and ex_close > 0:
+                base.at[idx, "去年除息日收盤價"] = ex_close
+                # 寫入 DB 緩存
+                _update_ex_date_close("dividend_history.db", base.at[idx, "股票代號"],
+                                       cy - 1, ex_date, ex_close)
+        if ex_close and not pd.isna(ex_close) and ex_close > 0:
+            # 有 ex_date_close → 算準確殖利率
+            base.at[idx, "去年除息日"] = ex_date if ex_date else None
+            base.at[idx, "去年現金殖利率(%)"] = round(cash / ex_close * 100, 2)
+        else:
+            # fallback：用現價（跟原本行為一致、不讓殖利率全 None）
+            cur_price = base.at[idx, "現價"]
+            if cur_price and not pd.isna(cur_price) and cur_price > 0:
+                base.at[idx, "去年現金殖利率(%)"] = round(cash / cur_price * 100, 2)
 
     # 10. 應用篩選條件（V0.9.5+ B 邏輯修正版）
     #     【關鍵修正】2026-06-14 William 反映「YoY < 30 還跑出來」
@@ -3686,23 +3871,45 @@ class StrategyGUI(tk.Tk):
         self._schedule_portfolio_refresh()
 
     def _auto_fetch_positions_prices(self):
-        """切到買賣記錄 Tab 時自動抓持倉所有股票現價（背景 thread）"""
+        """切到買賣記錄 Tab 時自動抓持倉所有股票現價（背景 thread）
+        V0.9.5+ Phase 10（William 11:39 反映）：加上動態進度顯示
+        - 起動：log 顯示「⏰ 下次 refresh HH:MM:SS」
+        - 抓取中：每一檔 log 「🔄 [3/8] 正在抓 2330...」
+        - 完成：log 顯示「✅ 11:30:15 refresh 完成、5 檔成功」
+        """
         positions = self.portfolio.get_positions()
         if not positions:
             return
         stock_ids = [p.stock_id for p in positions if p.stock_id]
 
+        # 顯示「下次 refresh 預定時間」（給使用者信心 polling 有在跑）
+        next_refresh_time = (datetime.now() + timedelta(seconds=30)).strftime("%H:%M:%S")
+        self.logger.log(
+            f"⏰ 下次持倉現價 refresh：{next_refresh_time}（30 秒後）"
+        )
+
         def worker():
             from portfolio import fetch_prices_batch
+            started_at = datetime.now()
+            self.after(0, lambda: self.logger.log(f"🔄 [{len(stock_ids)} 檔] 抓取中..."))
             try:
-                results = fetch_prices_batch(stock_ids)
+                def _progress(idx, total, sid):
+                    # 每一檔動態 log（讓使用者看到 progress 不會以為卡住）
+                    self.after(0, lambda: self.logger.log(
+                        f"🔄 [{idx}/{total}] 抓 {sid} 中... ({int((idx/total)*100)}%)"
+                    ))
+
+                results = fetch_prices_batch(stock_ids, progress_callback=_progress)
+                elapsed = (datetime.now() - started_at).total_seconds()
                 # 用 after 回主執行緒更新 GUI
                 self.after(0, lambda: self._apply_fetched_prices(results))
+                self.after(0, lambda: self.logger.log(
+                    f"✅ refresh 完成：{elapsed:.1f} 秒抓完 {len(stock_ids)} 檔"
+                ))
             except Exception as e:
                 self.after(0, lambda: self.logger.log(f"⚠️ 自動抓現價失敗：{e}"))
 
         threading.Thread(target=worker, daemon=True).start()
-        self.logger.log(f"📡 背景抓 {len(stock_ids)} 檔現價中...")
 
     def _apply_fetched_prices(self, results: Dict[str, Dict[str, Any]]):
         """把背景抓回來的現價套到 GUI（主執行緒）"""
