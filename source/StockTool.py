@@ -6,7 +6,7 @@
 V0.9.5-alpha
 【版本資訊】
 Version: v0.9.5-alpha
-最後更新: 2026-06-14 (Asia/Taipei)
+最後更新: 2026-06-15 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -45,7 +45,25 @@ Python 版本: 3.8+
   → 勾選後跑選股前會用最新股價（但會等股價抓完、較慢）
 - 順手加 CLI 手動覆寫工具（fetch_dividend.py update）
 
-【pytest】59 個 test 全部通過 ✅
+【手動選股 Tab 升級】（Phase 6：修 Bug + 402 主動提示）2026-06-15
+- 【修 Bug】勾選「去年現金殖利率 ≥ X%」不會再拋 UnboundLocalError
+  - 根因：Phase 4「B 邏輯」改一半，line 1168-1175 殘留 data_score / pass_score
+    雙計分死 code（變數從未初始化）
+  - 修法：line 1168-1175 改成跟 line 1163-1166（今年現金殖利率）一樣的
+    no-op（只設 any_checked=True），排序階段用 _yld_has_data 自然處理
+  - 表現：原本勾選「去年現金殖利率」就會崩潰、修完正常運行
+- 【UX 改善】手動選股跑完主動提示 FinMind 402 額度錯誤
+  - 情境：_fetch_finmind_dividend 中途被 402 中斷（已抓 X 筆寫入 DB），
+    _run_manual_selection 仍會完成並回傳部分結果
+  - 原本：使用者只看到「殖利率欄位一堆 None」、困惑為什麼
+  - 修完：狀態列附加「⚠️ FinMind 額度用完（已抓 X/Y 檔）｜部分股票殖利率為 None｜💡 改用指定股補抓或等下月重置」
+- pytest 新增 test_filter_last_yld_unbound.py（4 個）：
+  - test_勾選去年現金殖利率_不拋UnboundLocalError（核心守護）
+  - test_去年殖利率軟條件_不擋mask
+  - test_去年殖利率有值但未達標_不擋mask
+  - test_只勾選去年現金殖利率_仍可運行
+
+【pytest】74 個 test 全部通過 ✅
 - test_dividend_year_mapping.py（5 個）
 - test_pe_filter.py（5 個）
 - test_dividend_specific.py（10 個）
@@ -54,6 +72,9 @@ Python 版本: 3.8+
 - test_fetch_dividend_cli.py（10 個）
 - test_filter_b_logic.py（7 個）
 - test_div_cache_expiry.py（8 個）
+- test_ms_refresh_price.py（3 個）
+- test_filter_last_yld_unbound.py（4 個）
+- test_fetch_dividend_update.py（8 個）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.4 更新內容】2026-06-11
@@ -1166,13 +1187,17 @@ def _run_manual_selection(
         any_checked = True
         # 不動 mask、留給排序處理
 
-    # 去年現金殖利率 ≥ X%（軟）
+    # 去年現金殖利率 ≥ X%（軟：不擋 mask、只算排序）
+    # 【V0.9.5-alpha Phase 6 修 Bug】2026-06-15
+    # 原本以「data_score / pass_score 雙計分」實作（舊 B 邏輯），
+    # 但 Phase 4 已改成「硬 AND + 軟不擋 mask」邏輯，data_score/pass_score
+    # 從未被初始化，導致勾選「去年現金殖利率 ≥ X%」時 UnboundLocalError，
+    # 整個手動選股流程崩潰。
+    # 修法：跟「今年現金殖利率」一樣的 no-op（只設 any_checked=True），
+    # 排序階段用 _yld_has_data 自然處理殖利率有/無資料的排序。
     if filters.get("min_last_cash_yld") is not None:
-        yld = base["去年現金殖利率(%)"]
-        has_data = yld.notna()
-        passes = has_data & (yld >= filters["min_last_cash_yld"])
-        data_score = data_score + has_data.astype(int)
-        pass_score = pass_score + passes.astype(int)
+        any_checked = True
+        # 不動 mask、留給排序處理
 
     # 過濾：硬條件 AND mask（楊重複保險，殖利率軟條件不擋 mask）
     # 注：如果是「什麼都沒勾」的情況、保留全部（向後相容）
@@ -4313,6 +4338,25 @@ class StrategyGUI(tk.Tk):
             ), tags=(tag,))
 
         self._ms_status.set(f"✅ 符合條件：{len(result)} 檔（上限 {self._ms_limit_var.get()} 檔）｜排序：營收YoY > 今年股票 > 今年現金殖% > PE")
+
+        # 【V0.9.5-alpha Phase 6】2026-06-15：偵測 FinMind 402 額度錯誤
+        # 情境：_fetch_finmind_dividend 中途被 402 中斷（已抓 X 筆寫入 DB），
+        # _run_manual_selection 仍會完成並回傳部分結果（殖利率欄位一堆 None），
+        # 使用者會困惑「為什麼殖利率都沒有？」→ 主動提示額度問題。
+        quota_err = _MS_PROGRESS.get("error", "")
+        if quota_err and ("402" in quota_err or "額度" in quota_err):
+            done = _MS_PROGRESS.get("done", 0)
+            total = _MS_PROGRESS.get("total", 0)
+            self._ms_status.set(
+                f"✅ 符合條件：{len(result)} 檔｜"
+                f"⚠️ FinMind 額度用完（已抓 {done}/{total} 檔、已寫入 DB）｜"
+                f"部分股票殖利率/股利欄位為 None｜"
+                f"💡 可改用「🎯 指定股補抓」補關注股，或等下月重置"
+            )
+            self.logger.log(
+                f"⚠️ FinMind 額度用完（已抓 {done}/{total} 檔），"
+                f"已用 DB 資料顯示部分結果（殖利率欄位可能為 None）"
+            )
 
     def _ms_toggle_check(self, event):
         """點 Treeview 任一列 → toggle 勾選狀態"""
