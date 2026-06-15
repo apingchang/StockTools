@@ -86,7 +86,36 @@ Python 版本: 3.8+
   - test_revenue_盤中_不強制refresh_走原本邏輯
   - test_eps_盤中_不強制refresh_走原本邏輯
 
-【pytest】95 個 test 全部通過 ✅
+【手動選股 Tab 升級 + 買賣記錄 Tab】（Phase 8：股利金額顯示 + 30秒 refresh）2026-06-15
+- 【修 Bug + 改善】手動選股結果顯示今年/去年股利金額
+  - 修 Bug：_ms_display_results 內 row.get 沒讀「今年現金股利(元)」、「去年現金股利(元)」
+    → 雖然 DataFrame 結果有、但 Treeview 沒顯示
+  - 修法：加 2 個 column「今現金」、「去年現金」+ 對應的 row.get 讀取
+  - 表現：Treeview 從 11 個 column 變 13 個、使用者可以直接看到「現金股利金額 + 殖利率」驗算
+- 【新規則】買賣記錄 Tab 開盤 30 秒 refresh 持倉現價（William 11:02）
+  - 切到買賣記錄 Tab 且在開盤時段（09:00~13:30）→ 每 30 秒 refresh 持倉現價
+  - 收盤後、週末、切離買賣記錄 Tab → 自動停止
+  - 實作：_schedule_portfolio_refresh / _portfolio_refresh_loop / _cancel_portfolio_refresh
+  - 與現有「切到 Tab 時抓一次」共存：第一次切到 Tab 仍抓一次、之後每 30 秒抓一次
+- pytest 新增 test_ms_display_div_columns.py（5 個）：
+  - test_run_manual_selection_產出含元後綴股利欄位（核心整合守護）
+  - test_股票股利格式化_用對的key
+  - test_現金股利格式化_用對的key
+  - test_殖利率None時_格式化為橫線
+  - test_股利為0時_現金殖利率應為None（邊界）
+- pytest 新增 test_portfolio_refresh_loop.py（10 個）：
+  - test_盤中_排程下一次refresh
+  - test_盤後_不排程
+  - test_重複排程_取消上次的
+  - test_盤中_refresh_loop_刷新並排程下一次
+  - test_refresh_loop_已切離Tab_停止loop
+  - test_cancel_有job時呼叫after_cancel
+  - test_cancel_沒job時不做事
+  - test_refresh_loop_盤中排程後_排程時已是盤後_就停
+  - test_on_tab_changed_切到買賣記錄_啟動refresh
+  - test_on_tab_changed_切走_取消refresh
+
+【pytest】110 個 test 全部通過 ✅
 - test_dividend_year_mapping.py（5 個）
 - test_pe_filter.py（5 個）
 - test_dividend_specific.py（10 個）
@@ -100,6 +129,8 @@ Python 版本: 3.8+
 - test_fetch_dividend_update.py（8 個）
 - test_market_hours.py（16 個）
 - test_get_or_fetch_market_hours.py（5 個）
+- test_ms_display_div_columns.py（5 個）
+- test_portfolio_refresh_loop.py（10 個）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.4 更新內容】2026-06-11
@@ -3150,6 +3181,9 @@ class StrategyGUI(tk.Tk):
         self._price_last_update: Optional[datetime] = None
         self.after(800, self._startup_bg_fetch_price)
 
+        # V0.9.5+ Phase 8：買賣記錄 Tab 開盤 30 秒 refresh 持倉現價的 job id
+        self._portfolio_refresh_job_id = None
+
     def _build_ui(self):
         self.geometry("1280x720")
 
@@ -3573,8 +3607,60 @@ class StrategyGUI(tk.Tk):
                 self._refresh_portfolio_view()
                 # 背景執行抓現價（不 blocking GUI）
                 self.after(100, self._auto_fetch_positions_prices)
+                # V0.9.5+ Phase 8（William 2026-06-15 11:02）：
+                # 開盤時段（09:00~13:30）每 30 秒 refresh 一次持倉現價
+                self._schedule_portfolio_refresh()
+            else:
+                # 切離買賣記錄 Tab → 取消 refresh loop
+                self._cancel_portfolio_refresh()
         except Exception as e:
             self.logger.log(f"⚠️ Tab 切換 refresh 失敗：{e}")
+
+    def _schedule_portfolio_refresh(self):
+        """V0.9.5+ Phase 8：盤中（09:00~13:30）每 30 秒 refresh 一次持倉現價
+        收盤後、週末、切離 Tab 時自動停止
+        """
+        # 取消上次的排程（避免重複）
+        self._cancel_portfolio_refresh()
+
+        # 檢查是否在盤中
+        if not _is_market_hours():
+            self.logger.log("⏸️ 收盤時段、停止持倉現價自動 refresh（要 30 秒 refresh 請在 09:00~13:30 間瀠覽本 Tab）")
+            return
+
+        # 排程下一次 refresh（30 秒後）
+        self._portfolio_refresh_job_id = self.after(30000, self._portfolio_refresh_loop)
+        self.logger.log("🔄 盤中持倉現價自動 refresh 啟動（每 30 秒）")
+
+    def _cancel_portfolio_refresh(self):
+        """取消持倉現價 refresh 排程（無論是切離 Tab 或收盤）"""
+        if getattr(self, '_portfolio_refresh_job_id', None):
+            try:
+                self.after_cancel(self._portfolio_refresh_job_id)
+            except Exception:
+                pass
+            self._portfolio_refresh_job_id = None
+
+    def _portfolio_refresh_loop(self):
+        """refresh loop 本體：刷新一次持倉現價、判斷是否要排下一次
+        終止條件：
+        1. 使用者切離買賣記錄 Tab
+        2. 收盤（_is_market_hours() = False）
+        """
+        try:
+            current = self.notebook.index(self.notebook.select())
+            if current != 1:
+                # 已切離買賣記錄 Tab、停止 loop
+                self.logger.log("⏸️ 已切離買賣記錄 Tab、停止持倉現價自動 refresh")
+                return
+        except Exception:
+            return
+
+        # 抓一次現價
+        self._auto_fetch_positions_prices()
+
+        # 排程下一次（內部會檢查 _is_market_hours、收盤就停）
+        self._schedule_portfolio_refresh()
 
     def _auto_fetch_positions_prices(self):
         """切到買賣記錄 Tab 時自動抓持倉所有股票現價（背景 thread）"""
@@ -3820,12 +3906,16 @@ class StrategyGUI(tk.Tk):
         paned.add(right_frame, weight=1)
 
         # Treeview with checkbox
+        # 【V0.9.5+ Phase 8 修 Bug】2026-06-15 William 反映：
+        #   殖利率沒對照到原始股利金額、無法驗算是否正確
+        #   修法：加「今現金」/「去年現金」欄位（股利金額，原始股數）
+        #   並修正之前 key 錯位（找「今年股票股利(元)」但欄位是「今年股票股利」）
         cols = ("勾選","代號","名稱","現價","累計YoY%",
-                "今股票","今現金殖%","PE","成交量(張)",
-                "去年股票","去年現金殖%")
+                "今股票","今現金","今現金殖%","PE","成交量(張)",
+                "去年股票","去年現金","去年現金殖%")
         self._ms_tree = ttk.Treeview(right_frame, columns=cols, show="headings",
                                      selectmode="none", height=25)
-        col_widths = (40, 60, 100, 70, 70, 65, 80, 50, 80, 65, 80)
+        col_widths = (40, 60, 100, 70, 70, 60, 60, 80, 50, 80, 60, 60, 80)
         for col, w in zip(cols, col_widths):
             self._ms_tree.heading(col, text=col)
             self._ms_tree.column(col, width=w, anchor="center")
@@ -4383,16 +4473,24 @@ class StrategyGUI(tk.Tk):
             price_str = f"{price:.2f}" if price and str(price) not in ("nan","None") else "—"
             rev = row.get("累計營收YoY(%)")
             rev_str = f"{rev:.2f}" if rev and str(rev) not in ("nan","None") else "—"
+            # 【V0.9.5+ Phase 8】key 保留「(元)」：_run_manual_selection final rename
+            # 把「今年股票股利」→「今年股票股利(元)」、這裡要跟著帶「(元)」
             stock_div = row.get("今年股票股利(元)", "—")
             stock_str = f"{stock_div:.2f}" if isinstance(stock_div, float) and str(stock_div) not in ("nan","None") else "—"
+            # 【V0.9.5+ Phase 8 新增】今年現金股利金額（原本 _ms_display_results 完全沒讀這個欄位）
+            cash_div = row.get("今年現金股利(元)", "—")
+            cash_div_str = f"{cash_div:.2f}" if isinstance(cash_div, float) and str(cash_div) not in ("nan","None") else "—"
             cash_yld = row.get("今年現金殖利率(%)")
             cash_str = f"{cash_yld:.2f}" if cash_yld and str(cash_yld) not in ("nan","None") else "—"
             pe = row.get("PE")
             pe_str = f"{pe:.2f}" if pe and str(pe) not in ("nan","None") else "—"
             vol = row.get("成交量(張)")
             vol_str = f"{int(vol):,}" if vol and str(vol) not in ("nan","None") else "—"
-            last_stock = row.get("去年股票股利(元)")
+            last_stock = row.get("去年股票股利(元)", "—")
             last_stock_str = f"{last_stock:.2f}" if isinstance(last_stock, float) and str(last_stock) not in ("nan","None") else "—"
+            # 【V0.9.5+ Phase 8 新增】去年現金股利金額
+            last_cash_div = row.get("去年現金股利(元)", "—")
+            last_cash_div_str = f"{last_cash_div:.2f}" if isinstance(last_cash_div, float) and str(last_cash_div) not in ("nan","None") else "—"
             last_cash = row.get("去年現金殖利率(%)")
             last_cash_str = f"{last_cash:.2f}" if last_cash and str(last_cash) not in ("nan","None") else "—"
 
@@ -4400,8 +4498,8 @@ class StrategyGUI(tk.Tk):
             self._ms_tree.insert("", "end", iid=code, values=(
                 "☑" if self._ms_checked.get(code, False) else "☐",
                 code, name, price_str, rev_str,
-                stock_str, cash_str, pe_str, vol_str,
-                last_stock_str, last_cash_str
+                stock_str, cash_div_str, cash_str, pe_str, vol_str,
+                last_stock_str, last_cash_div_str, last_cash_str
             ), tags=(tag,))
 
         self._ms_status.set(f"✅ 符合條件：{len(result)} 檔（上限 {self._ms_limit_var.get()} 檔）｜排序：營收YoY > 今年股票 > 今年現金殖% > PE")
