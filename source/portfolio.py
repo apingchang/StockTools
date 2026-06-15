@@ -242,6 +242,27 @@ def fetch_stock_info(stock_id: str,
                 "ok": True,
                 "error": "",
             })
+            # 【V0.9.5+ Phase 9 修 Bug】2026-06-15 William 反映：
+            #   00403A 現價一直停在 10.61 不動
+            #   根因：TWSE 在「没成交瞬間」 z='-' → _num('z') 轉成 0.0
+            #         → _apply_fetched_prices price=0 跳過更新 → 保持舊值
+            #   修法：z=0 時 fallback 到 h+l 中價（今日高低中點、比昨收更接近即時）
+            #         並標記 price_fallback='mid'、讓 UI 知道是估算價
+            if result["price"] == 0:
+                h = result["high"]
+                l = result["low"]
+                if h > 0 and l > 0:
+                    result["price"] = round((h + l) / 2, 4)   # 保留 4 位跟 TWSE 精度一致
+                    result["price_fallback"] = "mid"         # 標記是中價估算
+                else:
+                    # h/l 也 0（TWSE 連 h/l 都没資料） → fallback 到昨收
+                    if result["prev_close"] > 0:
+                        result["price"] = result["prev_close"]
+                        result["price_fallback"] = "prev_close"
+                    else:
+                        result["price_fallback"] = ""
+            else:
+                result["price_fallback"] = ""  # 即時成交價、不需要 fallback
             return result
 
         except requests.RequestException as e:

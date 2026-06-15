@@ -115,7 +115,29 @@ Python 版本: 3.8+
   - test_on_tab_changed_切到買賣記錄_啟動refresh
   - test_on_tab_changed_切走_取消refresh
 
-【pytest】110 個 test 全部通過 ✅
+【買賣記錄 Tab】（Phase 9：00403A 現價 fallback）2026-06-15
+- 【修 Bug】00403A 現價一直停在 10.61 不動
+  - 根因：TWSE 在「沒成交瞬間」 z='-' → _num('z') 轉成 0.0
+         → _apply_fetched_prices price=0 跳過更新 → 保持舊值
+  - 修法：fetch_stock_info z=0 時 fallback 到 h+l 中價（今日高低价中點）
+    - 比 y（昨收）更接近即時
+    - 標記 price_fallback='mid'、UI 可依此判斷
+  - 二層 fallback：h/l 也為 0 → fallback 到 y（昨收）、標記 price_fallback='prev_close'
+  - 三層 fallback：y 也為 0 → price 保持 0、不更新
+  - logger 提示：「⚠️ XXX 無即時成交價、用今日高低价中點估算」
+- 影響範圍：所有交易不活躍的標的（特別是主動式 ETF、0050 這類有時 z='-' 的）
+- pytest 新增 test_fetch_stock_info_fallback.py（9 個）：
+  - test_z是橫線_fallback到h_l中價（核心）
+  - test_z是None_fallback到h_l中價
+  - test_hl也都0_fallback到昨收
+  - test_全都0_price保持0
+  - test_z有即時成交_不fallback（守護正常路徑）
+  - test_z有即時成交_就算接近昨收也不誤判fallback
+  - test_fetch_prices_batch_00403A_fallback正常運作
+  - test_apply_fetched_prices_fallback也更新
+  - test_apply_fetched_prices_price為0仍然跳過
+
+【pytest】119 個 test 全部通過 ✅
 - test_dividend_year_mapping.py（5 個）
 - test_pe_filter.py（5 個）
 - test_dividend_specific.py（10 個）
@@ -131,6 +153,7 @@ Python 版本: 3.8+
 - test_get_or_fetch_market_hours.py（5 個）
 - test_ms_display_div_columns.py（5 個）
 - test_portfolio_refresh_loop.py（10 個）
+- test_fetch_stock_info_fallback.py（9 個）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.4 更新內容】2026-06-11
@@ -3683,15 +3706,30 @@ class StrategyGUI(tk.Tk):
 
     def _apply_fetched_prices(self, results: Dict[str, Dict[str, Any]]):
         """把背景抓回來的現價套到 GUI（主執行緒）"""
+        fallback_count = 0
         for sid, info in results.items():
             if info.get("ok") and info.get("price", 0) > 0:
                 self._current_prices[sid] = info["price"]
                 # 同時補上股票名稱（如果 DB 沒有的話）
                 if info.get("name"):
                     self._backfill_stock_name(sid, info["name"])
+                # 【V0.9.5+ Phase 9】fallback 提示：若 price 是用 mid 估算的、log 提示使用者
+                if info.get("price_fallback") == "mid":
+                    fallback_count += 1
+                    self.logger.log(
+                        f"⚠️ {sid} 無即時成交價、用今日高低价中點估算：{info['price']:.2f}（TWSE 記錄 z='-'）"
+                    )
+                elif info.get("price_fallback") == "prev_close":
+                    fallback_count += 1
+                    self.logger.log(
+                        f"⚠️ {sid} 無即時成交價、用昨收估算：{info['price']:.2f}（TWSE 連 h/l 也缺資料）"
+                    )
         self._refresh_portfolio_view()
         ok_count = sum(1 for v in results.values() if v.get("ok"))
-        self.logger.log(f"✅ 現價抓取完成：{ok_count}/{len(results)} 檔成功")
+        msg = f"✅ 現價抓取完成：{ok_count}/{len(results)} 檔成功"
+        if fallback_count:
+            msg += f"（{fallback_count} 檔用估算價、缺即時成交）"
+        self.logger.log(msg)
 
     def _backfill_stock_name(self, stock_id: str, name: str):
         """把抓到的名稱補回 DB 中所有該代號的紀錄"""
