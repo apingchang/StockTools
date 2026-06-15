@@ -228,3 +228,36 @@ def test_portfolio_summary_有current_tax欄位():
     s = pf.PortfolioSummary()
     assert hasattr(s, "current_tax"), "PortfolioSummary 應有 current_tax 欄位"
     assert s.current_tax == 0.0
+
+
+# ==========================================================
+# 【UI Label keys】守護 row0/row1 包含必要的 key
+# ==========================================================
+
+def test_summary_label_keys_全集合():
+    """【守護】UI row0 + row1 必須包含：total_cost, total_market_value,
+    total_unrealized_pl, total_fee, total_tax, historical_tax,
+    net_realized_pl, total_return_pct, total_pl
+    缺一個就會 KeyError 在 _refresh_portfolio_view
+
+    William 2026-06-15 21:26 反映：total_return_pct 漏放 → KeyError
+    """
+    # 從 source code 解析 row0/row1（避免 import GUI）
+    import re
+    with open(os.path.join(os.path.dirname(__file__), "..", "source", "StockTool.py"), "r", encoding="utf-8") as f:
+        src = f.read()
+    m = re.search(r"row0 = \[(.+?)\]\s*# Row 1", src, re.DOTALL)
+    assert m, "應能從原始碼抓到 row0 定義"
+    m1 = re.search(r"row1 = \[(.+?)\]\s*\n\s*\n", src, re.DOTALL)
+    assert m1, "應能從原始碼抓到 row1 定義"
+    row0_keys = re.findall(r'"(\w+)"', m.group(1))
+    row1_keys = re.findall(r'"(\w+)"', m1.group(1))
+    all_keys = set(row0_keys) | set(row1_keys)
+
+    required = {
+        "total_cost", "total_market_value", "total_unrealized_pl", "total_fee",
+        "total_tax", "historical_tax", "net_realized_pl",
+        "total_return_pct", "total_pl",
+    }
+    missing = required - all_keys
+    assert not missing, f"row0/row1 缺少以下 key: {missing}（會導致 _refresh_portfolio_view KeyError）"

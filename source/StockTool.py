@@ -178,13 +178,16 @@ Python 版本: 3.8+
   - 修正：未實現 + 已實現淨損益 - 現價稅
   - 邏輯：未實現是「假設全部賣出的毛利」、賣出還要付現價稅、要扣
 - 【UI】Row 1 改成「現價累計證交稅 / 歷史累計已付稅 / 已實現淨損益 / 總損益（含現價稅）」
-- pytest 新增 test_current_tax.py（11 個）：
+- 【Phase 11 hotfix 21:26】威廉反映 Refresh 報 KeyError 'total_return_pct'
+  - 原因：row1 加 historical_tax 後變 4 個、total_return_pct 沒地方放、KeyError
+  - 修法：row0 加回 total_return_pct 變 5 個、row1 維持 4 個
+- pytest 新增 test_current_tax.py（12 個）：
   - 核心算法（4 個）：現價×股數×0.003、沒現價不計、持股=0 不計、部分賣只算剩餘
   - 歷史稅保留（2 個）：historical_tax 不變、current_tax 跟 historical_tax 可同時存在
   - 總損益扣除現價稅（4 個）：部分賣、沒持倉、現價下跌仍扣、報酬率分母
   - PortfolioSummary 結構（1 個）
 
-【pytest】145 個 test 全部通過 ✅
+【pytest】146 個 test 全部通過 ✅
 - test_dividend_year_mapping.py（5 個）
 - test_pe_filter.py（5 個）
 - test_dividend_specific.py（10 個）
@@ -202,7 +205,7 @@ Python 版本: 3.8+
 - test_portfolio_refresh_loop.py（10 個）
 - test_fetch_stock_info_fallback.py（9 個）
 - test_ex_date_yield.py（15 個）
-- test_current_tax.py（11 個）
+- test_current_tax.py（12 個）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.4 更新內容】2026-06-11
@@ -3977,12 +3980,15 @@ class StrategyGUI(tk.Tk):
         summary_frame.pack(fill="x", padx=8, pady=(8, 4))
         self._summary_labels = {}
 
-        # Row 0: 成本/市值/未實現/手續費
+        # Row 0: 成本/市值/未實現/手續費/總報酬率（V0.9.5+ Phase 11 修正：加回 total_return_pct）
+        #   原因：之前 row1 加了「歷史累計已付稅」後變 4 個、total_return_pct 沒地方放 → KeyError
+        #   解法：row0 加 total_return_pct 變 5 個、row1 維持 4 個
         row0 = [
             ("total_cost", "總成本（含費用）"),
             ("total_market_value", "總市值"),
             ("total_unrealized_pl", "未實現損益"),
             ("total_fee", "累計手續費"),
+            ("total_return_pct", "總報酬率 %"),  # V0.9.5+ Phase 11：從 row1 移回 row0
         ]
         # Row 1: 現價累計證交稅/歷史累計已付稅/已實現淨/總損益
         #   V0.9.5+ Phase 11（William 2026-06-15 19:15）：
