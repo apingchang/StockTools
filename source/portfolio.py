@@ -369,10 +369,11 @@ class PortfolioSummary:
     total_market_value: float = 0.0
     total_unrealized_pl: float = 0.0
     total_realized_pl: float = 0.0       # 原始已實現損益（扣 fee+tax 前）
-    total_fee: float = 0.0               # V0.9.4: 累計手續費
-    total_tax: float = 0.0               # V0.9.4: 累計證交稅
+    total_fee: float = 0.0               # V0.9.4: 累計手續費（已實現）
+    total_tax: float = 0.0               # V0.9.4: 歷史累計證交稅（已實現交易實際付過的）
+    current_tax: float = 0.0             # V0.9.5+ Phase 11：持倉現價累計證交稅（假設現在全賣要付的稅）
     net_realized_pl: float = 0.0         # V0.9.4: 已實現淨損益（扣 fee+tax 後）
-    total_pl: float = 0.0
+    total_pl: float = 0.0                # V0.9.5+ Phase 11：未實現 + 已實現淨 - 現價稅
     total_return_pct: float = 0.0
     position_count: int = 0
     tx_count: int = 0
@@ -627,9 +628,20 @@ class PortfolioDB:
         total_unrealized = sum(p.unrealized_pl for p in positions)
         total_realized = sum(p.realized_pl for p in positions)
         total_fee = sum(t.fee for t in txs)
-        total_tax = sum(t.tax for t in txs)
+        total_tax = sum(t.tax for t in txs)   # 歷史累計證交稅（已賣出的實際稅）
+
+        # V0.9.5+ Phase 11（William 2026-06-15 19:15）：
+        #   持倉現價累計證交稅 = Σ(現價 × 股數 × 0.003) 有現價的持倉
+        #   代表「如果現在全部賣出、要付的證交稅」
+        current_tax = 0.0
+        for p in positions:
+            if p.shares > 0 and p.current_price > 0:
+                current_tax += round(p.shares * p.current_price * SELL_TAX_RATE, 2)
+
         net_realized = total_realized - total_fee - total_tax
-        total_pl = total_unrealized + net_realized
+        # 【V0.9.5+ Phase 11 修正】total_pl 扣除「現價稅」、
+        #   因為未實現損益是「假設全部賣出」的毛利、但賣出還要付現價稅
+        total_pl = total_unrealized + net_realized - current_tax
         total_return = (total_pl / total_cost * 100) if total_cost > 0 else 0.0
 
         return PortfolioSummary(
@@ -639,6 +651,7 @@ class PortfolioDB:
             total_realized_pl=total_realized,
             total_fee=total_fee,
             total_tax=total_tax,
+            current_tax=current_tax,    # V0.9.5+ Phase 11：持倉現價累計證交稅
             net_realized_pl=net_realized,
             total_pl=total_pl,
             total_return_pct=total_return,

@@ -165,7 +165,26 @@ Python 版本: 3.8+
   - _fetch_ex_date_close：6 個（正常、假日、空字串、額度、沒資料、close=0）
   - _run_manual_selection 整合：4 個（用 ex_date_close 不是現價、沒 ex_date、現金=0、自動 fetch 緩存）
 
-【pytest】134 個 test 全部通過 ✅
+【買賣記錄 Tab】（Phase 11：持倉現價累計證交稅 + 計入總損益）2026-06-15 19:15
+- 【William 19:15 新需求】累計證交稅請以持股現價計算顯示出來並記入總損益中
+- 【原本】累計證交稅 = 已賣出交易實際付過的稅（historical）
+- 【修正】累計證交稅 = Σ(現價 × 股數 × 0.003) for 有現價的持倉（current_tax）
+  - 歷史已付稅另外以「歷史累計已付稅」欄位顯示（不丟失資訊）
+- 【PortfolioSummary 新欄位】
+  - current_tax：持倉現價累計證交稅（V0.9.5+ Phase 11）
+  - total_tax：保留為歷史已付稅（向後相容）
+- 【total_pl 算法修正】
+  - 原本：未實現 + 已實現淨損益 → 會高估（未實現沒扣現價稅）
+  - 修正：未實現 + 已實現淨損益 - 現價稅
+  - 邏輯：未實現是「假設全部賣出的毛利」、賣出還要付現價稅、要扣
+- 【UI】Row 1 改成「現價累計證交稅 / 歷史累計已付稅 / 已實現淨損益 / 總損益（含現價稅）」
+- pytest 新增 test_current_tax.py（11 個）：
+  - 核心算法（4 個）：現價×股數×0.003、沒現價不計、持股=0 不計、部分賣只算剩餘
+  - 歷史稅保留（2 個）：historical_tax 不變、current_tax 跟 historical_tax 可同時存在
+  - 總損益扣除現價稅（4 個）：部分賣、沒持倉、現價下跌仍扣、報酬率分母
+  - PortfolioSummary 結構（1 個）
+
+【pytest】145 個 test 全部通過 ✅
 - test_dividend_year_mapping.py（5 個）
 - test_pe_filter.py（5 個）
 - test_dividend_specific.py（10 個）
@@ -183,6 +202,7 @@ Python 版本: 3.8+
 - test_portfolio_refresh_loop.py（10 個）
 - test_fetch_stock_info_fallback.py（9 個）
 - test_ex_date_yield.py（15 個）
+- test_current_tax.py（11 個）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.4 更新內容】2026-06-11
@@ -3964,12 +3984,15 @@ class StrategyGUI(tk.Tk):
             ("total_unrealized_pl", "未實現損益"),
             ("total_fee", "累計手續費"),
         ]
-        # Row 1: 證交稅/已實現淨/總報酬率/空白
+        # Row 1: 現價累計證交稅/歷史累計已付稅/已實現淨/總損益
+        #   V0.9.5+ Phase 11（William 2026-06-15 19:15）：
+        #   「累計證交稅」改成「以持股現價計算」= Σ(現價 × 股數 × 0.003)
+        #   歷史已付稅另以小字顯示
         row1 = [
-            ("total_tax", "累計證交稅"),
+            ("total_tax", "現價累計證交稅"),       # ← 顯示 current_tax（V0.9.5+ Phase 11）
+            ("historical_tax", "歷史累計已付稅"),   # ← 顯示 total_tax（保留歷史）
             ("net_realized_pl", "已實現淨損益"),
-            ("total_return_pct", "總報酬率 %"),
-            ("total_pl", "總損益（含費）"),
+            ("total_pl", "總損益（含現價稅）"),
         ]
 
         for col, (key, label) in enumerate(row0):
@@ -5116,7 +5139,10 @@ class StrategyGUI(tk.Tk):
             pl_color = "#0a7d2c" if summary.total_unrealized_pl >= 0 else "#c00000"
             self._summary_labels["total_unrealized_pl"].config(text=f"{summary.total_unrealized_pl:+,.0f}", foreground=pl_color)
             self._summary_labels["total_fee"].config(text=f"{summary.total_fee:,.0f}")
-            self._summary_labels["total_tax"].config(text=f"{summary.total_tax:,.0f}")
+            # V0.9.5+ Phase 11：累計證交稅 = 持倉現價累計（current_tax）
+            #   「歷史累計已付稅」另外顯示（historical_tax = summary.total_tax）
+            self._summary_labels["total_tax"].config(text=f"{summary.current_tax:,.0f}")
+            self._summary_labels["historical_tax"].config(text=f"{summary.total_tax:,.0f}")
             net_color = "#0a7d2c" if summary.net_realized_pl >= 0 else "#c00000"
             self._summary_labels["net_realized_pl"].config(text=f"{summary.net_realized_pl:+,.0f}", foreground=net_color)
             ret_color = "#0a7d2c" if summary.total_return_pct >= 0 else "#c00000"
