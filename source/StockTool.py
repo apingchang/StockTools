@@ -4350,10 +4350,29 @@ class StrategyGUI(tk.Tk):
             in_db = len(cached)
             total = len(all_codes)
             missing = total - in_db
+
+            # 讀取每日排程最後抓取時間
+            last_fetch = ""
+            for p in [".tmp/dividend_last_fetch.txt",
+                      "../.tmp/dividend_last_fetch.txt",
+                      os.path.join(os.path.dirname(os.path.dirname(__file__)), ".tmp", "dividend_last_fetch.txt")]:
+                if os.path.exists(p):
+                    try:
+                        with open(p) as f:
+                            ts = f.read().strip()
+                        if ts:
+                            # 格式化：只取 日期 和 時:分
+                            parts = ts.split()
+                            if len(parts) >= 2:
+                                last_fetch = f"｜自動抓取 {parts[0]} {parts[1]}"
+                            break
+                    except Exception:
+                        pass
+
             if missing == 0:
-                self._ms_dividend_status.set(f"股利 DB: ✅ {in_db}/{total} 檔（全部就絡）")
+                self._ms_dividend_status.set(f"股利 DB: ✅ {in_db}/{total} 檔（全部就絡）{last_fetch}")
             else:
-                self._ms_dividend_status.set(f"股利 DB: {in_db}/{total} 檔（缺漏 {missing}）")
+                self._ms_dividend_status.set(f"股利 DB: {in_db}/{total} 檔（缺漏 {missing}）{last_fetch}")
         except Exception as e:
             self._ms_dividend_status.set(f"股利 DB: 查詢失敗 {str(e)[:30]}")
 

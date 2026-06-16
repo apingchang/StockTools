@@ -171,7 +171,89 @@ def cmd_reset_source(stock_id: str, year: int):
     return 0
 
 
+def _get_all_stock_ids():
+    """從 TWSE/TPEx API 取得全市場股號清單"""
+    import requests
+    ids = []
+    for url in [
+        "https://www.twse.com.tw/rwd/zh/afterShowAllStockQuote",
+    ]:
+        try:
+            r = requests.get(url, params={
+                "date": datetime.now().strftime("%Y%m%d"),
+                "response": "json",
+                "board": "ALL",
+            }, timeout=10)
+            data = r.json()
+            for item in data.get("data", []):
+                code = str(item[0]).strip()
+                if code.isdigit() and len(code) == 4:
+                    ids.append(code)
+        except Exception:
+            pass
+    # 上櫃從 DB 現有股號湊（DB 已有 2040 檔，取並集）
+    if not ids:
+        import sqlite3
+        conn = sqlite3.connect("dividend_history.db")
+        ids = [r[0] for r in conn.execute(
+            "SELECT DISTINCT stock_id FROM dividend_history ORDER BY stock_id").fetchall()]
+        conn.close()
+    return list(set(ids))
+
+
 def main():
+    # ── argparse: 支援 --all --batch ──
+    parser = argparse.ArgumentParser(description="股神股利補抓 CLI", add_help=False)
+    parser.add_argument("--all", action="store_true", help="補抓全市場股票（從 TWSE API 取得清單）")
+    parser.add_argument("--batch", type=int, default=100, help="每批抓幾檔（預設 100，Free tier 適用）")
+    parser.add_argument("--help", "-h", action="store_true")
+    argv, unknown = parser.parse_known_args(sys.argv[1:])
+
+    if argv.help:
+        print("""📋 股神股利補抓 CLI
+用法：
+  python fetch_dividend.py --all [--batch 100]   ← 全市場補抓
+  python fetch_dividend.py 2330 2454              ← 指定股號
+  python fetch_dividend.py show 3546               ← 查某檔歷史
+  python fetch_dividend.py update 3546 2025 --cash 2.0  ← 手動覆寫
+範例：
+  python fetch_dividend.py --all --batch 100
+  python fetch_dividend.py 3188,2330,2317
+  python fetch_dividend.py "3188 2330 2317"
+""")
+        sys.exit(0)
+
+    if argv.all:
+        # ── 全市場補抓 ──
+        print("🔍 取得全市場股號清單...")
+        all_codes = _get_all_stock_ids()
+        print(f"📋 全市場共 {len(all_codes)} 檔，開始差額補抓（batch={argv.batch}）...")
+        db_path = "dividend_history.db"
+        st._init_div_history_db(db_path)
+        cached = st._query_div_history(db_path, all_codes)
+        to_fetch = [c for c in all_codes if c not in cached]
+        print(f"   DB 已有 {len(all_codes) - len(to_fetch)} 檔，缺 {len(to_fetch)} 檔待補")
+        if not to_fetch:
+            print("✅ 全市場股利 DB 已完整，無需補抓")
+            sys.exit(0)
+        try:
+            added = st._background_fetch_all_dividend(
+                to_fetch, db_path=db_path,
+                batch_size=argv.batch,
+                progress_callback=lambda d, t: print(
+                    f"\r   進度 {d}/{t}（{int(d/t*100)}%）", end="", flush=True),
+            )
+            print()
+        except Exception as e:
+            print(f"\n❌ 補抓失敗：{e}")
+            sys.exit(2)
+        if added == -1:
+            print("⚠️ FinMind 額度用完（402），已寫入 DB 的資料已保存")
+            sys.exit(1)
+        print(f"✅ 全市場補抓完成：{added} 檔寫入 {db_path}")
+        sys.exit(0)
+
+    # ── 原有邏輯 ──
     if len(sys.argv) < 2:
         # 沒參數 → 顯示用法
         print("📋 用法：python fetch_dividend.py <股號1> <股號2> ...")
