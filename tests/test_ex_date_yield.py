@@ -204,8 +204,8 @@ def _make_div_df_with_ex_date() -> pd.DataFrame:
 
 def test_去年現金殖利率_用ex_date_close_不是現價():
     """【V0.9.5+ Phase 10 核心】2330 的 ex_date_close=620、去年現金=2.5
-    → 殖利率 = 2.5/620*100 = 0.40%
-    若誤用現價（60.0）算 → 4.17%（差 10 倍）"""
+    → 殖利率 = 3.0/620*100 = 0.48%
+    若誤用現價（60.0）算 → 5.0%（差 10 倍）"""
     st._fetch_finmind_dividend = lambda codes, **kw: _make_div_df_with_ex_date()
     # _fetch_ex_date_close 對 2317（沒緩存）回 100
     st._fetch_ex_date_close = lambda code, ex_date: 100.0 if code == "2317" else None
@@ -222,30 +222,35 @@ def test_去年現金殖利率_用ex_date_close_不是現價():
     row_2330 = result[result["股票代號"] == "2330"].iloc[0]
     row_2317 = result[result["股票代號"] == "2317"].iloc[0]
 
-    # 2330: 殖利率應該用 620（ex_date_close）算 → 2.5/620 = 0.40%
-    assert abs(row_2330["去年現金殖利率(%)"] - 0.40) < 0.01, \
-        f"2330 去年殖利率應為 0.40%（2.5/620），實際: {row_2330['去年現金殖利率(%)']}"
-    # 不是用現價 60 算的 4.17%
-    assert row_2330["去年現金殖利率(%)"] != 4.17, \
-        "不應誤用現價算（4.17% 是用現價 60 算出來的）"
+    # 2330: 殖利率應該用 620（ex_date_close）算 → 3.0/620 = 0.48%
+    assert abs(row_2330["去年現金殖利率(%)"] - 0.48) < 0.01, \
+        f"2330 去年殖利率應為 0.48%（3.0/620），實際: {row_2330['去年現金殖利率(%)']}"
+    # 不是用現價 60 算的 5.0%
+    assert row_2330["去年現金殖利率(%)"] != 5.0, \
+        "不應誤用現價算（5.0% 是用現價 60 算出來的）"
 
-    # 2317: 殖利率 1.5/100*100 = 1.50%
-    assert abs(row_2317["去年現金殖利率(%)"] - 1.50) < 0.01, \
-        f"2317 去年殖利率應為 1.50%（1.5/100），實際: {row_2317['去年現金殖利率(%)']}"
+    # 2317: 殖利率 2.0/100*100 = 2.0%
+    assert abs(row_2317["去年現金殖利率(%)"] - 2.0) < 0.01, \
+        f"2317 去年殖利率應為 2.0%（2.0/100），實際: {row_2317['去年現金殖利率(%)']}"
 
 
 def test_去年現金殖利率_沒ex_date_殖利率為None():
-    """【邊界】DB 沒除息日 → 殖利率 None（沒法算）"""
+    """【邊界】V0.9.5-goodinfo 新語意：ex_date 空且 fetch 也回 None
+    → 殖利率 fallback 用現價（行為同 v0.9.5+ Phase 10 修法）
+    殖利率 = 1.0 / 50.0 * 100 = 2.0%
+    """
     st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "9999",
             f"{CY}現金股利": None, f"{CY}股票股利": None,
-            f"{CY - 1}現金股利": 1.0, f"{CY - 1}股票股利": 0.0,
+            f"{CY - 1}現金股利": 1.0, f"{CY - 1}股票股利": [0.0][0],
             f"{CY - 2}現金股利": 0.0, f"{CY - 2}股票股利": 0.0,
             f"{CY - 1}除息日": "",  # ← 空字串
             f"{CY - 1}除息日收盤價": None,
         }
     ])
+    # fetch 也回 None
+    st._fetch_ex_date_close = lambda code, ex_date: None
 
     price_df = pd.DataFrame([
         {"股票代號": "9999", "股票名稱": "測試", "現價": 50.0,
@@ -254,9 +259,9 @@ def test_去年現金殖利率_沒ex_date_殖利率為None():
 
     result = st._run_manual_selection(price_df, pd.DataFrame(), pd.DataFrame(), {}, top_n=10)
     row = result.iloc[0]
-    # ex_date 空 → 殖利率 None
-    assert pd.isna(row["去年現金殖利率(%)"]), \
-        f"ex_date 空時殖利率應為 None，實際: {row['去年現金殖利率(%)']}"
+    # ex_date 空 + fetch 回 None → fallback 用現價 → 殖利率 = 1.0/50 = 2.0%
+    assert abs(row["去年現金殖利率(%)"] - 2.0) < 0.01, \
+        f"ex_date 空 + fetch 失敗 → 殖利率 fallback 用現價應為 2.0%，實際: {row['去年現金殖利率(%)']}"
 
 
 def test_去年現金殖利率_現金股利為0_殖利率為None():
@@ -285,13 +290,15 @@ def test_去年現金殖利率_現金股利為0_殖利率為None():
 
 
 def test_去年現金殖利率_沒ex_date_close_自動fetch並緩存():
-    """【整合】DB 沒 ex_date_close → 自動 fetch → 寫入 DB 緩存"""
+    """【整合】DB 沒 ex_date_close → 自動 fetch → 寫入 DB 緩存
+    V0.9.5-goodinfo 新語意：「去年」= DB year=CY-1 → ex_date 也是 CY-1 的
+    """
     st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "9999",
             f"{CY}現金股利": None, f"{CY}股票股利": None,
-            f"{CY - 1}現金股利": 0.0, f"{CY - 1}股票股利": 0.0,
-            f"{CY - 2}現金股利": 1.5, f"{CY - 2}股票股利": 0.0,  # ← 去年現金 1.5
+            f"{CY - 1}現金股利": 1.5, f"{CY - 1}股票股利": 0.0,  # ← 去年現金 1.5 (新語意)
+            f"{CY - 2}現金股利": 0.0, f"{CY - 2}股票股利": 0.0,
             f"{CY - 1}除息日": "2025-08-15",
             f"{CY - 1}除息日收盤價": None,  # 沒緩存
         }

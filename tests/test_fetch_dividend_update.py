@@ -199,9 +199,10 @@ def test_update後殖利率算法仍正確():
     # 直接組裝 finmind mock：3546 cash=2.0
     st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {"股票代號": "3546",
-         f"{CY}現金股利": None, f"{CY}股票股利": None,
-         f"{CY - 1}現金股利": 2.0, f"{CY - 1}股票股利": 0.5,  # 修過的 cash=2.0
-         f"{CY - 2}現金股利": 4.1, f"{CY - 2}股票股利": 1.0},
+         # V0.9.5-goodinfo 新語意：今年=cy → 把 2.0 移到 CY
+         f"{CY}現金股利": 2.0, f"{CY}股票股利": 0.5,
+         f"{CY - 1}現金股利": 4.1, f"{CY - 1}股票股利": 1.0,
+         f"{CY - 2}現金股利": None, f"{CY - 2}股票股利": None},
     ])
 
     price_df = pd.DataFrame([

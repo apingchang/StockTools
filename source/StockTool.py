@@ -1428,20 +1428,26 @@ def _run_manual_selection(
                 base[suf] = None
 
     # 7. 今年/去年現金股利欄位（干擾名稱，用固定名）
-    # 重要：FinMind `TaiwanStockDividend` 的 year 欄位是「會計年度」
-    #       ex: year=2025 = 2025 年度盈餘的股利，在 2026 年除息發放
-    #   台灣人說「今年現金股利」= 當年除息 = DB year=cy-1
-    #   因此正確對應是 cy-1=今年、cy-2=去年、cy-3=前年
-    #   （不要直接用 cy，因為 DB 通常還沒抓當年度的決公告資料）
+    # 【V0.9.5-goodinfo 修 Bug】2026-06-16 William 反映：
+    #   - 群聯 (8299) 半年配：App 原本「今年」= DB year=cy-1=2025=31.31
+    #     但 goodinfo 2026 支付年 = 16.96 (2026 H1 只配了一半、H2 還沒)
+    #   - 原設計「cy-1 = 該年除息」是 fiscal year 語意 → 半年配/季配會跟 goodinfo 不一致
+    #   - 修法：改用「cy = 該年除息」= payment year 語意，跟 goodinfo「發放年度」一致
+    #     讓使用者看到的「今年現金股利」= 今年實際收到的股利金額
+    #   - 範例：cy=2026
+    #     * 今年 (cy) = DB year=2026 = goodinfo 2026 = 「2026 收到的股利」
+    #     * 去年 (cy-1) = DB year=2025 = goodinfo 2025 = 「2025 收到的股利」
+    #     * 前年 (cy-2) = DB year=2024 = goodinfo 2024 = 「2024 收到的股利」
     cy = datetime.now().year
-    base["今年現金股利"] = base.get(f"{cy - 1}現金股利", None)
-    base["今年股票股利"] = base.get(f"{cy - 1}股票股利", None)
-    base["去年現金股利"] = base.get(f"{cy - 2}現金股利", None)
-    base["去年股票股利"] = base.get(f"{cy - 2}股票股利", None)
+    base["今年現金股利"] = base.get(f"{cy}現金股利", None)
+    base["今年股票股利"] = base.get(f"{cy}股票股利", None)
+    base["去年現金股利"] = base.get(f"{cy - 1}現金股利", None)
+    base["去年股票股利"] = base.get(f"{cy - 1}股票股利", None)
     # 前年度（保留給 UI 顯示）
-    base["前年現金股利"] = base.get(f"{cy - 3}現金股利", None)
-    base["前年股票股利"] = base.get(f"{cy - 3}股票股利", None)
+    base["前年現金股利"] = base.get(f"{cy - 2}現金股利", None)
+    base["前年股票股利"] = base.get(f"{cy - 2}股票股利", None)
     # V0.9.5+ Phase 10：去年除息日 + 除息日收盤價（供去年現金殖利率算法用）
+    # 【V0.9.5-goodinfo 配合修改】去年 = cy-1 = DB year=cy-1
     base["去年除息日"] = base.get(f"{cy - 1}除息日", None)
     base["去年除息日收盤價"] = base.get(f"{cy - 1}除息日收盤價", None)
 

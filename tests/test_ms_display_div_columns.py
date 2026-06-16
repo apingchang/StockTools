@@ -43,11 +43,12 @@ def test_run_manual_selection_產出含元後綴股利欄位():
     st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "2330",
-            f"{CY}現金股利": None,
-            f"{CY}股票股利": None,
-            f"{CY - 1}現金股利": 2.5,
-            f"{CY - 1}股票股利": 0.5,
-            f"{CY - 2}現金股利": 1.8,
+            # V0.9.5-goodinfo 新語意：今年=cy → 移 2.5 到 CY
+            f"{CY}現金股利": 2.5,
+            f"{CY}股票股利": 0.5,
+            f"{CY - 1}現金股利": 1.8,  # 去年
+            f"{CY - 1}股票股利": 0.0,
+            f"{CY - 2}現金股利": 0.0,  # 前年
             f"{CY - 2}股票股利": 0.0,
         }
     ])
@@ -156,12 +157,13 @@ def test_股利為0時_現金殖利率應為None():
     st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "9999",
-            f"{CY}現金股利": None,
-            f"{CY}股票股利": None,
-            f"{CY - 1}現金股利": 0.0,    # 不配息
+            # V0.9.5-goodinfo 新語意：今年=cy → 把「不配息」移到 CY
+            f"{CY}現金股利": 0.0,    # 不配息
+            f"{CY}股票股利": 0.0,
+            f"{CY - 1}現金股利": 1.0,
             f"{CY - 1}股票股利": 0.0,
-            f"{CY - 2}現金股利": 1.0,
-            f"{CY - 2}股票股利": 0.0,
+            f"{CY - 2}現金股利": None,
+            f"{CY - 2}股票股利": None,
         }
     ])
 
