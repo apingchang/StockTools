@@ -382,7 +382,7 @@ def import_avg_price(dry: bool = False):
 def main():
     parser = argparse.ArgumentParser(description="goodinfo 歷史資料一次性匯入")
     parser.add_argument("--dry", action="store_true", help="預演模式（不寫 DB）")
-    parser.add_argument("--only", choices=["div", "eps", "price", "2026exdate"], help="只跑指定類型")
+    parser.add_argument("--only", choices=["div", "eps", "price", "2026exdate", "nodiv"], help="只跑指定類型")
     args = parser.parse_args()
 
     print(f"""
@@ -406,6 +406,9 @@ def main():
 
     if args.only in [None, "2026exdate"]:
         import_dividend_2026_exdate(dry=args.dry)
+
+    if args.only in [None, "nodiv"]:
+        mark_no_dividend_stocks(dry=args.dry)
 
     elapsed = (datetime.now() - start).total_seconds()
     print(f"\n🎉 全部完成！耗時 {elapsed:.1f} 秒")
@@ -576,6 +579,77 @@ def import_dividend_2026_exdate(dry: bool = False):
     print(f"     缺 ex_date: {total_without_exdate} 筆")
     print(f"     source=goodinfo_2026: {from_2026_file} 筆")
     print(f"     DB 路徑: {DB_DIV}")
+
+
+def mark_no_dividend_stocks(dry: bool = False):
+    """把 price_df 有但 dividend DB 沒的股號 INSERT 進 DB（標記為「goodinfo 查過、無股利」）
+
+    為什麼需要：手動選股用「_query_div_history 回傳的股號集合」對比 price_df 的股號。
+    如果有股號「DB 完全沒記錄」，會被算成缺漏、但 goodinfo 其實查過了只是沒股利資料。
+    標記後手動選股就不會誤報缺漏。
+
+    使用情境：
+      - 沒配息的 ETF（0057、0061、00636 等）
+      - 新上市股（goodinfo 10Y 檔沒涵蓋）
+      - 槓桿/反向型 ETF（00400A~00406A、006205~00646）
+    """
+    print("\n" + "="*70)
+    print("【補充】標記「無股利股號」到 dividend_history.db")
+    print("="*70)
+
+    # 從 avg_price_history.json 拿全市場股號清單
+    avg_path = TMP_DIR / "avg_price_history.json"
+    if not avg_path.exists():
+        print(f"  ❌ {avg_path} 不存在、請先跑 --only price 產生")
+        return
+    with open(avg_path, encoding="utf-8") as f:
+        avg = json.load(f)
+    all_codes = set(avg.keys())
+    print(f"  全市場股號: {len(all_codes)} 檔")
+
+    # 查 DB 已有的股號
+    _init_div_db(str(DB_DIV))
+    conn = sqlite3.connect(str(DB_DIV))
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT stock_id FROM dividend_history")
+    have_codes = {r[0] for r in cur.fetchall()}
+    print(f"  DB 已有股號: {len(have_codes)} 檔")
+
+    missing = sorted(all_codes - have_codes)
+    print(f"  缺漏股號: {len(missing)} 檔")
+
+    if not missing:
+        print("  ✅ 全市場股號都在 DB、無需標記")
+        conn.close()
+        return
+
+    if dry:
+        print(f"\n  🟡 Dry run — 前 20 檔：")
+        for sid in missing[:20]:
+            print(f"    {sid} 現價={avg.get(sid, {}).get('2026', '?')}")
+        conn.close()
+        return
+
+    # INSERT 標記記錄（cash=0, stock=0, source='goodinfo_no_div', year=2026）
+    rows = [(sid, 2026, 0.0, 0.0, "goodinfo_no_div", None, None) for sid in missing]
+    cur.executemany(
+        """INSERT OR IGNORE INTO dividend_history
+           (stock_id, year, cash, stock, source, ex_date, ex_date_close)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        rows,
+    )
+    conn.commit()
+
+    cur.execute("SELECT COUNT(*) FROM dividend_history WHERE source='goodinfo_no_div'")
+    marked = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(DISTINCT stock_id) FROM dividend_history")
+    total = cur.fetchone()[0]
+    conn.close()
+
+    print(f"\n  ✅ 標記完成：")
+    print(f"     新增「無股利」標記: {len(missing)} 筆")
+    print(f"     DB 累計「無股利」標記: {marked} 筆")
+    print(f"     DB 股號總數: {total} 檔（= 全市場 {len(all_codes)} 檔）")
 
 
 if __name__ == "__main__":
