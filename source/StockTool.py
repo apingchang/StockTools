@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║                          台灣股市量化選股系統 v0.9.5-alpha                       ║
+║                          台灣股市量化選股系統 v0.9.5-goodinfo                   ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-V0.9.5-alpha
+V0.9.5-goodinfo
 【版本資訊】
-Version: v0.9.5-alpha
-最後更新: 2026-06-15 (Asia/Taipei)
+Version: v0.9.5-goodinfo
+最後更新: 2026-06-16 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -187,7 +187,66 @@ Python 版本: 3.8+
   - 總損益扣除現價稅（4 個）：部分賣、沒持倉、現價下跌仍扣、報酬率分母
   - PortfolioSummary 結構（1 個）
 
-【pytest】146 個 test 全部通過 ✅
+【v0.9.5-goodinfo 更新內容】2026-06-16
+【手動選股 Tab + 環境架構】goodinfo 歷史資料一次匯入 + 每日排程補抓
+
+【Phase 1 - goodinfo 歷史資料一次匯入】
+- 新增 scripts/import_goodinfo_history.py
+  把 goodinfo 18 個 .xls 檔案匯入本地 SQLite DB：
+  * dividend_history.db: 股利 15,253 列 / 2,040 檔 / 10 年 (2017-2026)
+  * eps_history.db: EPS 22,040 列 / 1,965 檔 / 12 年 (2014-2025)
+  * .tmp/avg_price_history.json: 平均股價 2,375 檔 / 12 年 (2015-2026)
+- 重要 mapping 規則：goodinfo「發放年度」= 除息年 = DB year（不用 -1）
+- 支援 --dry 預演模式 + --only {div,eps,price,2026exdate,nodiv} 個別子任務
+- 【使用量】dry run 4.5 秒、正式寫入 5.0 秒
+
+【Phase 2 - 每日排程自動補抓】
+- 新增 scripts/daily_fetch_dividend.sh（crontab shell 腳本）
+  - 15:00 自動跑 FinMind 差額補抓（batch=100）
+  - 週一到週五（避開週末未開盤）
+  - Log 寫入 .tmp/logs/fetch_dividend_YYYY-MM-DD.log
+  - 最後抓取時間寫入 .tmp/dividend_last_fetch.txt
+- crontab entry: 0 15 * * 1-5 /home/aping/MyProjects/StockTools/scripts/daily_fetch_dividend.sh
+  - 走系統 crontab（不包 LLM agent）以避開 FinMind 額度被 M2.7 過載
+- scripts/fetch_dividend.py 新增 --all --batch N 全市場補抓 CLI
+  - 全市場 2,040 檔股號自動從 TWSE 即時 API 取得
+  - 補抓 100 檔/次（Free tier 300-1000/月 額度友善）
+
+【Phase 3 - App 狀態面板】
+- _ms_refresh_dividend_status() 加上「最後自動抓取時間」顯示
+  - 讀取 .tmp/dividend_last_fetch.txt
+  - 狀態列格式：「股利 DB: ✅ 2040/2040 檔（全部就絡）｜自動抓取 2026-06-16 22:09」
+  - App 重啟時自動重讀
+
+【Phase 4 - 2026 股利除息日補入】
+- 讀 goodinfo 3 個 2026 股利股息檔（P50U/P20-50/P20L）
+- 解析「除息交易日」欄位（ROC 'YY/MM/DD 格式 → 西元 YYYY-MM-DD）
+- 1,666 筆 UPDATE ex_date（只補除息日、不覆寫 cash/stock）
+- 0 筆 INSERT（DB 已有 2026 金額記錄、只補日期）
+- 2026 股票股利除權息日尚未到：ex_date_close 留 NULL
+  → App 殖利率計算會用最新收盤價 fallback（V0.9.5+ Phase 10 設計）
+
+【Phase 5 - 修 Bug：335 檔「goodinfo 已查無股利」股號】
+- William 反映手動選股「股利 DB: 2030/2374 檔（缺漏 335）」
+- 根因：goodinfo 10Y 檔對 335 檔「無股利」標的沒資料
+  - 新發行的主動式 ETF (00400A~00406A)
+  - 槓桿/反向型 ETF (006205~00646)
+  - 跨境 ETF 無股利 (0057、0061、00636 等)
+- 修法：mark_no_dividend_stocks() 函式
+  - 把 price_df 有、但 DB 沒的股號 INSERT 標記 (cash=0, source='goodinfo_no_div')
+  - 手動選股即可正確顯示「無缺漏」（避免誤報 335 缺漏）
+- 結果：DB 股號總數 2040 → 2375（+335 標記）
+- 標記 source='goodinfo_no_div'，方便之後區分「實際有股利」vs「查無股利」
+
+【TWSE / FinMind 分工重大設計決策】
+- 月營收 / 營收 YoY：TWSE t187ap05_L.csv（App 已在用，不走 FinMind）
+- 季 EPS：TWSE t187ap14_L.csv（App 已在用，不走 FinMind）
+- 股利分派：TWSE 找不到公開 CSV（試過 t05st10ifrs_L.csv → 404）
+  → 仍用 FinMind + goodinfo 互補
+- 歷史股利 (10-12 年)：goodinfo 一次匯入
+- 每日新股利：FinMind 差額補抓（crontab 15:00）
+
+【pytest】146 個 test 全部通過 ✅（與 v0.9.5-alpha 相同）
 - test_dividend_year_mapping.py（5 個）
 - test_pe_filter.py（5 個）
 - test_dividend_specific.py（10 個）
@@ -493,7 +552,7 @@ class GuiLogger:
 def build_session() -> requests.Session:
     s = requests.Session()
     s.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.9.5-alpha",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.9.5-goodinfo",
         "Accept": "application/json,text/plain,*/*"
     })
     return s
@@ -2720,7 +2779,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     s = build_session()
 
     logger.log("=" * 60)
-    logger.log("🚀 StockTool v0.9.5-alpha 開始執行")
+    logger.log("🚀 StockTool v0.9.5-goodinfo 開始執行")
     logger.log(f"   評分系統: {'多因子評分' if cfg.use_enhanced_score else '簡易評分'}")
     logger.log(f"   技術指標: 強化版 (MTF={cfg.use_mtf_confirmation}, 背離={cfg.use_divergence_detection})")
     logger.log("=" * 60)
@@ -3387,7 +3446,7 @@ class _CalendarDialog:
 class StrategyGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("StockTool v0.9.5-alpha (Multi-Factor + Top10 Backtest + Portfolio)")
+        self.title("StockTool v0.9.5-goodinfo (Multi-Factor + Top10 Backtest + Portfolio + goodinfo)")
 
         self.log_queue = queue.Queue()
         self.logger = GuiLogger(self.log_queue)
@@ -5706,7 +5765,7 @@ class StrategyGUI(tk.Tk):
     def _on_run(self):
         self.run_btn.config(state="disabled")
         self.console.insert("end", "=" * 60 + "\n")
-        self.console.insert("end", "🚀 StockTool v0.9.5-alpha 開始執行\n")
+        self.console.insert("end", "🚀 StockTool v0.9.5-goodinfo 開始執行\n")
         self.console.insert("end", "=" * 60 + "\n")
         self.console.see("end")
 
