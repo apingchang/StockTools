@@ -382,7 +382,7 @@ def import_avg_price(dry: bool = False):
 def main():
     parser = argparse.ArgumentParser(description="goodinfo 歷史資料一次性匯入")
     parser.add_argument("--dry", action="store_true", help="預演模式（不寫 DB）")
-    parser.add_argument("--only", choices=["div", "eps", "price"], help="只跑指定類型")
+    parser.add_argument("--only", choices=["div", "eps", "price", "2026exdate"], help="只跑指定類型")
     args = parser.parse_args()
 
     print(f"""
@@ -404,8 +404,178 @@ def main():
     if args.only in [None, "price"]:
         import_avg_price(dry=args.dry)
 
+    if args.only in [None, "2026exdate"]:
+        import_dividend_2026_exdate(dry=args.dry)
+
     elapsed = (datetime.now() - start).total_seconds()
     print(f"\n🎉 全部完成！耗時 {elapsed:.1f} 秒")
+
+
+# ──────────────────────────────────────────────────
+# 4. goodinfo 2026 股利股息檔（含除息日）UPDATE DB
+# ──────────────────────────────────────────────────
+import re as _re_2026
+
+
+def _parse_roc_short_date(s):
+    """把 "'26/01/22" 或 "26/01/22" → "2026-01-22" (西元)
+    規則：'YY/MM/DD，YY 補成 20YY（2000 年以後）
+    失敗或空值回傳 None
+    """
+    if pd.isna(s):
+        return None
+    s = str(s).strip().lstrip("'")  # 去首引號
+    m = _re_2026.match(r'(\d{2})/(\d{2})/(\d{2})', s)
+    if not m:
+        return None
+    yy, mm, dd = m.groups()
+    yr = 2000 + int(yy)
+    if not (1 <= int(mm) <= 12 and 1 <= int(dd) <= 31):
+        return None
+    return f"{yr}-{int(mm):02d}-{int(dd):02d}"
+
+
+def import_dividend_2026_exdate(dry: bool = False):
+    """讀 goodinfo 2026 股利股息檔（3 個 .xls），把除息日寫入 dividend_history.db
+
+    設計重點：
+    1. 這 3 個檔是 10Y 檔的「2026 加強版」→ 多了「除息交易日」欄位
+    2. 10Y 檔已寫過 2026 股利金額 (source='goodinfo')
+       → 本函式只 UPDATE ex_date，不覆寫 cash/stock（10Y 可能是加總、更準確）
+    3. 2026 股利除息日若已過（例 2026/01/22）→ ex_date 寫入，ex_date_close 留 NULL
+       → 之後可由 FinMind 補、或 App fallback 用最新收盤價
+    4. 2026 除息日若未到（多數股票股利）→ ex_date 還是寫入（供未來參考）
+       → ex_date_close 一律 NULL → App 殖利率計算用最新收盤價
+    5. 同檔多筆同 year (例 26H1 + 26H2) → 採用「最早 ex_date」並加註來源
+    """
+    print("\n" + "="*70)
+    print("【4/4】補入 2026 股利除息日 → UPDATE dividend_history.db")
+    print("="*70)
+
+    # 3 個檔案路徑
+    files_2026 = [
+        ("P50U",   EXPORT_DIR / "dividend" / "P50U_2026股利股息.xls"),
+        ("P20-50", EXPORT_DIR / "dividend" / "P20-50_2026股利股息.xls"),
+        ("P20L",   EXPORT_DIR / "dividend" / "P20L_2026股利股息.xls"),
+    ]
+
+    frames = []
+    for gkey, fpath in files_2026:
+        if not fpath.exists():
+            print(f"  ⚠️  找不到 {fpath}，跳過")
+            continue
+        df = pd.read_html(fpath)[0]
+        df["_group"] = gkey
+        frames.append(df)
+    if not frames:
+        print("  ❌ 3 個 2026 檔都找不到")
+        return
+
+    all_2026 = pd.concat(frames, ignore_index=True)
+    print(f"  3 檔合計: {len(all_2026)} 列, {all_2026['代號'].nunique()} 檔")
+
+    # 解析除息交易日為 ISO 格式
+    all_2026["_ex_date"] = all_2026["除息交易日"].apply(_parse_roc_short_date)
+    has_exdate = all_2026["_ex_date"].notna().sum()
+    print(f"  有除息日資料: {has_exdate} 列 / {len(all_2026)} 列")
+
+    # 過濾出有現金股利或股票股利的有效列
+    valid = all_2026[
+        (all_2026["現金股利"].notna() & (all_2026["現金股利"] > 0)) |
+        (all_2026["股票股利"].notna() & (all_2026["股票股利"] > 0))
+    ].copy()
+    print(f"  有股利資料的有效列: {len(valid)} 列")
+
+    # 計算 year (除息日的年份作為 DB year)
+    valid["_year"] = valid["_ex_date"].apply(
+        lambda d: int(d[:4]) if pd.notna(d) else 2026  # 沒 ex_date 的也是 2026
+    )
+
+    # 按 (stock_id, year) 聚合：取最早 ex_date
+    # (同 year 多筆選最早、保留所有現金/股票金額)
+    agg = valid.groupby(["代號", "_year"]).agg({
+        "_ex_date": "min",  # 最早的除息日
+        "現金股利": "sum",
+        "股票股利": "sum",
+    }).reset_index()
+
+    print(f"  聚合後 (stock_id, year): {len(agg)} 組")
+
+    if dry:
+        print("\n  🟡 Dry run — 前 10 筆預覽：")
+        for _, r in agg.head(10).iterrows():
+            print(f"    {r['代號']} {r['_year']}: cash={r['現金股利']:.2f}, "
+                  f"stock={r['股票股利']:.2f}, ex_date={r['_ex_date']}")
+        return
+
+    # UPDATE DB：只設 ex_date，不覆寫 cash/stock
+    _init_div_db(str(DB_DIV))
+    conn = sqlite3.connect(str(DB_DIV))
+    cur = conn.cursor()
+
+    updated = 0
+    inserted = 0
+    skipped_no_exdate = 0
+    for _, r in agg.iterrows():
+        sid = str(r["代號"]).strip()
+        yr = int(r["_year"])
+        ex_date = r["_ex_date"]  # ISO 格式或 None
+
+        # 查現有記錄
+        cur.execute(
+            "SELECT cash, stock, ex_date FROM dividend_history WHERE stock_id=? AND year=?",
+            (sid, yr),
+        )
+        existing = cur.fetchone()
+
+        if existing is None:
+            # DB 沒有 → INSERT 新記錄（用 2026 檔的金額）
+            if ex_date is None:
+                skipped_no_exdate += 1
+                continue
+            cur.execute(
+                """INSERT INTO dividend_history
+                   (stock_id, year, cash, stock, source, ex_date, ex_date_close)
+                   VALUES (?, ?, ?, ?, 'goodinfo_2026', ?, NULL)""",
+                (sid, yr, float(r["現金股利"] or 0), float(r["股票股利"] or 0), ex_date),
+            )
+            inserted += 1
+        else:
+            # DB 有 → 只 UPDATE ex_date (不覆寫 cash/stock)
+            if ex_date is None:
+                skipped_no_exdate += 1
+                continue
+            cur.execute(
+                """UPDATE dividend_history
+                   SET ex_date = ?, fetched_at = datetime('now','localtime')
+                   WHERE stock_id = ? AND year = ? AND ex_date IS NULL""",
+                (ex_date, sid, yr),
+            )
+            if cur.rowcount > 0:
+                updated += 1
+
+    conn.commit()
+
+    # 統計
+    cur.execute("SELECT COUNT(*) FROM dividend_history WHERE ex_date IS NOT NULL")
+    total_with_exdate = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM dividend_history WHERE ex_date IS NULL")
+    total_without_exdate = cur.fetchone()[0]
+    cur.execute(
+        "SELECT COUNT(*) FROM dividend_history WHERE source='goodinfo_2026'"
+    )
+    from_2026_file = cur.fetchone()[0]
+    conn.close()
+
+    print(f"\n  ✅ 更新完成：")
+    print(f"     UPDATE ex_date: {updated} 筆（只補除息日、不改金額）")
+    print(f"     INSERT 新記錄: {inserted} 筆（DB 沒 2026 資料才新建）")
+    print(f"     略過（無除息日）: {skipped_no_exdate} 筆")
+    print(f"  📊 DB 狀態：")
+    print(f"     有 ex_date: {total_with_exdate} 筆")
+    print(f"     缺 ex_date: {total_without_exdate} 筆")
+    print(f"     source=goodinfo_2026: {from_2026_file} 筆")
+    print(f"     DB 路徑: {DB_DIV}")
 
 
 if __name__ == "__main__":
