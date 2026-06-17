@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║                  台灣股市量化選股系統 v0.9.5-goodinfo4 (2026-06-18 00:48)        ║
+║               台灣股市量化選股系統 v0.9.5-goodinfo4.3 (2026-06-18 07:16)         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-V0.9.5-goodinfo4
+V0.9.5-goodinfo4.3
 【版本資訊】
-Version: v0.9.5-goodinfo4
-最後更新: 2026-06-18 00:48 (Asia/Taipei)
+Version: v0.9.5-goodinfo4.3
+最後更新: 2026-06-18 07:16 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -267,6 +267,42 @@ Python 版本: 3.8+
 - test_current_tax.py（12 個）
 
 ════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-goodinfo4.3 更新內容】2026-06-18 07:10 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【William 反映】
+1. 「即時抓股價」checkbox 仍然 1 秒出結果、實際根本沒打 FinMind
+2. 懷疑 checkbox 設了但 cache 命中所以沒走
+
+【根因】
+- _fetch_finmind_prices_batch 內部用 module-level _FINMIND_PRICE_CACHE
+- App 啟動時 _startup_bg_fetch_price() 會把全部股票抓進 cache
+- 第二次呼叫時全部 cache 命中、不到一秒就 return
+- 「即時抓股價」checkbox 形同虛設
+
+【修法】
+- _fetch_finmind_prices_batch 加 force_refresh: bool = False 參數
+  - True → 先清空 _FINMIND_PRICE_CACHE 再走實際抓取
+  - False → 用 cache（默認、背景抓取場景）
+- _ms_run_selection 勾選時傳 force_refresh=True
+- UI 加進度：顯示「🔄 即時抓股價中... X/Y (Z%)」、完成後顯示耗時秒數
+- UI 更新一律用 self.after(0, ...) 避免 background thread 操作 widget crash
+
+【pytest】新 test_force_refresh_price.py（5 個）
+- 守護 force_refresh=True 確實清 cache
+- 守護 force_refresh=False 確實用 cache
+- 守護進度 callback 真的被呼叫
+- 守護耗時計算正確
+
+【使用】
+- App 重啟生效
+- 勾「即時抓股價」→ 真的會走 FinMind API 重抓全部股價（2376 檔 約 14 分鐘）
+- 勾選後狀態列會動態顯示「🔄 即時抓股價中... X/Y (Z%)」
+- 完成後顯示「✅ 即時抓股價完成（2376 檔、耗時 XXX 秒）」
+- 不勾時行為不變、繼續用 cache（快速、不打 FinMind）
+
+════════════════════════════════════════════════════════════════════════════════
+
+════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-goodinfo4 更新內容】2026-06-17 21:04 (William 反映)
 ════════════════════════════════════════════════════════════════════════════════
 【William 3 點反映】
@@ -461,7 +497,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-goodinfo4"
+VERSION = "v0.9.5-goodinfo4.3"
 
 
 import io
@@ -1172,7 +1208,8 @@ def _parse_roc_year(year_str: str) -> int:
 
 
 def _fetch_finmind_prices_batch(stock_ids: List[str],
-                                progress_callback=None) -> pd.DataFrame:
+                                progress_callback=None,
+                                force_refresh: bool = False) -> pd.DataFrame:
     """
     批次抓取股票現價（FinMind TaiwanStockPrice，支援 rate limit 回退）。
     每批 10 個，間隔 0.35s，超過 300/h 會被擋 → 等 61s 再試。
@@ -1184,7 +1221,31 @@ def _fetch_finmind_prices_batch(stock_ids: List[str],
           - 盤後：data[-1].date == today → 拿今日收盤
           - 盤中：data[-1].date == today → 拿今日盤中最後一筆（盤中即時）
           - 週末：data[-1].date 是上週五 → 拿上週五收盤（合理）
+
+    V0.9.5-goodinfo4.3 修 Bug：2026-06-18 William 反映
+    原本：每次呼叫都用 _FINMIND_PRICE_CACHE 命中 → 「即時抓股價」checkbox 失效
+          因為 App 啟動時背景抓過一次、cache 已被填滿、按 checkbox 也直接拿 cache
+    修法：加 force_refresh 參數
+          - True → 先清空 _FINMIND_PRICE_CACHE 再抓（用於「即時抓股價」checkbox）
+          - False → 用 cache（默認，背景抓取場景）
+
+    Parameters
+    ----------
+    stock_ids : list[str]
+        要抓取的股票代號清單
+    progress_callback : callable
+        (n_done, n_total) → 進度更新回呼（用於 UI 動態顯示）
+    force_refresh : bool
+        True：清 cache 重抓（耗時）；False：直接用 cache（快速）
     """
+    if force_refresh:
+        # 【V0.9.5-goodinfo4.3】「即時抓股價」checkbox 場景
+        # App 啟動時背景抓的 cache 不能擋、必須清掉重抓
+        n_cleared = len(_FINMIND_PRICE_CACHE)
+        _FINMIND_PRICE_CACHE.clear()
+        # log 印在 console、不走 logger（背景 thread 也行）
+        print(f"🔄 [force_refresh] 已清空 {n_cleared} 檔 price cache，重新打 FinMind")
+
     rows = []
     end_date = datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
@@ -4897,12 +4958,43 @@ class StrategyGUI(tk.Tk):
                 # V0.9.5+: 「即時抓股價」checkbox → 跑選股前重抓 price_df 全部股票的最新股價
                 # 背景重抓的股價可能跟使用者看到的時間不同
                 # 勾選後會走 FinMind price API 重抓全部（可能需要 30-60 秒）
+                # 【V0.9.5-goodinfo4.3 修 Bug】2026-06-18 William 反映：
+                #   勾了 checkbox 仍 1 秒出結果、實際根本沒打 FinMind
+                #   根因：_FINMIND_PRICE_CACHE 是 module-level 全域 cache、
+                #         App 啟動時背景抓過的 cache 會一直命中、checkbox 形同虛設
+                #   修法：傳 force_refresh=True → 先清 cache 再實際打 FinMind
+                #   UI 更新一律用 self.after(0, ...) 回到 main thread 避免 thread-safety 問題
                 if getattr(self, '_ms_refresh_price_var', None) and self._ms_refresh_price_var.get():
                     if price_df is not None and not price_df.empty:
                         all_codes = price_df["股票代號"].astype(str).str.strip().tolist()
-                        print(f"🔄 即時抓股價中... {len(all_codes)} 檔")
+                        n_codes = len(all_codes)
+                        # 預估時間：0.35s / 檔
+                        est_min = n_codes * 0.35 / 60
+                        self.after(0, lambda: self._ms_status.set(
+                            f"🔄 即時抓股價中（{n_codes} 檔、約 {est_min:.1f} 分鐘）..."
+                        ))
+                        print(f"🔄 即時抓股價中... {n_codes} 檔（force_refresh=True）")
+                        self.logger.log(f"🔄 即時抓股價中... {n_codes} 檔")
+                        _t0 = datetime.now()
                         try:
-                            fresh = _fetch_finmind_prices_batch(all_codes)
+                            def _price_progress(n_done, n_total):
+                                pct = int(n_done / n_total * 100) if n_total else 0
+                                # 進度回呼在 background thread 跑、用 after 回到 main thread
+                                self.after(0, lambda: self._ms_status.set(
+                                    f"🔄 即時抓股價中... {n_done}/{n_total} ({pct}%)"
+                                ))
+                            fresh = _fetch_finmind_prices_batch(
+                                all_codes,
+                                progress_callback=_price_progress,
+                                force_refresh=True,  # ← 關鍵：清 cache 重抓
+                            )
+                            _t1 = datetime.now()
+                            _elapsed = (_t1 - _t0).total_seconds()
+                            self.after(0, lambda: self._ms_status.set(
+                                f"✅ 即時抓股價完成（{n_codes} 檔、耗時 {_elapsed:.1f} 秒）"
+                            ))
+                            print(f"✅ 即時抓股價完成：耗時 {_elapsed:.1f} 秒")
+                            self.logger.log(f"✅ 即時抓股價完成：耗時 {_elapsed:.1f} 秒")
                             if not fresh.empty and "現價" in fresh.columns:
                                 # merge：新價覆蓋舊價、沒抓到的保持原值
                                 fresh_small = fresh[["股票代號"]].copy()
