@@ -296,3 +296,52 @@ def test_5386_捷敏_殖利率用goodinfo_不為None():
     assert row["去年現金殖利率(%)"] == 0.76
     assert row["今年股票殖利率(%)"] == 1.0
     assert row["去年股票殖利率(%)"] == 1.78
+
+
+# ─────────────────────────────────────────
+# 9. V0.9.5-goodinfo4 修：殖利率 0.0 不該被當 None
+# ─────────────────────────────────────────
+def test_殖利率0_0_不該當None_應為0_00():
+    """V0.9.5-goodinfo4 修 Bug：William 2026-06-17 反映
+
+    原本 _ms_display_results 用 `if cash_yld and ...` truthy 判斷
+    → 0.0 是 falsy、被當 None 顯示 '—'
+    → 5386 現金殖利率 0.3 會被當 0.0 顯示 '—' 看起來像無資料
+
+    修法：殖利率 = 0.0 是合法值（該年未配息 / goodinfo 算 0%）、要顯示 '0.00'
+    """
+    fake_div = pd.DataFrame({
+        "股票代號": ["2408"],
+        "2026現金股利": [0.0], "2026股票股利": [0.0],   # 沒配息
+        "2025現金股利": [1.347], "2025股票股利": [0.0],
+        "2024現金股利": [None], "2024股票股利": [None],
+        # goodinfo 殖利率 = 0（該年未配息）
+        "2026現金殖利率_goodinfo": [0.0],   # ← 關鍵
+    })
+    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+
+    price_df = _make_input([("2408", "南亞科", 340.0, 1000)])
+    rev, eps = _empty_revenue_eps()
+
+    result = st._run_manual_selection(price_df, rev, eps, _no_filters(), top_n=10)
+    row = result.iloc[0]
+
+    # 殖利率 = 0.0（該年未配息）、不是 None
+    val = row["今年現金殖利率(%)"]
+    assert val == 0.0, f"殖利率 0.0 應保留為 0.0，實際: {val}"
+
+
+def test_殖利率0_30_不該顯示破折號():
+    """V0.9.5-goodinfo4：5386 現金殖利率 0.3 場景
+
+    模擬顯示格式化：殖利率 0.3 在舊版 if cash_yld and ... 邏輯下
+    因為 0.3 是 truthy → 會正確顯示 '0.30'
+    但 0.0 會被當 None → 顯示 '—'
+    """
+    # 這是 _ms_display_results 的格式化 helper 測試
+    from StockTool import _fmt_float
+    assert _fmt_float(0.0) == "0.00", f"0.0 應顯示 '0.00'，實際: '{_fmt_float(0.0)}'"
+    assert _fmt_float(0.3) == "0.30", f"0.3 應顯示 '0.30'，實際: '{_fmt_float(0.3)}'"
+    assert _fmt_float(None) == "—", f"None 應顯示 '—'"
+    assert _fmt_float(float("nan")) == "—", f"NaN 應顯示 '—'"
+    assert _fmt_float(425.0) == "425.00"

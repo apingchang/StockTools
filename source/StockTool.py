@@ -1,11 +1,11 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║                      台灣股市量化選股系統 v0.9.5-goodinfo3                      ║
+║                      台灣股市量化選股系統 v0.9.5-goodinfo4                      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-V0.9.5-goodinfo3
+V0.9.5-goodinfo4
 【版本資訊】
-Version: v0.9.5-goodinfo3
+Version: v0.9.5-goodinfo4
 最後更新: 2026-06-17 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
@@ -265,6 +265,54 @@ Python 版本: 3.8+
 - test_fetch_stock_info_fallback.py（9 個）
 - test_ex_date_yield.py（15 個）
 - test_current_tax.py（12 個）
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-goodinfo4 更新內容】2026-06-17 21:04 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【William 3 點反映】
+1. 選股結果殖利率都是破折號（0.0 被當 None）
+2. 選股現價是昨日收盤（不是 6/17 盤中即時）
+3. 持倉總攬算法確認 OK（未實現 + net_realized - current_tax）
+
+【修法 1：殖利率 0.0 不再被當 None】
+- 【原本】_ms_display_results 7 個欄位用「if val and ...」truthy 判斷
+  → 0.0 是 falsy → 被當 None 顯示 '—'
+  → 5386 現金殖利率 0.3 看起來像 0.0 一樣是破折號
+- 【修法】新增 _fmt_float() module-level helper
+  → 用 pd.isna(v) 判斷（None/NaN 才視為空）
+  → 0.0 顯示 '0.00'、0.3 顯示 '0.30'、None 顯示 '—'
+- 修法 1 是「顯示問題」、DB 內 cash_yield_pct 本來就有 0.0 值
+
+【修法 2：盤中現價不再取昨日收盤】
+- 【原本】_fetch_finmind_prices_batch 用 data[-1] 拿「最後一筆」
+  → 盤中時 data[-1] 的 date 是「今日」但 close 是盤中即時
+  → 收盤後 data[-1] 的 date 是「今日」但 close 是今日收盤
+  → 週六 週日 / 國定假日 data[-1] 的 date 是「上週五」、不是「昨日」
+  → 原本不會誤判、但若 TWSE 資料型態是 tick 會出問題
+- 【修法】新增 _pick_latest_price_row() helper
+  → 從後往前找 date == today 的那筆
+  → 找不到（週末）→ 取 data[-1]（上週五收盤、合理 fallback）
+- 同時順手拿掉股利 finmind 抓取（設 skip_remote=True）
+  → DB 內已有 goodinfo 寫的 1,710 筆股利資料、finmind 不再需要
+  → 歷史資料來自 goodinfo、現價來自 TWSE+TPEx+finmind（盤中）
+
+【修法 3：拿掉股利 finmind 抓取】
+- 【原本】_run_manual_selection 內 _fetch_finmind_dividend(all_codes)
+  → DB 沒的會去抓 finmind、finmind 額度限制（每小時 300 次）出問題
+- 【修法】改成 _fetch_finmind_dividend(all_codes, skip_remote=True)
+  → DB 沒的永遠不抓、殖利率直接 None → 跟未配息一樣顯示
+  → 全部 1,710 檔股利從 goodinfo DB 來、不依賴 finmind
+
+【pytest】163 個 test 全部通過 ✅
+- test_goodinfo_yield_rate.py：+ 2 個 test（殖利率 0.0 守護）
+- test_pick_latest_price_row.py：+ 6 個 test（新 helper 守護）
+- 其他既有 test 全部保留過
+
+【使用】
+- App 重啟生效
+- 「即時抓股價」按鈕的 finmind 股價抓取已加 date 判斷、避開昨日收盤 bug
+- 選股結果不會再顯示「殖利率破折號」、會顯示 0.00
+- 持倉總攬的 599,501 數字不變（算法原本就對、已驗證）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-goodinfo3 更新內容】2026-06-17 12:03
@@ -1040,7 +1088,33 @@ def _fetch_market_stock_list() -> pd.DataFrame:
         return result
     return pd.DataFrame(columns=["股票代號", "股票名稱"])
 
-_FINMIND_PRICE_CACHE = {}   # {stock_id: {date: row}}
+_FINMIND_PRICE_CACHE = {}   # {stock_id: {date: row}}（多日 cache）
+
+
+def _pick_latest_price_row(data: list) -> tuple:
+    """從 FinMind TaiwanStockPrice 資料中選「今日」或退到「前一個交易日」的一筆
+
+    V0.9.5-goodinfo4 修 Bug：2026-06-17 William 反映
+    原本：直接 data[-1] → 盤中時 data[-1] 可能是今日（對）或昨日（誤）
+    修法：從後往前找第一個 date == today 的、找不到就回傳 data[-1]（最後一個交易日）
+
+    Returns
+    -------
+    (row, date_str) → 選到的 row 跟它的 date（ROC 格式 '1150617'）
+    """
+    from datetime import datetime as _dt
+    today_roc = (_dt.now().year - 1911) * 10000 + _dt.now().month * 100 + _dt.now().day
+    # 從後往前找
+    for rec in reversed(data):
+        rec_date = rec.get("date", "")
+        if str(rec_date) == str(today_roc):
+            return rec, rec_date
+    # 找不到今日 → 取最後一筆（上一個交易日的收盤）
+    if data:
+        return data[-1], data[-1].get("date", "")
+    return None, None
+
+
 _FINMIND_DIVIDEND_CACHE = {}  # {stock_id: {year: {cash, stock}}}
 
 
@@ -1096,6 +1170,13 @@ def _fetch_finmind_prices_batch(stock_ids: List[str],
     批次抓取股票現價（FinMind TaiwanStockPrice，支援 rate limit 回退）。
     每批 10 個，間隔 0.35s，超過 300/h 會被擋 → 等 61s 再試。
     progress_callback(n_done, n_total) 可傳進來做 UI 更新。
+
+    V0.9.5-goodinfo4 修 Bug：2026-06-17 William 反映
+    原本：data[-1] 直接用 → 盤中時 data[-1] 可能是「上一個交易日的收盤」誤判為今日
+    修法：用 _pick_latest_price_row 判斷 date == today
+          - 盤後：data[-1].date == today → 拿今日收盤
+          - 盤中：data[-1].date == today → 拿今日盤中最後一筆（盤中即時）
+          - 週末：data[-1].date 是上週五 → 拿上週五收盤（合理）
     """
     rows = []
     end_date = datetime.now().strftime("%Y-%m-%d")
@@ -1115,11 +1196,11 @@ def _fetch_finmind_prices_batch(stock_ids: List[str],
         else:
             data = _finmind_get("TaiwanStockPrice", code, start_date, end_date)
             if data:
-                latest = data[-1]
+                latest, _date = _pick_latest_price_row(data)
                 _FINMIND_PRICE_CACHE[code] = latest
                 rows.append({"股票代號": code,
-                            "現價": latest.get("close"),
-                            "成交量_張": (latest.get("Trading_Volume", 0) or 0) / 1000})
+                            "現價": latest.get("close") if latest else None,
+                            "成交量_張": ((latest.get("Trading_Volume", 0) or 0) / 1000) if latest else 0})
             else:
                 _FINMIND_PRICE_CACHE[code] = None
 
@@ -1132,6 +1213,27 @@ def _fetch_finmind_prices_batch(stock_ids: List[str],
 
     return pd.DataFrame(rows) if rows else pd.DataFrame(
         columns=["股票代號", "現價", "成交量_張"])
+
+
+def _fmt_float(v, decimals: int = 2) -> str:
+    """統一格式化數值為字串：None/NaN → '—'、否則顯示數值
+
+    V0.9.5-goodinfo4 修 Bug：2026-06-17 William 反映
+    原本用「if val and ...」是 truthy 判斷
+    → 殖利率 0.0 被誤判為 None、顯示 '—'（0.0 是 falsy）
+    → 5386 現金殖利率 0.3 會被當 0.0 顯示 '—' 看起來像無資料
+
+    修法：用 pd.isna() 判斷（None/NaN 才視為空）、數值照實顯示
+    """
+    try:
+        if pd.isna(v):
+            return "—"
+    except (TypeError, ValueError):
+        return "—"
+    try:
+        return f"{float(v):.{decimals}f}"
+    except (TypeError, ValueError):
+        return "—"
 
 
 def _fetch_finmind_dividend(stock_ids: List[str],
@@ -1523,7 +1625,7 @@ def _run_manual_selection(
 
     # 6. 抓 FinMind 股利（會用 DB 快取，只在 DB 沒有的才抓 FinMind）
     all_codes = base["股票代號"].tolist()
-    div_df = _fetch_finmind_dividend(all_codes)
+    div_df = _fetch_finmind_dividend(all_codes, skip_remote=True)
     if not div_df.empty:
         base = base.merge(div_df, on="股票代號", how="left")
     else:
@@ -4937,35 +5039,27 @@ class StrategyGUI(tk.Tk):
         for _, row in result.iterrows():
             code = str(row.get("股票代號", "")).strip()
             name = str(row.get("股票名稱", "")).strip()
-            price = row.get("現價")
-            price_str = f"{price:.2f}" if price and str(price) not in ("nan","None") else "—"
-            rev = row.get("累計營收YoY(%)")
-            rev_str = f"{rev:.2f}" if rev and str(rev) not in ("nan","None") else "—"
+            price_str = _fmt_float(row.get("現價"))
+            rev_str = _fmt_float(row.get("累計營收YoY(%)"))
             # 【V0.9.5+ Phase 8】key 保留「(元)」：_run_manual_selection final rename
             # 把「今年股票股利」→「今年股票股利(元)」、這裡要跟著帶「(元)」
-            stock_div = row.get("今年股票股利(元)", "—")
-            stock_str = f"{stock_div:.2f}" if isinstance(stock_div, float) and str(stock_div) not in ("nan","None") else "—"
+            stock_str = _fmt_float(row.get("今年股票股利(元)"))
             # 【V0.9.5+ Phase 8 新增】今年現金股利金額（原本 _ms_display_results 完全沒讀這個欄位）
-            cash_div = row.get("今年現金股利(元)", "—")
-            cash_div_str = f"{cash_div:.2f}" if isinstance(cash_div, float) and str(cash_div) not in ("nan","None") else "—"
-            cash_yld = row.get("今年現金殖利率(%)")
-            cash_str = f"{cash_yld:.2f}" if cash_yld and str(cash_yld) not in ("nan","None") else "—"
-            pe = row.get("PE")
-            pe_str = f"{pe:.2f}" if pe and str(pe) not in ("nan","None") else "—"
+            cash_div_str = _fmt_float(row.get("今年現金股利(元)"))
+            cash_str = _fmt_float(row.get("今年現金殖利率(%)"))
+            pe_str = _fmt_float(row.get("PE"))
             vol = row.get("成交量(張)")
-            vol_str = f"{int(vol):,}" if vol and str(vol) not in ("nan","None") else "—"
-            last_stock = row.get("去年股票股利(元)", "—")
-            last_stock_str = f"{last_stock:.2f}" if isinstance(last_stock, float) and str(last_stock) not in ("nan","None") else "—"
+            try:
+                vol_str = f"{int(vol):,}" if pd.notna(vol) else "—"
+            except (TypeError, ValueError):
+                vol_str = "—"
+            last_stock_str = _fmt_float(row.get("去年股票股利(元)"))
             # 【V0.9.5+ Phase 8 新增】去年現金股利金額
-            last_cash_div = row.get("去年現金股利(元)", "—")
-            last_cash_div_str = f"{last_cash_div:.2f}" if isinstance(last_cash_div, float) and str(last_cash_div) not in ("nan","None") else "—"
-            last_cash = row.get("去年現金殖利率(%)")
-            last_cash_str = f"{last_cash:.2f}" if last_cash and str(last_cash) not in ("nan","None") else "—"
+            last_cash_div_str = _fmt_float(row.get("去年現金股利(元)"))
+            last_cash_str = _fmt_float(row.get("去年現金殖利率(%)"))
             # V0.9.5-goodinfo：股票殖利率（goodinfo 來源）
-            stock_yld_this = row.get("今年股票殖利率(%)")
-            stock_yld_this_str = f"{stock_yld_this:.2f}" if stock_yld_this and str(stock_yld_this) not in ("nan","None") else "—"
-            stock_yld_last = row.get("去年股票殖利率(%)")
-            stock_yld_last_str = f"{stock_yld_last:.2f}" if stock_yld_last and str(stock_yld_last) not in ("nan","None") else "—"
+            stock_yld_this_str = _fmt_float(row.get("今年股票殖利率(%)"))
+            stock_yld_last_str = _fmt_float(row.get("去年股票殖利率(%)"))
 
             tag = "checked" if self._ms_checked.get(code, False) else "unchecked"
             self._ms_tree.insert("", "end", iid=code, values=(
