@@ -1,11 +1,11 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║                       台灣股市量化選股系統 v0.9.5-goodinfo2                     ║
+║                      台灣股市量化選股系統 v0.9.5-goodinfo3                      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-V0.9.5-goodinfo2
+V0.9.5-goodinfo3
 【版本資訊】
-Version: v0.9.5-goodinfo2
+Version: v0.9.5-goodinfo3
 最後更新: 2026-06-17 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
@@ -267,7 +267,48 @@ Python 版本: 3.8+
 - test_current_tax.py（12 個）
 
 ════════════════════════════════════════════════════════════════════════════════
-【v0.9.5-goodinfo2 更新內容】2026-06-17
+【v0.9.5-goodinfo3 更新內容】2026-06-17 12:03
+════════════════════════════════════════════════════════════════════════════════
+【William 三點修正要求】
+1. 拿掉 10Y 平均殖利率欄位（不需要了）
+2. 舊邏輯：「cash=0 → continue 跳過 → 殖利率 None」 是錯的
+   ex: 5386 cash=0 但 goodinfo cash_yield=0.76% → 應用 goodinfo 值
+3. 「殖利率應該不用任何計算直接用才對」→ 拿掉所有 fallback
+
+【修法】
+1. 拿掉 10Y 平均殖利率欄位
+   - Treeview 從 16 欄變 15 欄
+   - sort_by 拿掉 _sort_avg_yld
+   - final_cols 拿掉 「歷史平均現金殖利率(%)」
+2. 拿掉 cash/現價、cash/ex_date_close、現價所有 fallback
+   - 殖利率 100% 直接用 goodinfo cash_yield_pct / share_yield_pct
+   - cash=0 但 goodinfo 有殖利率值 → 殖利率直接用 goodinfo 值
+   - goodinfo 殖利率 = 0（未配息）→ 顯示 0%
+   - goodinfo 殖利率 = None → 殖利率 None
+3. 順手修 import_dividend 合併 bug：
+   - 【原本】`{**cash_agg, **share_agg}` 用 dict unpack、後者覆蓋前者
+     對 cash 跟 share 都有資料的股票（ex: 5386 2018）cash 被洗成 0
+     受影響：1,710 筆 / 646 檔
+   - 【修法】明確取 cash_agg.cash + share_agg.stock
+4. 重跑 import_dividend + import_yield_rate、修復 5386 等 646 檔 cash 資料
+5. 修正後驗證：
+   - 3231 緯創：今 5.5/3.48%、去 3.799/3.3% ✅
+   - 5386 捷敏：今 6.5/0.3%、去 1.968/0.76% ✅（cash=0 但殖利率照顯示）
+
+【pytest】155 個 test 全部通過 ✅
+- test_dividend_year_mapping.py：更新 3 個 test 預期（殖利率用 goodinfo）
+- test_ex_date_yield.py：更新 3 個 test 預期（殖利率用 goodinfo）
+- test_fetch_dividend_update.py：更新 1 個 test 預期
+- test_ms_display_div_columns.py：更新 1 個 test 預期
+- test_goodinfo_yield_rate.py：重寫為 9 個（V0.9.5-goodinfo3 行為）
+
+【使用】
+- 重跑 import_dividend（已自動跑過、5386 等 646 檔 cash 修對了）
+- 重跑 import_yield_rate（已自動跑過）
+- App 重啟即可生效
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-goodinfo2 更新內容】2026-06-17 11:10
 ════════════════════════════════════════════════════════════════════════════════
 【手動選股殖利率改用 goodinfo 來源】（William 2026-06-17 11:10 反映）
 - 問題：原本殖利率算法 = 現金股利 / 現價 → 只反映「最近一次配息 vs 現價」
@@ -1517,132 +1558,51 @@ def _run_manual_selection(
     # 前年度（保留給 UI 顯示）
     base["前年現金股利"] = base.get(f"{cy - 2}現金股利", None)
     base["前年股票股利"] = base.get(f"{cy - 2}股票股利", None)
-    # V0.9.5+ Phase 10：去年除息日 + 除息日收盤價（供去年現金殖利率算法用）
+    # V0.9.5+ Phase 10：去年除息日 + 除息日收盤價（供除息價 fallback 用）
     # 【V0.9.5-goodinfo 配合修改】去年 = cy-1 = DB year=cy-1
     base["去年除息日"] = base.get(f"{cy - 1}除息日", None)
     base["去年除息日收盤價"] = base.get(f"{cy - 1}除息日收盤價", None)
-    # V0.9.5-goodinfo：殖利率原始值（goodinfo 來源）— 給歷史平均、UI 顯示用
+    # V0.9.5-goodinfo：殖利率原始值（goodinfo 來源）— 殖利率直接用、不計算
     base["今年現金殖利率_goodinfo"] = base.get(f"{cy}現金殖利率_goodinfo", None)
     base["今年股票殖利率_goodinfo"] = base.get(f"{cy}股票殖利率_goodinfo", None)
     base["去年現金殖利率_goodinfo"] = base.get(f"{cy - 1}現金殖利率_goodinfo", None)
     base["去年股票殖利率_goodinfo"] = base.get(f"{cy - 1}股票殖利率_goodinfo", None)
-    base["前年現金殖利率_goodinfo"] = base.get(f"{cy - 2}現金殖利率_goodinfo", None)
-    base["前年股票殖利率_goodinfo"] = base.get(f"{cy - 2}股票殖利率_goodinfo", None)
 
-    # 8. 今年現金殖利率（V0.9.5-goodinfo 改用 goodinfo 殖利率，William 2026-06-17 反映）
-    # 【問題】原本算法 = 今年現金股利 / 現價 → 偏差大（只反映最近一次配息 vs 現價）
-    # 【修正】優先用 goodinfo 提供的「該年現金殖利率」（%）= 該年除息基準日的還原殖利率
-    #   - goodinfo 從除息日前 5 天均價算殖利率，比「現金股利/現價」準
-    #   - 涵蓋全年配息（不會只算第一次）
-    # 【fallback 順序】
-    #   1. goodinfo 殖利率（%：3.17 = 3.17%）— 最準
-    #   2. 現金股利 / 現價 — DB 沒殖利率時的退路
-    #   3. None（無資料）
-    # 注：0 = 「該年未配息」→ 殖利率顯示 0（合理）或用 None 都可以；選 None（不讓股票混淆）
+    # 8. 今年現金殖利率（V0.9.5-goodinfo3 改：100% 用 goodinfo，不 fallback）
+    # 【William 2026-06-17 12:03 反映】「殖利率應該不用任何計算直接用才對」
+    #   - goodinfo 已用除息基準日還原價算好殖利率、比任何 fallback 都準
+    #   - 拿掉 cash/現價 fallback（會被現價偏離誤導）
+    #   - cash=0 也要用 goodinfo 值（ex: 5386 2026 cash=0 但 goodinfo cash_yield=0.30%）
+    #   - goodinfo 殖利率 = 0 (該年未配息) → 殖利率 0%（合理、不是 None）
     base["今年現金殖利率(%)"] = None
-    # 1) goodinfo 路徑
-    goodinfo_yld_mask = (
-        base["今年現金殖利率_goodinfo"].notna()
-        & (base["今年現金殖利率_goodinfo"] > 0)
-    )
+    goodinfo_yld_mask = base["今年現金殖利率_goodinfo"].notna()
     base.loc[goodinfo_yld_mask, "今年現金殖利率(%)"] = (
         base.loc[goodinfo_yld_mask, "今年現金殖利率_goodinfo"].round(2)
     )
-    # 2) fallback：現金股利 / 現價
-    fallback_mask = (
-        base["今年現金殖利率(%)"].isna()
-        & (base["現價"].notna()) & (base["現價"] > 0)
-        & (base["今年現金股利"].notna()) & (base["今年現金股利"] > 0)
-    )
-    base.loc[fallback_mask, "今年現金殖利率(%)"] = (
-        base.loc[fallback_mask, "今年現金股利"] / base.loc[fallback_mask, "現價"] * 100
-    ).round(2)
 
-    # 9. 去年現金殖利率（V0.9.5-goodinfo 改用 goodinfo 殖利率）
-    # 【原本】除以「去年除息日收盤價」（V0.9.5+ Phase 10 William 11:39 修正）
-    # 【V0.9.5-goodinfo 改用】優先用 goodinfo 殖利率（比 ex_date_close 更準）
-    #   - goodinfo 用「除息日前 5 日均價」算 → 不被單日股價波動干擾
-    #   - 也涵蓋多次配息（不會只算第一次除息）
-    # 【fallback 順序】 goodinfo → ex_date_close → 現價 → None
+    # 9. 去年現金殖利率（V0.9.5-goodinfo3：100% 用 goodinfo、不走 cash/現價 fallback）
+    # 【原本】cash=0 → continue 跳過 → 殖利率 None（5386 去年現金殖利率 bug）
+    # 【修正】cash=0 也要看 goodinfo 有沒有殖利率值、有就直接用
     for col in ["去年除息日", "去年除息日收盤價"]:
         if col not in base.columns:
             base[col] = None
     base["去年現金殖利率(%)"] = None
-    for idx in base.index:
-        cash = base.at[idx, "去年現金股利"]
-        if cash is None or cash <= 0 or pd.isna(cash):
-            continue
-        # 1) 優先用 goodinfo 殖利率（最準）
-        goodinfo_yld = base.at[idx, "去年現金殖利率_goodinfo"]
-        if goodinfo_yld and not pd.isna(goodinfo_yld) and goodinfo_yld > 0:
-            base.at[idx, "去年現金殖利率(%)"] = round(float(goodinfo_yld), 2)
-            continue
-        # 2) fallback：用 ex_date_close（V0.9.5+ Phase 10 算法）
-        ex_date = base.at[idx, "去年除息日"]
-        ex_close = base.at[idx, "去年除息日收盤價"]
-        if (ex_close is None or pd.isna(ex_close) or ex_close == 0) and ex_date and not pd.isna(ex_date):
-            ex_close = _fetch_ex_date_close(base.at[idx, "股票代號"], ex_date)
-            if ex_close and ex_close > 0:
-                base.at[idx, "去年除息日收盤價"] = ex_close
-                _update_ex_date_close("dividend_history.db", base.at[idx, "股票代號"],
-                                       cy - 1, ex_date, ex_close)
-        if ex_close and not pd.isna(ex_close) and ex_close > 0:
-            base.at[idx, "去年除息日"] = ex_date if ex_date else None
-            base.at[idx, "去年現金殖利率(%)"] = round(cash / ex_close * 100, 2)
-            continue
-        # 3) fallback：用現價
-        cur_price = base.at[idx, "現價"]
-        if cur_price and not pd.isna(cur_price) and cur_price > 0:
-            base.at[idx, "去年現金殖利率(%)"] = round(cash / cur_price * 100, 2)
+    goodinfo_last_mask = base["去年現金殖利率_goodinfo"].notna()
+    base.loc[goodinfo_last_mask, "去年現金殖利率(%)"] = (
+        base.loc[goodinfo_last_mask, "去年現金殖利率_goodinfo"].round(2)
+    )
 
-    # 9.5 V0.9.5-goodinfo 新增：今年/去年股票殖利率
-    #   goodinfo 直接提供、同樣不需自己算
+    # 9.5 V0.9.5-goodinfo：今年/去年股票殖利率（直接用 goodinfo 提供）
     base["今年股票殖利率(%)"] = None
     base["去年股票殖利率(%)"] = None
-    sy_mask_this = (
-        base["今年股票殖利率_goodinfo"].notna()
-        & (base["今年股票殖利率_goodinfo"] > 0)
-    )
+    sy_mask_this = base["今年股票殖利率_goodinfo"].notna()
     base.loc[sy_mask_this, "今年股票殖利率(%)"] = (
         base.loc[sy_mask_this, "今年股票殖利率_goodinfo"].round(2)
     )
-    sy_mask_last = (
-        base["去年股票殖利率_goodinfo"].notna()
-        & (base["去年股票殖利率_goodinfo"] > 0)
-    )
+    sy_mask_last = base["去年股票殖利率_goodinfo"].notna()
     base.loc[sy_mask_last, "去年股票殖利率(%)"] = (
         base.loc[sy_mask_last, "去年股票殖利率_goodinfo"].round(2)
     )
-
-    # 9.6 V0.9.5-goodinfo 新增：歷史平均現金殖利率（10Y, 含今年）
-    #   解決「歷史殖利率用年平均價算偏差太大」問題 (William 2026-06-17 反映)
-    #   直接拿 goodinfo 各年度殖利率算術平均，比「總股利 / 平均價」準
-    #   至少有 1 筆才顯示（None = 完全無資料）
-    base["歷史平均現金殖利率(%)"] = None
-    yld_cols_history = [
-        f"{cy}現金殖利率_goodinfo",
-        f"{cy - 1}現金殖利率_goodinfo",
-        f"{cy - 2}現金殖利率_goodinfo",
-        f"{cy - 3}現金殖利率_goodinfo",
-        f"{cy - 4}現金殖利率_goodinfo",
-        f"{cy - 5}現金殖利率_goodinfo",
-        f"{cy - 6}現金殖利率_goodinfo",
-        f"{cy - 7}現金殖利率_goodinfo",
-        f"{cy - 8}現金殖利率_goodinfo",
-    ]
-    # 補上缺的欄位（div_df 為空、merge 失敗時的防呆）
-    for c in yld_cols_history:
-        if c not in base.columns:
-            base[c] = None
-    for idx in base.index:
-        vals = []
-        for c in yld_cols_history:
-            v = base.at[idx, c]
-            if v is None or pd.isna(v):
-                continue
-            vals.append(float(v))
-        if vals:
-            base.at[idx, "歷史平均現金殖利率(%)"] = round(sum(vals) / len(vals), 2)
 
     # 10. 應用篩選條件（V0.9.5+ B 邏輯修正版）
     #     【關鍵修正】2026-06-14 William 反映「YoY < 30 還跑出來」
@@ -1741,18 +1701,17 @@ def _run_manual_selection(
 
     # 11. 排序：殖利率有值 > 殖利率高 > 股票股利高 > 營收 YoY 高 > PE 低
     # 【重點】殖利率有資料（vs None）排前面、殖利率高的排前面、None 排後面
-    # V0.9.5-goodinfo：排序優先用「歷史平均現金殖利率」(10Y)、更穩定不易被單一年度拉高
+    # V0.9.5-goodinfo3：拿掉 10Y 平均殖利率 sort key（William 不需要）
     result["_yld_has_data"] = result["今年現金殖利率(%)"].notna().astype(int)
     # 殖利率直接作 sort key、不加負號→降序時殖利率高排前
     result["_sort_yld"] = result["今年現金殖利率(%)"].fillna(-9999)
-    result["_sort_avg_yld"] = result["歷史平均現金殖利率(%)"].fillna(-9999)
     result["_sort_rev"] = result["營收YoY(%)"].fillna(-9999)
     result["_sort_stock"] = result["今年股票股利"].fillna(0)
     result["_sort_pe"] = result["PE"].fillna(9999)
 
     result = result.sort_values(
-        ["_yld_has_data", "_sort_avg_yld", "_sort_yld", "_sort_stock", "_sort_rev", "_sort_pe"],
-        ascending=[False, False, False, False, False, True]
+        ["_yld_has_data", "_sort_yld", "_sort_stock", "_sort_rev", "_sort_pe"],
+        ascending=[False, False, False, False, True]
     ).reset_index(drop=True)
 
     result = result.head(top_n).reset_index(drop=True)
@@ -1763,8 +1722,8 @@ def _run_manual_selection(
                 "成交量_張", "今年現金股利",
                 "去年現金股利", "去年股票股利", "去年現金殖利率(%)", "EPS本期",
                 f"{cy}現金股利", f"{cy - 1}現金股利", f"{cy - 2}現金股利",
-                # V0.9.5-goodinfo：殖利率加強欄位
-                "今年股票殖利率(%)", "去年股票殖利率(%)", "歷史平均現金殖利率(%)"]
+                # V0.9.5-goodinfo3：殖利率加強欄位（10Y 平均殖利率已拿掉，William 不需要）
+                "今年股票殖利率(%)", "去年股票殖利率(%)"]
     out_cols = [c for c in out_cols if c in result.columns]
     # 整理重複的現金股利（保留乾淨的今年/去年/前年）
     result = result[out_cols].rename(columns={
@@ -1784,7 +1743,6 @@ def _run_manual_selection(
                   "今年股票股利", "今年現金股利", "今年現金殖利率(%)",
                   "去年股票股利", "去年現金股利", "去年現金殖利率(%)",
                   "今年股票殖利率(%)", "去年股票殖利率(%)",
-                  "歷史平均現金殖利率(%)",
                   "PE", "成交量(張)", "EPS本期"]
     final_cols = [c for c in final_cols if c in result.columns]
     return result[final_cols].rename(columns={
@@ -4402,12 +4360,11 @@ class StrategyGUI(tk.Tk):
         cols = ("勾選","代號","名稱","現價","累計YoY%",
                 "今股票","今現金","今現金殖%","今股票殖%",
                 "PE","成交量(張)",
-                "去年股票","去年現金","去年現金殖%","去年股票殖%",
-                "10Y平均殖%")
+                "去年股票","去年現金","去年現金殖%","去年股票殖%")
         self._ms_tree = ttk.Treeview(right_frame, columns=cols, show="headings",
                                      selectmode="none", height=25)
         col_widths = (40, 60, 100, 70, 70, 60, 60, 80, 80,
-                      50, 80, 60, 60, 80, 80, 80)
+                      50, 80, 60, 60, 80, 80)
         for col, w in zip(cols, col_widths):
             self._ms_tree.heading(col, text=col)
             self._ms_tree.column(col, width=w, anchor="center")
@@ -5009,8 +4966,6 @@ class StrategyGUI(tk.Tk):
             stock_yld_this_str = f"{stock_yld_this:.2f}" if stock_yld_this and str(stock_yld_this) not in ("nan","None") else "—"
             stock_yld_last = row.get("去年股票殖利率(%)")
             stock_yld_last_str = f"{stock_yld_last:.2f}" if stock_yld_last and str(stock_yld_last) not in ("nan","None") else "—"
-            avg_yld = row.get("歷史平均現金殖利率(%)")
-            avg_yld_str = f"{avg_yld:.2f}" if avg_yld and str(avg_yld) not in ("nan","None") else "—"
 
             tag = "checked" if self._ms_checked.get(code, False) else "unchecked"
             self._ms_tree.insert("", "end", iid=code, values=(
@@ -5018,11 +4973,10 @@ class StrategyGUI(tk.Tk):
                 code, name, price_str, rev_str,
                 stock_str, cash_div_str, cash_str, stock_yld_this_str,
                 pe_str, vol_str,
-                last_stock_str, last_cash_div_str, last_cash_str, stock_yld_last_str,
-                avg_yld_str
+                last_stock_str, last_cash_div_str, last_cash_str, stock_yld_last_str
             ), tags=(tag,))
 
-        self._ms_status.set(f"✅ 符合條件：{len(result)} 檔（上限 {self._ms_limit_var.get()} 檔）｜排序：營收YoY > 今年股票 > 今年現金殖% > 10Y平均殖% > PE")
+        self._ms_status.set(f"✅ 符合條件：{len(result)} 檔（上限 {self._ms_limit_var.get()} 檔）｜排序：營收YoY > 今年股票 > 今年現金殖% > PE")
 
         # 【V0.9.5-alpha Phase 6】2026-06-15：偵測 FinMind 402 額度錯誤
         # 情境：_fetch_finmind_dividend 中途被 402 中斷（已抓 X 筆寫入 DB），

@@ -43,13 +43,14 @@ def test_run_manual_selection_產出含元後綴股利欄位():
     st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "2330",
-            # V0.9.5-goodinfo 新語意：今年=cy → 移 2.5 到 CY
             f"{CY}現金股利": 2.5,
             f"{CY}股票股利": 0.5,
             f"{CY - 1}現金股利": 1.8,  # 去年
             f"{CY - 1}股票股利": 0.0,
             f"{CY - 2}現金股利": 0.0,  # 前年
             f"{CY - 2}股票股利": 0.0,
+            # V0.9.5-goodinfo3：殖利率 100% 用 goodinfo
+            f"{CY}現金殖利率_goodinfo": 4.17,
         }
     ])
 
@@ -80,7 +81,7 @@ def test_run_manual_selection_產出含元後綴股利欄位():
     assert row["今年股票股利(元)"] == 0.5
     assert row["去年現金股利(元)"] == 1.8
     assert row["去年股票股利(元)"] == 0.0
-    # 殖利率 4.17% = 2.5 / 60.0 * 100
+    # V0.9.5-goodinfo3：殖利率直接用 goodinfo 提供
     assert abs(row["今年現金殖利率(%)"] - 4.17) < 0.01
 
 

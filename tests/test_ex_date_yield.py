@@ -182,21 +182,31 @@ def test_fetch_ex_date_close_close為0回傳None():
 
 def _make_div_df_with_ex_date() -> pd.DataFrame:
     """模擬 _fetch_finmind_dividend 回傳含 ex_date / ex_date_close 的 df
-    注意：cy=2026、cy-1=2025=「今年」、cy-2=2024=「去年」"""
+    V0.9.5-goodinfo3：殖利率 100% 用 goodinfo、加 cash_yield_pct 欄位
+
+    原本設 ex_date/ex_date_close 是給 V0.9.5+ Phase 10 fallback 用，
+    V0.9.5-goodinfo3 拿掉 fallback、殖利率直接看 cash_yield_pct_goodinfo
+    """
     rows = [
         {
             "股票代號": "2330",
             f"{CY}現金股利": None, f"{CY}股票股利": None,
             f"{CY - 1}現金股利": 3.0, f"{CY - 1}股票股利": 0.5,   # 今年
-            f"{CY - 2}現金股利": 2.5, f"{CY - 2}股票股利": 0.0,   # 去年 ← 2.5 才是 去年 現金
+            f"{CY - 2}現金股利": 2.5, f"{CY - 2}股票股利": 0.0,   # 去年
             f"{CY - 1}除息日": "2025-08-15", f"{CY - 1}除息日收盤價": 620.0,
+            # V0.9.5-goodinfo3：殖利率 100% 用 goodinfo
+            f"{CY - 1}現金殖利率_goodinfo": 0.48,
+            f"{CY - 1}股票殖利率_goodinfo": 0.08,
         },
         {
             "股票代號": "2317",
             f"{CY}現金股利": None, f"{CY}股票股利": None,
             f"{CY - 1}現金股利": 2.0, f"{CY - 1}股票股利": 0.0,   # 今年
             f"{CY - 2}現金股利": 1.5, f"{CY - 2}股票股利": 0.0,   # 去年
-            f"{CY - 1}除息日": "2025-07-20", f"{CY - 1}除息日收盤價": None,  # 沒緩存
+            f"{CY - 1}除息日": "2025-07-20", f"{CY - 1}除息日收盤價": None,
+            # 2317 去年現金殖利率 goodinfo = 2.0%（不是用 ex_date_close fallback 算的）
+            f"{CY - 1}現金殖利率_goodinfo": 2.0,
+            f"{CY - 1}股票殖利率_goodinfo": 0.0,
         },
     ]
     return pd.DataFrame(rows)
@@ -234,10 +244,11 @@ def test_去年現金殖利率_用ex_date_close_不是現價():
         f"2317 去年殖利率應為 2.0%（2.0/100），實際: {row_2317['去年現金殖利率(%)']}"
 
 
-def test_去年現金殖利率_沒ex_date_殖利率為None():
-    """【邊界】V0.9.5-goodinfo 新語意：ex_date 空且 fetch 也回 None
-    → 殖利率 fallback 用現價（行為同 v0.9.5+ Phase 10 修法）
-    殖利率 = 1.0 / 50.0 * 100 = 2.0%
+def test_去年現金殖利率_沒goodinfo_殖利率為None():
+    """【邊界】V0.9.5-goodinfo3：沒 goodinfo 殖利率 → 殖利率 None
+
+    原本（V0.9.5+ Phase 10）：ex_date 空且 fetch 失敗 → fallback 用現價 = 2.0%
+    V0.9.5-goodinfo3：拿掉所有 fallback → 沒 goodinfo = None
     """
     st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
@@ -247,6 +258,7 @@ def test_去年現金殖利率_沒ex_date_殖利率為None():
             f"{CY - 2}現金股利": 0.0, f"{CY - 2}股票股利": 0.0,
             f"{CY - 1}除息日": "",  # ← 空字串
             f"{CY - 1}除息日收盤價": None,
+            # V0.9.5-goodinfo3：故意不給殖利率（沒 goodinfo 資料）
         }
     ])
     # fetch 也回 None
@@ -259,9 +271,9 @@ def test_去年現金殖利率_沒ex_date_殖利率為None():
 
     result = st._run_manual_selection(price_df, pd.DataFrame(), pd.DataFrame(), {}, top_n=10)
     row = result.iloc[0]
-    # ex_date 空 + fetch 回 None → fallback 用現價 → 殖利率 = 1.0/50 = 2.0%
-    assert abs(row["去年現金殖利率(%)"] - 2.0) < 0.01, \
-        f"ex_date 空 + fetch 失敗 → 殖利率 fallback 用現價應為 2.0%，實際: {row['去年現金殖利率(%)']}"
+    # V0.9.5-goodinfo3：沒 fallback、殖利率 = None
+    assert pd.isna(row["去年現金殖利率(%)"]), \
+        f"沒 goodinfo 殖利率應為 None，實際: {row['去年現金殖利率(%)']}"
 
 
 def test_去年現金殖利率_現金股利為0_殖利率為None():
@@ -289,39 +301,39 @@ def test_去年現金殖利率_現金股利為0_殖利率為None():
         f"現金股利 0 應為 None，實際: {row['去年現金殖利率(%)']}"
 
 
-def test_去年現金殖利率_沒ex_date_close_自動fetch並緩存():
-    """【整合】DB 沒 ex_date_close → 自動 fetch → 寫入 DB 緩存
-    V0.9.5-goodinfo 新語意：「去年」= DB year=CY-1 → ex_date 也是 CY-1 的
+def test_去年現金殖利率_殖利率100用goodinfo_不走fetch():
+    """【V0.9.5-goodinfo3】殖利率 100% 用 goodinfo、不呼叫 _fetch_ex_date_close
+
+    原本（V0.9.5+ Phase 10）：DB 沒 ex_date_close → 自動 fetch → 寫入緩存 → 用 1.36%
+    V0.9.5-goodinfo3：直接用 goodinfo 提供的殖利率、不需 fetch
     """
     st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "9999",
             f"{CY}現金股利": None, f"{CY}股票股利": None,
-            f"{CY - 1}現金股利": 1.5, f"{CY - 1}股票股利": 0.0,  # ← 去年現金 1.5 (新語意)
+            f"{CY - 1}現金股利": 1.5, f"{CY - 1}股票股利": 0.0,
             f"{CY - 2}現金股利": 0.0, f"{CY - 2}股票股利": 0.0,
             f"{CY - 1}除息日": "2025-08-15",
             f"{CY - 1}除息日收盤價": None,  # 沒緩存
+            # V0.9.5-goodinfo3：殖利率 100% 用 goodinfo
+            f"{CY - 1}現金殖利率_goodinfo": 1.36,   # goodinfo 提供
+            f"{CY - 1}股票殖利率_goodinfo": 0.0,
         }
     ])
-    # 自動 fetch 抓到 110
-    st._fetch_ex_date_close = lambda code, ex_date: 110.0
+    # 不應被呼叫：殖利率不走 fetch 路徑
+    st._fetch_ex_date_close = lambda code, ex_date: 110.0  # 故意設錯、避免誤用
 
-    # 抓 _update_ex_date_close 是否被呼叫
+    # 抓 _update_ex_date_close 不應被呼叫
     with patch.object(st, "_update_ex_date_close") as mock_update:
         price_df = pd.DataFrame([
             {"股票代號": "9999", "股票名稱": "測試", "現價": 50.0,
              "營收YoY(%)": 10.0, "成交量_張": 1000.0, "PE": 20.0, "EPS本期": 2.5},
         ])
         result = st._run_manual_selection(price_df, pd.DataFrame(), pd.DataFrame(), {}, top_n=10)
-        # 應呼叫 _update_ex_date_close 寫入緩存
-        assert mock_update.called, "應呼叫 _update_ex_date_close 寫入 DB 緩存"
-        call_args = mock_update.call_args
-        # call_args = (db_path, stock_id, year, ex_date, ex_close)
-        assert call_args[0][1] == "9999"
-        assert call_args[0][2] == CY - 1
-        assert call_args[0][3] == "2025-08-15"
-        assert call_args[0][4] == 110.0
+        # V0.9.5-goodinfo3：殖利率 100% 用 goodinfo、不會走 fetch 路徑
+        assert not mock_update.called, "V0.9.5-goodinfo3 不該呼叫 _update_ex_date_close"
 
     row = result.iloc[0]
-    # 殖利率 = 1.5 / 110 * 100 = 1.36
-    assert abs(row["去年現金殖利率(%)"] - 1.36) < 0.01
+    # 直接用 goodinfo 1.36%，不是 fetch 算出來的 1.36（巧合一樣）
+    assert abs(row["去年現金殖利率(%)"] - 1.36) < 0.01, \
+        f"殖利率應用 goodinfo 1.36%，實際: {row['去年現金殖利率(%)']}"

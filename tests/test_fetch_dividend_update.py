@@ -190,19 +190,20 @@ def test_update_不存在的記錄應報錯():
 
 
 def test_update後殖利率算法仍正確():
-    """【整合測試】手動改 cash=2.0、殖利率應算出 2.44%（2/82）"""
+    """【整合測試】V0.9.5-goodinfo3：殖利率 100% 用 goodinfo（2.44% 直接給的）"""
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
     import pandas as pd
     from datetime import datetime
     CY = datetime.now().year
 
-    # 直接組裝 finmind mock：3546 cash=2.0
+    # 直接組裝 finmind mock：3546 cash=2.0, goodinfo yield=2.44
     st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {"股票代號": "3546",
-         # V0.9.5-goodinfo 新語意：今年=cy → 把 2.0 移到 CY
          f"{CY}現金股利": 2.0, f"{CY}股票股利": 0.5,
          f"{CY - 1}現金股利": 4.1, f"{CY - 1}股票股利": 1.0,
-         f"{CY - 2}現金股利": None, f"{CY - 2}股票股利": None},
+         f"{CY - 2}現金股利": None, f"{CY - 2}股票股利": None,
+         # V0.9.5-goodinfo3：殖利率 100% 用 goodinfo
+         f"{CY}現金殖利率_goodinfo": 2.44},
     ])
 
     price_df = pd.DataFrame([
@@ -211,7 +212,7 @@ def test_update後殖利率算法仍正確():
     ])
     result = st._run_manual_selection(price_df, pd.DataFrame(), pd.DataFrame(), {}, top_n=10)
     yld = result.iloc[0]["今年現金殖利率(%)"]
-    assert abs(yld - 2.44) < 0.01, f"殖利率應為 2.44%，實際: {yld}"
+    assert abs(yld - 2.44) < 0.01, f"殖利率應用 goodinfo 2.44%，實際: {yld}"
 
 
 if __name__ == "__main__":

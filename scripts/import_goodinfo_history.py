@@ -2,7 +2,12 @@
 """
 import_goodinfo_history.py
 ============================
-【V0.9.5-goodinfo2 新增】 2026-06-17
+【V0.9.5-goodinfo3 修】 2026-06-17 12:03
+  * 修 import_dividend 合併 bug：
+    - 原本：{**cash_agg, **share_agg} 用 dict unpack、後者覆蓋前者
+      → 對 cash 跟 share 都有資料的股票，cash 被洗成 0（1,710 筆 / 646 檔）
+    - 修法：明確取 cash_agg.cash + share_agg.stock
+【V0.9.5-goodinfo2 新增】 2026-06-17 11:10
   * import_yield_rate() 寫入 6 個殖利率檔
   * DB schema 加 cash_yield_pct / share_yield_pct
   * --only yield 選項
@@ -185,11 +190,20 @@ def import_dividend(dry: bool = False):
                 else:
                     agg[key]["stock"] += float(val)
 
-    # 合併（cash + stock 同一張表）
-    all_agg: dict = defaultdict(lambda: {"cash": 0.0, "stock": 0.0})
-    for (sid, yr), vals in {**dict(cash_agg), **dict(share_agg)}.items():
-        all_agg[(sid, yr)]["cash"] += vals.get("cash", 0.0)
-        all_agg[(sid, yr)]["stock"] += vals.get("stock", 0.0)
+    # 【V0.9.5-goodinfo3 修 Bug】合併 cash + stock 同一張表
+    # 【原本 bug】{**cash_agg, **share_agg} 用 dict unpack、後者覆蓋前者
+    #   結果：對 cash 跟 share 都有資料的股票（ex: 5386 2018 cash=2.5/share=1.5），
+    #         share_agg 的 {"cash":0,"stock":1.5} 會覆蓋 cash_agg 的 {"cash":2.5,"stock":0}
+    #         → DB cash=0, stock=1.5（cash 被洗成 0！）
+    # 【修法】明確取 cash_agg.cash + share_agg.stock（兩個來源不同、不會衝突）
+    #   cash = sum(cash_agg.cash)        ← 只來自 cash 檔
+    #   stock = sum(share_agg.stock)     ← 只來自 share 檔
+    all_agg: dict = {}
+    all_keys = set(cash_agg.keys()) | set(share_agg.keys())
+    for (sid, yr) in all_keys:
+        cash_vals = cash_agg.get((sid, yr), {}).get("cash", 0.0)
+        stock_vals = share_agg.get((sid, yr), {}).get("stock", 0.0)
+        all_agg[(sid, yr)] = {"cash": cash_vals, "stock": stock_vals}
 
     print(f"  合計 {len(all_agg)} 筆 (stock_id, year) 組合")
 

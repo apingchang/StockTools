@@ -83,6 +83,10 @@ def test_3188_鑫龍騰_去年殖利率不該用今年現金股利():
         "2025現金股利": [1.8],   "2025股票股利": [0.0],
         "2024現金股利": [1.6],   "2024股票股利": [0.0],
         "2023現金股利": [None],  "2023股票股利": [0.0],
+        # V0.9.5-goodinfo3：殖利率 100% 用 goodinfo
+        "2026現金殖利率_goodinfo": [12.81],
+        "2025現金殖利率_goodinfo": [7.21],
+        "2024現金殖利率_goodinfo": [5.54],
     })
     st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
@@ -97,11 +101,11 @@ def test_3188_鑫龍騰_去年殖利率不該用今年現金股利():
     assert row["去年現金股利(元)"] == 1.8, \
         f"去年現金股利應為 1.8 (DB year=2025)，實際: {row['去年現金股利(元)']}"
 
-    # 殖利率計算 = 股利 / 現價 * 100
+    # V0.9.5-goodinfo3：殖利率 100% 用 goodinfo（不走 cash/現價 fallback）
     cy_yld = row["今年現金殖利率(%)"]
     ly_yld = row["去年現金殖利率(%)"]
-    assert abs(cy_yld - 12.81) < 0.01, f"今年殖利率應約 12.81%，實際: {cy_yld}"
-    assert abs(ly_yld - 7.21) < 0.01, f"去年殖利率應約 7.21%，實際: {ly_yld}"
+    assert abs(cy_yld - 12.81) < 0.01, f"今年殖利率應用 goodinfo 12.81%，實際: {cy_yld}"
+    assert abs(ly_yld - 7.21) < 0.01, f"去年殖利率應用 goodinfo 7.21%，實際: {ly_yld}"
 
 
 def test_2408_南亞科_無DB資料時今年股利是None_不是用去年頂替():
@@ -135,17 +139,20 @@ def test_2408_南亞科_無DB資料時今年股利是None_不是用去年頂替(
         f"去年現金股利應為 1.347 (DB year=2025)，實際: {last_div}"
 
 
-def test_2408_南亞科_殖利率用現價計算():
-    """2408 V0.9.5-goodinfo 新語意：
-    今年 (cy=2026) = DB year=2026 = 1.347 (goodinfo 2026 file)
-    殖利率 = 1.347/340 = 0.4%
+def test_2408_南亞科_殖利率用goodinfo():
+    """2408 V0.9.5-goodinfo3：殖利率直接用 goodinfo 提供
+
+    修訂：原本測「殖利率 = cash/現價 = 0.4%」，V0.9.5-goodinfo3 改用 goodinfo
+    goodinfo 2408 2026 = 0.32%（不是 0.4%）
     """
     fake_div = pd.DataFrame({
         "股票代號": ["2408"],
-        "2026現金股利": [1.347], "2026股票股利": [0.0],   # ← 移到 2026 (新語意「今年」)
+        "2026現金股利": [1.347], "2026股票股利": [0.0],
         "2025現金股利": [None], "2025股票股利": [None],
         "2024現金股利": [None], "2024股票股利": [None],
         "2023現金股利": [None], "2023股票股利": [None],
+        # V0.9.5-goodinfo3：殖利率 100% 用 goodinfo
+        "2026現金殖利率_goodinfo": [0.32],
     })
     st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
@@ -156,7 +163,7 @@ def test_2408_南亞科_殖利率用現價計算():
     row = result.iloc[0]
 
     cy_yld = row["今年現金殖利率(%)"]
-    assert abs(cy_yld - 0.4) < 0.01, f"今年殖利率應約 0.4%，實際: {cy_yld}"
+    assert abs(cy_yld - 0.32) < 0.01, f"今年殖利率應用 goodinfo 0.32%，實際: {cy_yld}"
 
 
 def test_6171_大城地產_前年現金股利指向cy3():
@@ -172,6 +179,9 @@ def test_6171_大城地產_前年現金股利指向cy3():
         "2025現金股利": [1.5],   "2025股票股利": [0.0],
         "2024現金股利": [2.5],   "2024股票股利": [0.0],
         "2023現金股利": [None],  "2023股票股利": [0.0],
+        # V0.9.5-goodinfo3：殖利率 100% 用 goodinfo
+        "2025現金殖利率_goodinfo": [6.25],
+        "2024現金殖利率_goodinfo": [3.05],
     })
     st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
@@ -186,9 +196,9 @@ def test_6171_大城地產_前年現金股利指向cy3():
     assert row["去年現金股利(元)"] == 1.5, \
         f"去年現金股利應為 1.5 (DB year=2025)，實際: {row['去年現金股利(元)']}"
 
-    # 殖利率 = 1.5 / 24.0 * 100 = 6.25%
+    # V0.9.5-goodinfo3：殖利率直接用 goodinfo 提供
     ly_yld = row["去年現金殖利率(%)"]
-    assert abs(ly_yld - 6.25) < 0.01, f"去年殖利率應約 6.25%，實際: {ly_yld}"
+    assert abs(ly_yld - 6.25) < 0.01, f"去年殖利率應用 goodinfo 6.25%，實際: {ly_yld}"
 
 
 def test_year_mapping_不互相覆蓋():
