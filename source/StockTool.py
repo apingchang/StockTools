@@ -457,6 +457,13 @@ Phase 2.3 — 買賣記錄 5 項更新：
 
 from __future__ import annotations
 
+# ==========================================================
+# Version 常數（V0.9.5-goodinfo4 設定）
+# ==========================================================
+# 中央管理版本號、避免各處手動改不到
+VERSION = "v0.9.5-goodinfo4"
+
+
 import io
 import os
 import json
@@ -688,7 +695,7 @@ class GuiLogger:
 def build_session() -> requests.Session:
     s = requests.Session()
     s.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-v0.9.5-goodinfo",
+        "User-Agent": f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) StockTool/AdvisorStyle-{VERSION}",
         "Accept": "application/json,text/plain,*/*"
     })
     return s
@@ -2995,7 +3002,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     s = build_session()
 
     logger.log("=" * 60)
-    logger.log("🚀 StockTool v0.9.5-goodinfo 開始執行")
+    logger.log(f"🚀 StockTool {VERSION} 開始執行")
     logger.log(f"   評分系統: {'多因子評分' if cfg.use_enhanced_score else '簡易評分'}")
     logger.log(f"   技術指標: 強化版 (MTF={cfg.use_mtf_confirmation}, 背離={cfg.use_divergence_detection})")
     logger.log("=" * 60)
@@ -3662,7 +3669,7 @@ class _CalendarDialog:
 class StrategyGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("StockTool v0.9.5-goodinfo (Multi-Factor + Top10 Backtest + Portfolio + goodinfo)")
+        self.title(f"StockTool {VERSION} (Multi-Factor + Top10 Backtest + Portfolio + goodinfo)")
 
         self.log_queue = queue.Queue()
         self.logger = GuiLogger(self.log_queue)
@@ -5981,7 +5988,7 @@ class StrategyGUI(tk.Tk):
     def _on_run(self):
         self.run_btn.config(state="disabled")
         self.console.insert("end", "=" * 60 + "\n")
-        self.console.insert("end", "🚀 StockTool v0.9.5-goodinfo 開始執行\n")
+        self.console.insert("end", f"🚀 StockTool {VERSION} 開始執行\n")
         self.console.insert("end", "=" * 60 + "\n")
         self.console.see("end")
 
