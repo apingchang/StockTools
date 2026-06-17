@@ -2,6 +2,10 @@
 """
 import_goodinfo_history.py
 ============================
+【V0.9.5-goodinfo2 新增】 2026-06-17
+  * import_yield_rate() 寫入 6 個殖利率檔
+  * DB schema 加 cash_yield_pct / share_yield_pct
+  * --only yield 選項
 一次性把 goodinfo 匯出的 xls 歷史資料寫入 StockTools DB。
 
 【來源檔案】放在 .tmp/goodinfo_export/ 下：
@@ -11,6 +15,12 @@ import_goodinfo_history.py
             P50UShare10Y.xls       → 股票股利（高價股）
             P20-50Share10Y.xls     → 股票股利（中價股）
             P20LShare10Y.xls       → 股票股利（低價股）
+            P50U_DividendRate.xls  → 現金殖利率（高價股，2017~2026, V0.9.5-goodinfo）
+            P20-50_DividendRate.xls → 現金殖利率（中價股）
+            P20L_DividendRate.xls  → 現金殖利率（低價股）
+            P50U_ShareRate.xls     → 股票殖利率（高價股，2017~2026）
+            P20-50_ShareRate.xls   → 股票殖利率（中價股）
+            P20L_ShareRate.xls     → 股票殖利率（低價股）
   eps/       P50UEPS12Y.xls       → EPS（高價股，2014~2025）
             P20-50EPS12Y.xls      → EPS（中價股）
             P20LEPS12Y.xls        → EPS（低價股）
@@ -22,7 +32,7 @@ import_goodinfo_history.py
             P20LRevRate12Y.xls    → 營收年增率（低價股）
 
 【寫入目標】
-  dividend_history.db  → 現金股利 + 股票股利（加總年度）
+  dividend_history.db  → 現金股利 + 股票股利（加總年度）+ 殖利率
   eps_history.db       → 年度 EPS
   .tmp/avg_price_history.json → 平均股價（給殖利率計算用，不寫 DB）
   .tmp/revenue_rate_history.json → 營收年增率（純參考，不寫 DB）
@@ -37,10 +47,18 @@ import_goodinfo_history.py
     - FinMind TaiwanStockDividend 用 CashExDividendTradingDate 的西元年當分組 key
     - 同一 stock_id + year 多季加總
 
+  殖利率（V0.9.5-goodinfo）：
+    - goodinfo DividendRate/ShareRate 的「2017現金殖利率」= 2017 年除息基準日的殖利率
+    - 殖利率已是百分比（3.17 = 3.17%），直接寫入 cash_yield_pct
+    - 同一 stock_id + year 跨三個價位帶的話「取平均」（與股利加總不同）
+    - 沒有殖利率 = 0（該年沒配息）→ 寫 0（不是 NULL，避免誤判為缺資料）
+    - 寫入策略：只更新殖利率、不動既有 cash/stock
+
 【用法】
   cd /home/aping/MyProjects/StockTools/source
   python ../scripts/import_goodinfo_history.py          # 全部
   python ../scripts/import_goodinfo_history.py --only div   # 只跑股利
+  python ../scripts/import_goodinfo_history.py --only yield # 只跑殖利率（V0.9.5-goodinfo）
   python ../scripts/import_goodinfo_history.py --only eps   # 只跑 EPS
   python ../scripts/import_goodinfo_history.py --dry        # 預演（不寫 DB）
 """
@@ -201,7 +219,7 @@ def import_dividend(dry: bool = False):
 
 
 def _init_div_db(db_path: str):
-    """初始化 dividend_history.db schema"""
+    """初始化 dividend_history.db schema（V0.9.5-goodinfo 加殖利率欄）"""
     conn = sqlite3.connect(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS dividend_history (
@@ -213,20 +231,45 @@ def _init_div_db(db_path: str):
             fetched_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             ex_date     TEXT,
             ex_date_close REAL,
+            cash_yield_pct  REAL,    -- V0.9.5-goodinfo：該年現金殖利率（%, goodinfo 來源）
+            share_yield_pct REAL,    -- V0.9.5-goodinfo：該年股票殖利率（%, goodinfo 來源）
             PRIMARY KEY (stock_id, year)
         )""")
+    # V0.9.5-goodinfo：動態加殖利率欄（既有 DB 自動 migration）
+    for col_sql in [
+        "ALTER TABLE dividend_history ADD COLUMN cash_yield_pct REAL",
+        "ALTER TABLE dividend_history ADD COLUMN share_yield_pct REAL",
+    ]:
+        try:
+            conn.execute(col_sql)
+        except Exception:
+            pass  # 欄位已存在（重複 migration 安全）
     conn.commit()
     conn.close()
 
 
 def _upsert_div_history(db_path: str, rows: list):
-    """rows: [(stock_id, year, cash, stock, source, ex_date, ex_date_close), ...]"""
+    """rows: [(stock_id, year, cash, stock, source, ex_date, ex_date_close, cash_yield_pct, share_yield_pct), ...]
+    V0.9.5-goodinfo：9-tuple（向後相容 5-tuple、7-tuple）
+      - 5-tuple: (sid, year, cash, stock, source)
+      - 7-tuple: (sid, year, cash, stock, source, ex_date, ex_date_close)
+      - 9-tuple: 上 + cash_yield_pct + share_yield_pct
+    """
     conn = sqlite3.connect(db_path)
+    normalized = []
+    for r in rows:
+        if len(r) == 5:
+            normalized.append((r[0], r[1], r[2], r[3], r[4], None, None, None, None))
+        elif len(r) == 7:
+            normalized.append((r[0], r[1], r[2], r[3], r[4], r[5], r[6], None, None))
+        else:
+            normalized.append(r)
     conn.executemany(
         """INSERT OR REPLACE INTO dividend_history
-           (stock_id, year, cash, stock, source, fetched_at, ex_date, ex_date_close)
-           VALUES (?, ?, ?, ?, ?, datetime('now','localtime'), ?, ?)""",
-        rows,
+           (stock_id, year, cash, stock, source, ex_date, ex_date_close,
+            cash_yield_pct, share_yield_pct)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        normalized,
     )
     conn.commit()
     conn.close()
@@ -313,6 +356,171 @@ def _upsert_eps_history(db_path: str, rows: list):
 
 
 # ─────────────────────────────────────────
+# 2.5 寫入殖利率（V0.9.5-goodinfo：6 個殖利率檔一次匯入）
+# ─────────────────────────────────────────
+def import_yield_rate(dry: bool = False):
+    """把 goodinfo 6 個殖利率檔（3 個現金 + 3 個股票）寫入 dividend_history.db
+
+    來源檔：
+      dividend/P50U_DividendRate.xls   - 高價股 2017~2026 現金殖利率
+      dividend/P20-50_DividendRate.xls - 中價股 2017~2026 現金殖利率
+      dividend/P20L_DividendRate.xls   - 低價股 2017~2026 現金殖利率
+      dividend/P50U_ShareRate.xls      - 高價股 2017~2026 股票殖利率
+      dividend/P20-50_ShareRate.xls    - 中價股 2017~2026 股票殖利率
+      dividend/P20L_ShareRate.xls      - 低價股 2017~2026 股票殖利率
+
+    重要 mapping 規則：
+      1. 殖利率已是百分比（3.17 = 3.17%），直接寫入 cash_yield_pct
+      2. 同一 stock_id + year 跨三個價位帶的話「取平均」（與股利加總不同）
+         理由：三個價位帶可能都有同檔、平均比加總更合理
+      3. 0 值代表「該年該類無配息」（ex: 現金股利為 0、現金殖利率=0）→ 寫 0
+         與 cash/stock=0 一致語意、讓 App 可以直接判斷
+      4. NaN (原本沒資料) → 跳過、不寫入（保留原值）
+      5. 只 UPDATE cash_yield_pct / share_yield_pct、不動 cash/stock/ex_date
+         （殖利率是「補充資訊」、不該覆蓋股利金額或除息日）
+    """
+    print("\n" + "="*70)
+    print("【2.5/4】寫入殖利率 → UPDATE dividend_history.db (V0.9.5-goodinfo)")
+    print("="*70)
+
+    # 載入 6 個檔
+    # 跟股利檔不同的是、殖利率檔前綴是 P50U/P20-50/P20L、不是 P50Up/P20~50
+    YIELD_FILES = [
+        ("dividend", "P50U",   "DividendRate", "_DividendRate"),  # 現金殖利率
+        ("dividend", "P20-50", "DividendRate", "_DividendRate"),
+        ("dividend", "P20L",   "DividendRate", "_DividendRate"),
+        ("dividend", "P50U",   "ShareRate",    "_ShareRate"),     # 股票殖利率
+        ("dividend", "P20-50", "ShareRate",    "_ShareRate"),
+        ("dividend", "P20L",   "ShareRate",    "_ShareRate"),
+    ]
+
+    cash_frames = []
+    share_frames = []
+    for folder, gkey, kind, suffix in YIELD_FILES:
+        fpath = EXPORT_DIR / folder / f"{gkey}{suffix}.xls"
+        if not fpath.exists():
+            print(f"  ⚠️  找不到 {fpath}，跳過")
+            continue
+        df = pd.read_html(fpath)[0]
+        df["_group"] = gkey
+        if kind == "DividendRate":
+            cash_frames.append(df)
+        else:
+            share_frames.append(df)
+
+    if not cash_frames or not share_frames:
+        print("  ❌ 殖利率檔不完整（現金/股票需都有）")
+        return
+
+    cash_all = pd.concat(cash_frames, ignore_index=True)
+    share_all = pd.concat(share_frames, ignore_index=True)
+    print(f"  現金殖利率檔合計: {len(cash_all)} 列 / {cash_all['代號'].nunique()} 檔")
+    print(f"  股票殖利率檔合計: {len(share_all)} 列 / {share_all['代號'].nunique()} 檔")
+
+    # 解析年度欄位
+    def year_num(col: str) -> int:
+        m = re.search(r'(\d{4})', col)
+        return int(m.group(1)) if m else None
+
+    cash_years = [c for c in cash_all.columns if "現金殖利率" in c]
+    share_years = [c for c in share_all.columns if "股票殖利率" in c]
+    print(f"  現金殖利率年份: {sorted(set(year_num(c) for c in cash_years if year_num(c)))}")
+    print(f"  股票殖利率年份: {sorted(set(year_num(c) for c in share_years if year_num(c)))}")
+
+    # 聚合（取平均，不加總）
+    # key: (stock_id, year) → {cash_yield_pct: [...], share_yield_pct: [...]}
+    cash_agg: dict = defaultdict(list)
+    share_agg: dict = defaultdict(list)
+
+    for df, agg, year_cols in [
+        (cash_all, cash_agg, cash_years),
+        (share_all, share_agg, share_years),
+    ]:
+        for _, row in df.iterrows():
+            sid = str(row["代號"]).strip()
+            for ycol in year_cols:
+                yr = year_num(ycol)
+                if yr is None:
+                    continue
+                val = row.get(ycol)
+                # 0 是「沒配息」的合法值（殖利率=0）→ 寫入
+                # NaN 是「缺資料」→ 跳過
+                if pd.isna(val):
+                    continue
+                agg[(sid, yr)].append(float(val))
+
+    print(f"  現金殖利率組合: {len(cash_agg)} 筆")
+    print(f"  股票殖利率組合: {len(share_agg)} 筆")
+
+    if dry:
+        print(f"\n  🟡 Dry run — 前 10 筆預覽（現金殖利率）:")
+        keys = sorted(cash_agg.keys())[:10]
+        for k in keys:
+            vals = cash_agg[k]
+            avg = sum(vals) / len(vals) if vals else 0
+            print(f"    {k[0]} {k[1]}: {vals} → avg={avg:.2f}%")
+        return
+
+    # UPDATE DB：只更新殖利率、不動 cash/stock/ex_date
+    _init_div_db(str(DB_DIV))
+    conn = sqlite3.connect(str(DB_DIV))
+    cur = conn.cursor()
+
+    # 合併 cash + share
+    all_keys = set(cash_agg.keys()) | set(share_agg.keys())
+    updated = 0
+    skipped_no_data = 0
+    for (sid, yr) in all_keys:
+        cash_vals = cash_agg.get((sid, yr), [])
+        share_vals = share_agg.get((sid, yr), [])
+        cash_avg = sum(cash_vals) / len(cash_vals) if cash_vals else None
+        share_avg = sum(share_vals) / len(share_vals) if share_vals else None
+
+        # 查 DB 現有記錄
+        cur.execute(
+            "SELECT 1 FROM dividend_history WHERE stock_id=? AND year=?",
+            (sid, yr),
+        )
+        exists = cur.fetchone() is not None
+        if not exists:
+            skipped_no_data += 1
+            continue
+
+        # UPDATE 殖利率（保留既有 cash/stock/ex_date）
+        cur.execute(
+            """UPDATE dividend_history
+               SET cash_yield_pct = COALESCE(?, cash_yield_pct),
+                   share_yield_pct = COALESCE(?, share_yield_pct),
+                   fetched_at = datetime('now','localtime')
+               WHERE stock_id = ? AND year = ?""",
+            (cash_avg, share_avg, sid, yr),
+        )
+        if cur.rowcount > 0:
+            updated += 1
+
+    conn.commit()
+
+    # 統計
+    cur.execute("SELECT COUNT(*) FROM dividend_history WHERE cash_yield_pct IS NOT NULL")
+    total_cash_yld = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM dividend_history WHERE share_yield_pct IS NOT NULL")
+    total_share_yld = cur.fetchone()[0]
+    cur.execute(
+        "SELECT COUNT(DISTINCT stock_id) FROM dividend_history WHERE cash_yield_pct IS NOT NULL"
+    )
+    stocks_with_cash_yld = cur.fetchone()[0]
+    conn.close()
+
+    print(f"\n  ✅ 更新完成：")
+    print(f"     UPDATE 殖利率: {updated} 筆")
+    print(f"     略過（DB 沒對應股利記錄）: {skipped_no_data} 筆")
+    print(f"  📊 DB 狀態：")
+    print(f"     有 cash_yield_pct: {total_cash_yld} 筆 / {stocks_with_cash_yld} 檔")
+    print(f"     有 share_yield_pct: {total_share_yld} 筆")
+    print(f"     DB 路徑: {DB_DIV}")
+
+
+# ─────────────────────────────────────────
 # 3. 匯出平均股價 → JSON（給殖利率計算用）
 # ─────────────────────────────────────────
 def import_avg_price(dry: bool = False):
@@ -382,7 +590,7 @@ def import_avg_price(dry: bool = False):
 def main():
     parser = argparse.ArgumentParser(description="goodinfo 歷史資料一次性匯入")
     parser.add_argument("--dry", action="store_true", help="預演模式（不寫 DB）")
-    parser.add_argument("--only", choices=["div", "eps", "price", "2026exdate", "nodiv"], help="只跑指定類型")
+    parser.add_argument("--only", choices=["div", "yield", "eps", "price", "2026exdate", "nodiv"], help="只跑指定類型")
     args = parser.parse_args()
 
     print(f"""
@@ -397,6 +605,9 @@ def main():
 
     if args.only in [None, "div"]:
         import_dividend(dry=args.dry)
+
+    if args.only in [None, "yield"]:
+        import_yield_rate(dry=args.dry)
 
     if args.only in [None, "eps"]:
         import_eps(dry=args.dry)
