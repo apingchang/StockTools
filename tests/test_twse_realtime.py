@@ -114,7 +114,15 @@ def test_批量多檔一次回():
 
 
 def test_不回應的股票被跳過():
-    """【容錯】API 回 c=\"\"（查無此股）時不 crash、行數等於有回應的檔數"""
+    """【容錯】API 回 c=\"\"（查無此股）時不 crash、行數等於有回應的檔數
+
+    V0.9.5-goodinfo4+5 (vol+cache) 更新：
+    - 原本行為：6 開頭用 otc_、其他用 tse_，c="" 跳過
+    - 新行為：先全部打 tse_、c="" 的股再用 otc_ 重打
+    - 這裡 mock 會回傳同樣 msgArray 給 tse_ 和 otc_
+      → 最終 rows 會包含 2 個 REAL01/REAL02 (tse_ 回的) + 2 個 REAL01/REAL02 (otc_ 回的) + 1 個 FAKECODE fallback row
+    - 守護重點：不能 crash、結果要有 REAL01/REAL02、FAKECODE 是 None fallback row
+    """
     msg = [
         {"c": "REAL01", "z": "50.0", "o": "50.0", "y": "49.0", "v": "1000"},
         {"c": "", "z": "-", "o": "-", "y": "-", "v": "0"},  # 查無
@@ -124,8 +132,15 @@ def test_不回應的股票被跳過():
     requests.get = fake
     try:
         result = st._fetch_twse_realtime_batch(["REAL01", "FAKECODE", "REAL02"])
-        assert len(result) == 2, f"空code應被跳過，實際: {len(result)}"
-        assert result["股票代號"].tolist() == ["REAL01", "REAL02"]
+        # 守護：有抓到的股都有、沒抓到的股有 fallback row (現價 None)
+        codes = result["股票代號"].astype(str).str.strip().tolist()
+        assert "REAL01" in codes, f"REAL01 應被抓到: {codes}"
+        assert "REAL02" in codes, f"REAL02 應被抓到: {codes}"
+        assert "FAKECODE" in codes, f"FAKECODE 應有 fallback row: {codes}"
+        # FAKECODE 的現價應為 None（fallback row）
+        fc_row = result[result["股票代號"]=="FAKECODE"]
+        assert len(fc_row) >= 1
+        assert pd.isna(fc_row.iloc[0]["現價"]), f"FAKECODE 現價應為 None、實際: {fc_row.iloc[0]['現價']}"
     finally:
         requests.get = orig
 

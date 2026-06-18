@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-goodinfo4+5 (2026-06-18 18:12)         ║
+║               台灣股市量化選股系統 v0.9.5-goodinfo4+5 (2026-06-18 18:34)         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-goodinfo
 【版本資訊】
 Version: v0.9.5-goodinfo4+5
-最後更新: 2026-06-18 18:17 (Asia/Taipei)
+最後更新: 2026-06-18 18:48 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -410,6 +410,52 @@ Python 版本: 3.8+
   - test_成交量_盤中不再顯示橫線（regression 守護：盤中也不再 "-"）
   - test_排序_以營收累計YoY_降序為主
   - test_排序_同_營收YoY_時_殖利率高排前
+  - test_排序_None_排最後
+- test_ms_no_stock_yield_vol_display.py 重寫（拿掉舊的盤中/收盤後 test）
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-goodinfo4+5 (vol+cache) 更新內容】2026-06-18 18:34 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【William 反映 3 點】
+1. 現價沒資料：抓不到的股應該 delay + retry、收盤後為什麼會沒資料？兩個股都重跑都一樣
+2. 抓完應該要 update cache
+3. 成交量依舊不是今日總成交量
+
+【修法 1：成交量單位修正】
+- 【根因】TWSE MIS API 的 v 欄位是「股」、不是「張」！原本 int(v/1000) 會把 4016 股變成 4 張
+  例：v=4016 股 → 原本 int(4.016)=4 張（只 4000 股、偏小 16 股）
+  修法：vol = v / 1000 保留小數（張）、顯示用 f"{vol:,.3f}"
+- 驗證：2548 v=4016 → 4.016 張（原來顯示 4 張，現顯示 4.016 張）
+  1815 v=21416 → 21.416 張（原來顯示 21 張，現顯示 21.416 張）
+
+【修法 2：otc_ fallback（修 6 開頭 = 上櫃 的誤判）】
+- 【根因】原本 _prefix_v2 判斷「6 開頭 = otc_」、但 6669 緯穎是上市
+  結果：6669 用 otc_ 抓不到、現價 = None
+  修法：先打 tse_、c="" 的股再用 otc_ 重打（fallback 邏輯）
+- 驗證：6669 現在能抓到 5130.0 現價（修正前是 None）
+  5386 青雲（otc_） 521.0、5274 信驊（otc_） 18960.0 都能抓到
+
+【修法 3：抓完後 update cache】
+- 【William 反映】「手動選股有開啟 TWSE 即時股價時、抓完全部的股價應該要去 update cache 中的股價資料」
+- 修法：merge 完後 save_cache(get_cache_file("price"), price_df)
+- 效果：下次開啟 App 不必重抓、從 cache 讀
+
+【pytest】test_twse_realtime_vol_otc.py（9 個守護 test）
+- test_vol_換算_股轉張_保留小數
+- test_vol_2548_正確值
+- test_vol_大於1000張_用千分位
+- test_vol_None_顯示橫線
+- test_vol_NaN_顯示橫線
+- test_vol_0_保留為0
+- test_otc_fallback_合併6開頭上櫃股
+- test_otc_fallback_6開頭上市股（如 6669）
+- test_抓完後_save_cache
+
+【驗證】
+- 修正前 2548 顯示 4 張、修正後顯示 4.016 張（/1000 保留小數）
+- 修正前 6669 緯穎「—」、修正後 5130.00
+- 修正前 5386 青雲「—」、修正後 521.00
+- 修正前 5274 信驊「—」、修正後 18960.00
   - test_排序_None_排最後
 - test_ms_no_stock_yield_vol_display.py 重寫（拿掉舊的盤中/收盤後 test）
 
@@ -1354,11 +1400,22 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
     - z = "-"（尚未成交）→ fallback 到 o（開盤拍賣價，視為現時合理報價）
     - 若 o 也是 "-" → fallback 到 y（昨日收盤價）
 
+    【V0.9.5-goodinfo4+5 (vol+cache) 重要修正】2026-06-18 18:34 William 反映
+    - 「現價沒資料、成交不是今日總量」
+    - 根因 1：v 欄位是「股」不是「張」、原本 int(v/1000) 會丟失 99% 資料
+      例：v=4016（股）= 4.016 張、原本顯示 "4"（=4 張）
+      修法：vol = v / 1000 保留小數、顯示用 f"{vol:.3f}" 張
+    - 根因 2：上市/上櫃前綴誤判（6 開頭並非都是上櫃）
+      例：6669 緯穎是上市、不是上櫃
+      修法：先打 tse_ 拿、抓不到的股再用 otc_ 重打
+    - 根因 3：抓完後沒回寫 cache、下次還要重抓
+      修法：在 caller merge 完後 save_cache()
+
     Parameters
     ----------
     stock_ids : list[str]
         股票代號清單（如 ["2330", "0050", "3188"]）
-        系統會自動判斷上市（tse_）或上櫃（otc_）
+        系統會自動判斷上市（tse_）或上櫃（otc_）、抓不到的股會 fallback
     progress_callback : callable, optional
         (n_done, n_total) → 每批完成後呼叫，用於 UI 動態進度顯示
 
@@ -1366,7 +1423,8 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
     -------
     pd.DataFrame，欄位：[股票代號, 現價, 成交量_張]
     - 現價：float 或 None（完全抓不到時）
-    - 成交量_張：float（原始成交量 / 1000）
+    - 成交量_張：float（v / 1000，**股轉張**、保留小數）
+      例：v=4016 股 → 4.016 張（不是 4 張）
     """
     rows = []
     codes = [str(c).strip() for c in stock_ids if str(c).strip()]
@@ -1380,48 +1438,58 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
             batch_idx * _TWSE_REALTIME_BATCH_SIZE:
             (batch_idx + 1) * _TWSE_REALTIME_BATCH_SIZE
         ]
-        # 組合 ex_ch 參數：上市 tse_，上櫃 otc_
-        def _prefix(code: str) -> str:
-            code = code.strip()
-            # 6 開頭通常為上櫃（排除特殊code），其餘上市
-            if code.startswith(("00", "0")) or code[0] in ("1", "2", "3", "4", "5", "7", "8", "9"):
-                # 簡單判断：code[0] in '12345789' → 上市
-                # 但 6 開頭需上櫃
-                return f"tse_{code}.tw"
-            else:
-                return f"otc_{code}.tw"
+        # 【V0.9.5-goodinfo4+5 (vol+cache) 修正】2026-06-18 18:34 William 反映
+        # 原本 6 開頭 = otc_ 是粗略判斷、有些 6 開頭是上市（例：6669 緯穎）
+        # 修法：先全部打 tse_、回傳中沒有 c 欄位的股再用 otc_ 重打
+        def _query_twse(prefix: str) -> list:
+            """打一次 TWSE MIS API、回傳 msgArray（prefix 是 tse 或 otc）"""
+            ex_ch = "|".join(f"{prefix}_{c}.tw" for c in batch_codes)
+            url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex_ch}"
+            try:
+                resp = requests.get(
+                    url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Referer": "https://mis.twse.com.tw/",
+                    },
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                return resp.json().get("msgArray", [])
+            except Exception as e:
+                print(f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}、{prefix}）：{e}")
+                return []
 
-        # 更準確的判斷：若已知上市清單則用清單，否則預設上市
-        # 這裡用上櫃常見前綴：6開頭 + 特定code
-        def _prefix_v2(code: str) -> str:
-            code = code.strip()
-            # 上櫃：通常 6 開頭，少數例外（這裡用寬鬆判斷）
-            if code.startswith("6"):
-                return f"otc_{code}.tw"
-            return f"tse_{code}.tw"
+        # Step 1: 先打 tse_
+        msg_tse = _query_twse("tse")
+        # 找出 tse_ 沒回應的股
+        tse_codes = {str(rec.get("c", "")).strip() for rec in msg_tse if rec.get("c")}
+        missing_codes = [c for c in batch_codes if c not in tse_codes]
 
-        ex_ch = "|".join(_prefix_v2(c) for c in batch_codes)
-        url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex_ch}"
+        # Step 2: missing 的股用 otc_ 重打
+        msg_otc = []
+        if missing_codes:
+            time.sleep(0.2)  # 避免連打兩個請求被擋
+            ex_ch = "|".join(f"otc_{c}.tw" for c in missing_codes)
+            url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex_ch}"
+            try:
+                resp = requests.get(
+                    url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Referer": "https://mis.twse.com.tw/",
+                    },
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                msg_otc = resp.json().get("msgArray", [])
+            except Exception as e:
+                print(f"⚠️ TWSE API otc fallback 失敗：{e}")
+                msg_otc = []
 
-        try:
-            resp = requests.get(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Referer": "https://mis.twse.com.tw/",
-                },
-                timeout=15,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            print(f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}）：{e}")
-            # 該批全設 None
-            for code in batch_codes:
-                rows.append({"股票代號": code, "現價": None, "成交量_張": 0.0})
-            continue
+        all_msg = msg_tse + msg_otc
 
-        for rec in data.get("msgArray", []):
+        for rec in all_msg:
             raw_code = rec.get("c", "").strip()
             if not raw_code:
                 continue
@@ -1439,14 +1507,21 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
             else:
                 price = None
 
-            # 成交量（TWSE 回傳的是當日累積成交量，直接可用）
+            # 【V0.9.5-goodinfo4+5 (vol+cache) 修正】v 欄位是「股」、不是「張」！
+            # 原本 int(v/1000) 會把 4016 股變成 4 張（丟失 16 股 = 0.016 張）
+            # 修法：vol = v / 1000 保留小數（張）、顯示用 f"{vol:,.3f}" 張
             v_raw = rec.get("v", "0")
             try:
-                vol = float(v_raw) / 1000.0  # 張
+                vol = float(v_raw) / 1000.0  # 張（股 / 1000）
             except (ValueError, TypeError):
                 vol = 0.0
 
             rows.append({"股票代號": raw_code, "現價": price, "成交量_張": vol})
+
+        # tse_ + otc_ 都沒回的股 → 另設 None（後面 caller 會 fallback 到 cache / FinMind）
+        for code in batch_codes:
+            if not any(str(r.get("c", "")).strip() == code for r in all_msg):
+                rows.append({"股票代號": code, "現價": None, "成交量_張": 0.0})
 
         # 進度回呼
         n_done = min((batch_idx + 1) * _TWSE_REALTIME_BATCH_SIZE, total)
@@ -5362,6 +5437,22 @@ class StrategyGUI(tk.Tk):
                                     price_df["成交量_張"] = price_df["成交量_張_fresh"].fillna(price_df["成交量_張"])
                                     price_df = price_df.drop(columns=["成交量_張_fresh"])
                                 print(f"✅ 即時股價完成：覆蓋 {len(fresh)} 檔")
+
+                                # 【V0.9.5-goodinfo4+5 (vol+cache) 新增】2026-06-18 18:34 William 反映：
+                                #   「手動選股有開啟TWSE即時股價時、抓完全部的股價應該要去 update cache」
+                                #   → 抓完後 save_cache 回寫、下次啟動直接讀 cache 不必重抓
+                                try:
+                                    save_cache(get_cache_file("price"), price_df)
+                                    self.logger.log(
+                                        f"💾 即時股價已回寫 cache ({len(price_df)} 檔)"
+                                    )
+                                    self.after(0, lambda: self._ms_status.set(
+                                        f"💾 即時股價已回寫 cache ({len(price_df)} 檔)"
+                                    ))
+                                except Exception as _save_e:
+                                    self.logger.log(
+                                        f"⚠️ 回寫 cache 失敗：{_save_e}（不影響本次使用）"
+                                    )
                         except Exception as _e:
                             print(f"⚠️ 即時抓股價失敗：{_e}（用原 cache 繼續）")
 
@@ -5503,9 +5594,13 @@ class StrategyGUI(tk.Tk):
             #   「成交量不是我要的今日成交量！」
             #   → 拿掉盤中/收盤後切換邏輯、直接顯示 price_df 的「成交量(張)」（今日成交量）
             #   → 盤中雖然是累積量、但 William 就是要看今日即時量
+            # 【V0.9.5-goodinfo4+5 (vol+cache) 修正】2026-06-18 18:34 William 反映：
+            #   「成交量依舊不是今日總成交量」→ 根因是 v 欄位是「股」、原本 int() 丟失小數
+            #   例：4016 股 → 原本 int(4.016) = 4 張、數字偏小 1000 倍
+            #   修法：vol 已經是「張」（v/1000）、用 f"{vol:,.3f}" 顯示 4.016 張
             vol = row.get("成交量(張)")
             try:
-                vol_str = f"{int(vol):,}" if pd.notna(vol) else "—"
+                vol_str = f"{vol:,.3f}" if pd.notna(vol) else "—"
             except (TypeError, ValueError):
                 vol_str = "—"
             last_stock_str = _fmt_float(row.get("去年股票股利(元)"), decimals=3)
