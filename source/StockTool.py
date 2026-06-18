@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-twser (2026-06-18 07:16)         ║
+║               台灣股市量化選股系統 v0.9.5-twser2 (2026-06-18 10:31)         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-twser
 【版本資訊】
-Version: v0.9.5-twser
-最後更新: 2026-06-18 10:13 (Asia/Taipei)
+Version: v0.9.5-twser2
+最後更新: 2026-06-18 10:56 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -267,6 +267,33 @@ Python 版本: 3.8+
 - test_current_tax.py（12 個）
 
 ════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-twser2 更新內容】2026-06-18 10:31 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【William 反映】
+1. 殖利率欄位全部顯示「-」（一個都沒有）
+2. 現金股利數字錯了（懷疑股票+現金被加總）
+
+【Bug 1：殖利率全部 "-" — 根因 + 修法】
+- 根因：`_fetch_finmind_dividend` 用 `_query_div_history` 查 DB
+  → `_query_div_history` 只回 `cash/stock/ex_date`，不包含 `cash_yield_pct/share_yield_pct`
+  → 所以輸出的 `{cy}現金殖利率_goodinfo` 等欄位全部是 None → Treeview 顯示「-」
+- 修法：改用 `_query_div_history_with_fetched`（有完整 9 欄含殖利率）
+  - 同時注意 nested 結構差異：`.get("years", {})` → `.get(year)`
+
+【Bug 2：_upsert_div_history 只寫 7 欄 — 會洗掉 goodinfo 殖利率】
+- 根因：`INSERT OR REPLACE` 只給 7 欄（stock_id~ex_date_close）
+  → `cash_yield_pct/share_yield_pct` 兩個欄位變成 NULL（被洗掉）
+  → 這是「次要風險」（主要 App 用 `skip_remote=True` 不會跑 upsert）
+- 修法：`_upsert_div_history` 擴充支援 9-tuple
+  - 5-tuple（舊）：補足到 9 欄
+  - 7-tuple（現有 caller）：補 2 個 None
+  - 9-tuple（新）：直接寫入、不洗掉既有值
+
+【pytest】test_dividend_yield_fix.py（5 個守護 test）
+
+════════════════════════════════════════════════════════════════════════════════
+
+════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-twser 更新內容】2026-06-18 10:05 (William 指示)
 ════════════════════════════════════════════════════════════════════════════════
 【背景】William 確認 TWSE 即時資訊延遲只有 15-20 秒（不是 15 分鐘），且有免費 JSON API 可用。
@@ -483,7 +510,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-twser"
+VERSION = "v0.9.5-twser2"
 
 
 import io
@@ -889,24 +916,78 @@ def _init_div_history_db(db_path: str):
         conn.commit()
 
 def _upsert_div_history(db_path: str, rows: list):
-    """rows: [(stock_id, year, cash, stock, source, ex_date, ex_date_close), ...]
-    向後相容：如果 row 只有 5 個欄位、ex_date/ex_date_close 設 NULL。
+    """
+    寫入股利資料到 dividend_history.db。
+
+    V0.9.5-twser2 Fix（重要）：
+    - 現有 schema 有 10 個實體欄位（不含 PRIMARY KEY）：
+      stock_id, year, cash, stock, source, fetched_at, ex_date, ex_date_close,
+      cash_yield_pct, share_yield_pct
+    - `INSERT OR REPLACE` 會刪除舊列、插入新列。未指定的欄位 → DEFAULT（fetched_at）或 NULL（其他）。
+    - 因此所有 tuple 都必須膨脹到 10 個實體欄位 + 2 個 PRIMARY KEY = 11 值，
+      否則會對位錯誤，把 cash_yield_pct/share_yield_pct 寫成 NULL。
+
+    向後相容：
+    - 5-tuple：(stock_id, year, cash, stock, source) → 墊到 11 值
+    - 7-tuple：(stock_id, year, cash, stock, source, ex_date, ex_date_close) → 墊到 11 值
+    - 9-tuple：(stock_id, year, cash, stock, source, ex_date, ex_date_close, cash_yield_pct, share_yield_pct) → 墊到 11 值
+    - 11-tuple：(stock_id, year, cash, stock, source, fetched_at, ex_date, ex_date_close, cash_yield_pct, share_yield_pct) → 直接寫
     """
     import sqlite3
     if not rows:
         return 0
-    # 補足欄位數（向後相容舊 code 5-tuple）
+
+    # INSERT column list: 10 cols
+    #   stock_id, year, cash, stock, source, fetched_at, ex_date, ex_date_close, cash_yield_pct, share_yield_pct
+    # VALUES: 9 ? placeholders
+    #   ?1=stock_id, ?2=year, ?3=cash, ?4=stock, ?5=source, datetime('now','localtime') [hardcoded, NOT a placeholder],
+    #   ?6=ex_date, ?7=ex_date_close, ?8=cash_yield_pct, ?9=share_yield_pct
+    # 結論：所有 normalized row 必須剛好 9 值（對應 9 個 ?）
+    import sqlite3 as _sq
     normalized = []
     for r in rows:
-        if len(r) == 5:
-            normalized.append((r[0], r[1], r[2], r[3], r[4], None, None))
+        n = len(r)
+        if n == 5:
+            # (stock_id, year, cash, stock, source) → 9 值：[r0-4, r5=none(fetched), r6=none(ex_date), r7=none(ex_close), r8=none(cash), r9=none(share)]
+            normalized.append((r[0], r[1], r[2], r[3], r[4], None, None, None, None))
+        elif n == 6:
+            # (stock_id, year, cash, stock, source, ex_date) → 9 值：[r0-4, fetched_at硬編, r5=ex_date, r6=none, r7=none(cash), r8=none(share)]
+            normalized.append((r[0], r[1], r[2], r[3], r[4], r[5], None, None, None))
+        elif n == 7:
+            # 【V0.9.5-twser2 Fix】
+            # FinMind 舊 caller：(stock_id, year, cash, stock, source, ex_date, ex_date_close)
+            # INSERT OR REPLACE 會清除未指定的 cash_yield/share_yield → 先查詢舊值再合併
+            with _sq.connect(db_path) as conn:
+                old = conn.execute(
+                    "SELECT cash_yield_pct, share_yield_pct FROM dividend_history "
+                    "WHERE stock_id=? AND year=?", (r[0], r[1])
+                ).fetchone()
+            old_cash_yld = old[0] if old else None
+            old_share_yld = old[1] if old else None
+            # 9 值：[r0-4, fetched_at硬編, r5=ex_date, r6=ex_date_close, old_cash, old_share]
+            normalized.append((r[0], r[1], r[2], r[3], r[4], r[5], r[6], old_cash_yld, old_share_yld))
+        elif n == 8:
+            # (stock_id, year, cash, stock, source, ex_date, ex_date_close, cash_yield_pct) → 9 值
+            normalized.append((r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], None))
+        elif n == 9:
+            # (stock_id, year, cash, stock, source, ex_date, ex_date_close, cash_yield_pct, share_yield_pct) → 9 值
+            normalized.append((r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]))
+        elif n == 10:
+            # (stock_id, year, cash, stock, source, fetched_at, ex_date, ex_date_close, cash_yield_pct, share_yield_pct) → 9 值
+            # r[5] is fetched_at but it's hardcoded, we still pass r[5] (it goes into VALUES ?6=ex_date)
+            # 10-tuple: (stock_id, year, cash, stock, source, fetched_at, ex_date, ex_date_close, cash_yield_pct, share_yield_pct)
+            # VALUES: ?1-?5=r0-4, datetime=hardcode, ?6=ex_date=r[6], ?7=ex_date_close=r[7], ?8=cash_yield=r[8], ?9=share_yield=r[9]
+            # → 9 values: r0,r1,r2,r3,r4,r5,r6,r7,r8
+            normalized.append((r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]))
         else:
-            normalized.append(r)
-    with sqlite3.connect(db_path) as conn:
+            # 取前 9 個值
+            normalized.append(tuple(r[:9]))
+    with _sq.connect(db_path) as conn:
         conn.executemany(
             """INSERT OR REPLACE INTO dividend_history
-               (stock_id, year, cash, stock, source, ex_date, ex_date_close)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (stock_id, year, cash, stock, source, fetched_at, ex_date, ex_date_close,
+                cash_yield_pct, share_yield_pct)
+               VALUES (?, ?, ?, ?, ?, datetime('now','localtime'), ?, ?, ?, ?)""",
             normalized,
         )
         conn.commit()
@@ -1452,11 +1533,16 @@ def _fetch_finmind_dividend(stock_ids: List[str],
     end_date = f"{current_year}-12-31"
 
     # 1. 先查 DB（含 fetched_at 用來判斷過期）
+    # 【V0.9.5-twser2 Fix】統一是用 _query_div_history_with_fetched（含 cash_yield_pct/share_yield_pct）
+    #   cached[code] = {"_fetched_at": ..., "years": {year: {...}}}
+    #   舊版 _query_div_history 無殖利率欄位 → 殖利率全部 None → "-"
     _init_div_history_db(db_path)
     cached_with_fetched = _query_div_history_with_fetched(
         db_path, [str(c).strip() for c in stock_ids]
     )
-    cached = _query_div_history(db_path, [str(c).strip() for c in stock_ids])
+    cached = _query_div_history_with_fetched(
+        db_path, [str(c).strip() for c in stock_ids]
+    )
 
     # 2. 區分「DB 有的」跟「要即時抓的」
     #    - DB 沒有的 → 抓
@@ -1538,15 +1624,19 @@ def _fetch_finmind_dividend(stock_ids: List[str],
         print(f"❌ FinMind 額度錯誤：{e}（已抓 {len(fetch_rows)} 筆、部分寫入 DB）")
     if fetch_rows:
         _upsert_div_history(db_path, fetch_rows)
-        # 重新讀一次 DB 拿新資料
-        cached = _query_div_history(db_path, [str(c).strip() for c in stock_ids])
+        # 重新讀一次 DB 拿新資料（確保拿最新寫入的）
+        cached = _query_div_history_with_fetched(db_path, [str(c).strip() for c in stock_ids])
 
     # 3. 組裝結果
     for code in [str(c).strip() for c in stock_ids]:
-        by_year = cached.get(code, {})
-        this_yr = by_year.get(current_year, {})
-        last_yr = by_year.get(current_year - 1, {})
-        prev_yr = by_year.get(current_year - 2, {})
+        # 【V0.9.5-twser2 Fix】用 _query_div_history_with_fetched 的 nested 結構：
+        #   cached[code] = {"_fetched_at": ..., "years": {year: {...}}}
+        #   所以要 .get("years", {}) 而不是直接 .get(year)
+        code_data = cached.get(code, {})
+        years_data = code_data.get("years", {}) if isinstance(code_data, dict) else {}
+        this_yr = years_data.get(current_year, {})
+        last_yr = years_data.get(current_year - 1, {})
+        prev_yr = years_data.get(current_year - 2, {})
         rows.append({
             "股票代號": code,
             f"{current_year}現金股利": this_yr.get("cash", 0.0),
