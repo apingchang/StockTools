@@ -47,32 +47,38 @@ import StockTool as st  # noqa: E402
 # 【Bug 1：成交量單位】v 是股、不是張
 # ==========================================================
 
-def test_vol_換算_股轉張_保留小數():
-    """【V0.9.5-goodinfo4+5 (vol+cache) 守護】v 欄位是「股」、換算成「張」要保留小數
+def test_vol_換算_張直接顯示():
+    """【V0.9.5-goodinfo4+5 (vol-no-divide) 守護】v 欄位已經是「張」、不要再除
 
-    v=4016 股 → 4.016 張（不是 4 張）
+    William 2026-06-18 21:54 反映：「成交量不要除以1000應該就對了」
+    之前測試 v=4,020,000 假設是股、但實際 2548 v=4016 對應 4,016 張（接近 4020 張收盤量）
+    → TWSE MIS API 的 v 欄位已經是「張」單位
+    → 不需要 // 1000
     """
-    # 模擬 _fetch_twse_realtime_batch 內的 vol 換算
-    v_raw = "4016"
-    vol = float(v_raw) / 1000.0  # 張
-    assert vol == 4.016, f"v=4016 股 應為 4.016 張、實際: {vol}"
-    print("PASS: test_vol_換算_股轉張_保留小數")
+    v_raw = "4016"  # TWSE API 對 2548 收盤時的 v 值
+    vol = int(float(v_raw))  # 直接是張
+    assert vol == 4016, f"v=4016 應為 4,016 張（不除 1000）、實際: {vol}"
+    print("PASS: test_vol_換算_張直接顯示")
 
 
 def test_vol_2548_正確值():
-    """【V0.9.5-goodinfo4+5 (vol+cache) 守護】2548 v=4016 → 顯示 4.016 張"""
-    # 模擬 _ms_display_results 的 vol_str
-    vol = 4.016
-    vol_str = f"{vol:,.3f}" if pd.notna(vol) else "—"
-    assert vol_str == "4.016", f"2548 成交量應顯示 '4.016'、實際: {vol_str}"
+    """【V0.9.5-goodinfo4+5 (vol-no-divide) 守護】2548 v=4016 → 顯示 4,016 張
+
+    William 2026-06-18 21:54 反映：「2548 今天是 4020 張」
+    TWSE API 抓到的 v=4016（接近收盤量 4020）→ 直接顯示 4,016 張
+    """
+    v_raw = "4016"
+    vol = int(float(v_raw))  # 不再除以 1000
+    vol_str = f"{int(vol):,}" if pd.notna(vol) and vol > 0 else "—"
+    assert vol_str == "4,016", f"2548 成交量應顯示 '4,016'、實際: {vol_str}"
     print("PASS: test_vol_2548_正確值")
 
 
 def test_vol_大於1000張_用千分位():
-    """【V0.9.5-goodinfo4+5 (vol+cache) 守護】大於 1000 張用千分位"""
-    vol = 12345.678
-    vol_str = f"{vol:,.3f}" if pd.notna(vol) else "—"
-    assert vol_str == "12,345.678", f"大於 1000 張應用千分位: {vol_str}"
+    """【V0.9.5-goodinfo4+5 (vol-int) 守護】大於 1000 張用千分位（整數）"""
+    vol = 12345
+    vol_str = f"{int(vol):,}" if pd.notna(vol) and vol > 0 else "—"
+    assert vol_str == "12,345", f"大於 1000 張應用千分位整數: {vol_str}"
     print("PASS: test_vol_大於1000張_用千分位")
 
 
@@ -92,12 +98,12 @@ def test_vol_NaN_顯示橫線():
     print("PASS: test_vol_NaN_顯示橫線")
 
 
-def test_vol_0_保留為0():
-    """【V0.9.5-goodinfo4+5 (vol+cache) 守護】vol=0 → 顯示 0.000"""
-    vol = 0.0
-    vol_str = f"{vol:,.3f}" if pd.notna(vol) else "—"
-    assert vol_str == "0.000", f"vol=0 應顯示 '0.000'、實際: {vol_str}"
-    print("PASS: test_vol_0_保留為0")
+def test_vol_0_顯示橫線():
+    """【V0.9.5-goodinfo4+5 (vol-int) 守護】vol=0 表示「沒抓到」應顯示 '—'"""
+    vol = 0
+    vol_str = f"{int(vol):,}" if pd.notna(vol) and vol > 0 else "—"
+    assert vol_str == "—", f"vol=0 應顯示 '—'、實際: {vol_str}"
+    print("PASS: test_vol_0_顯示橫線")
 
 
 # ==========================================================
@@ -188,8 +194,9 @@ def test_otc_fallback_6開頭上市股():
     # 6669 應該被抓到（一次 tse_ 就 OK）
     assert '6669' in df["股票代號"].values
     assert df[df["股票代號"]=="6669"].iloc[0]["現價"] == 5130.0
-    # 確認 vol 換算（v=1537 股 → 1.537 張）
-    assert abs(df[df["股票代號"]=="6669"].iloc[0]["成交量_張"] - 1.537) < 0.001
+    # 確認 vol 換算（v=1537 → 1,537 張，不再除以 1000）
+    assert df[df["股票代號"]=="6669"].iloc[0]["成交量_張"] == 1537, \
+        f"v=1537 應為 1,537 張（不除 1000）、實際: {df[df['股票代號']=='6669'].iloc[0]['成交量_張']}"
     print("PASS: test_otc_fallback_6開頭上市股")
 
 

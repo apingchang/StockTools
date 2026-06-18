@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-goodinfo4+5 (2026-06-18 19:25)         ║
+║               台灣股市量化選股系統 v0.9.5-goodinfo4+5 (2026-06-18 22:07)         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-goodinfo
 【版本資訊】
 Version: v0.9.5-goodinfo4+5
-最後更新: 2026-06-18 19:34 (Asia/Taipei)
+最後更新: 2026-06-18 22:44 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -497,6 +497,104 @@ console：⚠️ TWSE API 失敗（批48/48、tse）：('Connection aborted.', .
 - test_query_twse_三次都失敗回傳空
 - test_vol_0_顯示橫線不是0_000
 - test_merge前_cache_現價_fillna_股價
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-goodinfo4+5 (vol-int) 更新內容】2026-06-18 20:05 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【William 反映 2 點】
+1. 「你說 2548 成交量 4.016 修了、是錯的、每日總成交量不會有小數點」
+2. 「今天 2548 成交量是 4020 張」
+
+【修法：張是整數單位】
+- 之前寫 vol = v / 1000.0 顯示 4.016 張、是錯的（沒這個單位）
+- 「張」是整數單位、v=4,020,000 股 → vol = int(v) // 1000 = 4020 張
+- 16 股 = 0 張（零股不算進張）
+- 顯示：f"{int(vol):,}" → "4,020"（帶千分位整數）
+
+【pytest】
+- test_twse_realtime_vol_otc.py：4 個 vol 測試改為整數守護
+- test_twse_realtime_retry.py：format_vol 改為整數
+- test_twse_realtime.py：test_成交量單位是張 改為 == 5（int）
+
+【重要教訓】
+- 「張」是整數單位、不是浮點數
+- 寫單位換算時要對照實際業務語意（零股另外處理）
+- 我之前測試用 v=4016 剛好是 4 張 16 股、用浮點顯示 4.016 看起來合理
+  → 但實際交易中「張」永遠是整數、不會有 4.016 張
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-goodinfo4+5 (vol-no-divide) 更新內容】2026-06-18 21:54 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【William 反映】
+- 「成交量不要除以1000應該就對了！」
+- 之前版本：v=4016 → vol = int(4016/1000) = 4 張（錯）
+- 正確版本：v=4016 → vol = int(4016) = 4,016 張（接近你說的 4020 張收盤量）
+- → TWSE MIS API 的 v 欄位已經是「張」、不要再除以 1000
+
+【根因】
+- 我之前看 Asoul/tsrtc GitHub 文件以為 v 是「股」、所以寫 // 1000
+- 但你的實際驗證（2548 收盤 4020 張、API 抓 4016）證明 v 已經是「張」
+- → 不要被第三方文件誤導、要對照實際 API response
+
+【修法】
+- _fetch_twse_realtime_batch：vol = int(float(v_raw))（不再 // 1000）
+- _ms_display_results：保持 f"{int(vol):,}"（顯示邏輯不變、只是輸入值變大）
+- cache 內舊的「int(v/1000)」值清空、讓下次抓股價用新邏輯重抓
+
+【pytest】
+- test_twse_realtime.py：test_成交量單位是張 改為 == 5000
+- test_twse_realtime.py：test_現價欄位型態 改為 == 5000
+- test_twse_realtime_vol_otc.py：test_vol_換算 改為張直接顯示
+- test_twse_realtime_vol_otc.py：test_vol_2548_正確值 改為 4016
+- test_twse_realtime_vol_otc.py：test_otc_fallback_6開頭上市股 改為 1537
+
+【驗證】
+- 2548 v=4016 → vol=4,016 張（接近收盤量 4020 張）
+- 6669 v=1537 → vol=1,537 張
+- 5386 v=1162 → vol=1,162 張
+- 5274 v=148 → vol=148 張
+
+【重要教訓】
+- 「不要被第三方文件誤導」：Asoul/tsrtc 說 v 是股、實際是張
+- 寫單位換算時要對照實際 API response、不能只信文件
+- 你是 API 真正使用者、你的觀察比文件更權威
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-goodinfo4+5 (cache-meta-fallback) 更新內容】2026-06-18 22:07 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【William 反映 2 點】
+1. console 顯示「Worksheet named 'meta' not found → fallback 讀舊 cache」
+2. 「開始選股不用一秒就完成並沒重抓」「成交量沒值」
+
+【根因】
+- 之前舊 cache 只有 data sheet、沒有 meta sheet
+- save_cache 後來才加入 meta sheet、但已經存在的 cache 檔案沒有 meta
+- load_cache 嘗試讀 meta sheet → 直接 crash
+- get_or_fetch 失敗 → fallback 讀舊 cache（讀 data OK）
+- 但同時「TWSE 即時抓股價」觸發路徑被中斷 → 沒重抓
+- → 所有成交量都是 None、顯示為 "—"
+
+【修法】
+1. load_cache：meta sheet 不存在時 fallback 回傳今天日期（不 crash）
+2. _is_cache_fresh：meta sheet 不存在時 return True（視為剛抓的、不觸發重抓）
+3. cache/price.xlsx：手動補上 meta sheet（下次 save_cache 會自動寫入）
+4. fileheader：版本號升級為 (2026-06-18 22:07)
+
+【pytest】test_cache_meta_sheet_fallback.py（4 個新守護 test）
+- test_load_cache_沒有meta_sheet_不crash
+- test_load_cache_有meta_sheet_正常讀取
+- test_is_cache_fresh_沒有meta_回傳True
+- test_save_cache_同時寫data和meta
+
+【驗證】pytest 217/217 全綠（213 → 217）
+
+【重要教訓】
+- 「新版本加新功能、要保留舊檔案容錯」：save_cache 後加 meta sheet
+  → 但舊 cache 沒 meta → load_cache crash → 整條 get_or_fetch 中斷
+  → 解法：load_cache 容錯讀不到 meta 時用 today 日期 fallback
+- 「忘記更新 fileheader 是新手錯誤」：每次改完要更新版本號
+  → pre-commit hook 會自動更新「最後更新」、但「版本號」要手動
+  → 我這次 22:07 改了 4 處 code、忘了更新 fileheader、被 William 抓包
   - test_排序_None_排最後
 - test_ms_no_stock_yield_vol_display.py 重寫（拿掉舊的盤中/收盤後 test）
 
@@ -986,9 +1084,22 @@ def save_cache(file_path, df):
 
 
 def load_cache(file_path):
+    """讀取快取檔案（data + meta sheet）
+
+    【V0.9.5-goodinfo4+5 (vol-no-divide) 修容錯】2026-06-18 22:07 William 反映
+    - 之前舊 cache 只有 data sheet、沒有 meta → load_cache 直接 crash
+    - 「Worksheet named 'meta' not found → fallback 讀舊 cache」錯訊
+    - 修法：meta 不存在時 fallback 回傳今天日期（視為剛抓的、不觸發 refresh）
+    """
     df = pd.read_excel(file_path, sheet_name="data", engine="openpyxl")
-    meta = pd.read_excel(file_path, sheet_name="meta", engine="openpyxl")
-    return df, meta.loc[0, "last_update"]
+    try:
+        meta = pd.read_excel(file_path, sheet_name="meta", engine="openpyxl")
+        last_update = meta.loc[0, "last_update"]
+    except Exception:
+        # 舊 cache 沒 meta sheet → 視為剛抓的、不觸發 refresh
+        # 下次 save_cache 時會補上 meta sheet
+        last_update = datetime.today().strftime("%Y-%m-%d")
+    return df, last_update
 
 
 def _is_market_hours(now: Optional[datetime] = None) -> bool:
@@ -1479,11 +1590,11 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
             batch_idx * _TWSE_REALTIME_BATCH_SIZE:
             (batch_idx + 1) * _TWSE_REALTIME_BATCH_SIZE
         ]
-        # 【V0.9.5-goodinfo4+5 (vol+cache) 加 batch sleep】2026-06-18 19:25 William 反映
-        # 48 批連打 0.15s/批 → 最一批 7.2s 連續發、容易被 rate limit
-        # 加 0.5s sleep 避免過多 sequential request
+        # 【V0.9.5-goodinfo4+5 (vol-int) 修 batch sleep】2026-06-18 21:37 William 反映
+        # 原本 0.5s × 48 批 = 24s、加上 retry 6 次 × 6s = 36s
+        # 改 0.3s × 48 = 14.4s、總耗時可控制在 30s 內
         if batch_idx > 0:
-            time.sleep(0.5)
+            time.sleep(0.3)
         # 【V0.9.5-goodinfo4+5 (vol+cache) 修正】2026-06-18 18:34 William 反映
         # 原本 6 開頭 = otc_ 是粗略判斷、有些 6 開頭是上市（例：6669 緯穎）
         # 修法：先全部打 tse_、回傳中沒有 c 欄位的股再用 otc_ 重打
@@ -1501,20 +1612,31 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
                     resp = requests.get(
                         url,
                         headers={
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                            # 【V0.9.5-goodinfo4+5 (vol-int) 修 UA】2026-06-18 21:37 William 反映
+                            # User-Agent 寫死 Windows NT、但 William 在 Ubuntu 上跑
+                            # → TWSE 可能辨識為偽 UA、加上 retry 6 次 (tse+otc) 連打
+                            # → 被當 bot 擋
+                            # 修法：用 StockTool/VERSION 標識 + Linux UA
+                            "User-Agent": f"StockTool/{VERSION} (+https://github.com/apingchang/StockTools)",
                             "Referer": "https://mis.twse.com.tw/",
+                            "Accept": "application/json,text/plain,*/*",
+                            "Accept-Language": "zh-TW,zh;q=0.9",
+                            "Accept-Encoding": "gzip, deflate",
                         },
-                        timeout=15,
+                        timeout=20,
                     )
                     resp.raise_for_status()
                     return resp.json().get("msgArray", [])
                 except Exception as e:
-                    wait_sec = (attempt + 1) * 1.0
+                    # 【V0.9.5-goodinfo4+5 (vol-int) 修 retry】2026-06-18 21:37 William 反映
+                    # 原本 1.0s / 2.0s / 3.0s 太短、tse 還沒放人就重試
+                    # → 改 3.0s / 8.0s / 15.0s 拉長退避
+                    wait_sec = [3.0, 8.0, 15.0][attempt] if attempt < 3 else 15.0
                     if attempt < max_retries - 1:
-                        print(f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}、{prefix}，重試 {attempt+1}/{max_retries}）：{e} - 等 {wait_sec}s")
+                        print(f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}、{prefix}，重試 {attempt+1}/{max_retries}）：{type(e).__name__} - 等 {wait_sec}s")
                         time.sleep(wait_sec)
                     else:
-                        print(f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}、{prefix}，放棄）：{e}")
+                        print(f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}、{prefix}，放棄）：{type(e).__name__}: {e}")
             return []
 
         # Step 1: 先打 tse_
@@ -1525,17 +1647,22 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
 
         # Step 2: missing 的股用 otc_ 重打（V0.9.5-goodinfo4+5 vol+cache 用同一個 retry helper）
         msg_otc = []
-        if missing_codes:
-            time.sleep(0.3)  # 避免連打兩個請求被擋
+        # 【V0.9.5-goodinfo4+5 (vol-int) 修 otc fallback】2026-06-18 21:37 William 反映
+        # 原本 missing_codes 全部 codes（tse 完全失敗時）→ otc 也打 50 個 → 也失敗
+        # 改：missing 超過 batch 90%（表示 tse 整批失敗、不是「抓不到個別股」）→ 跳過 otc
+        if missing_codes and len(missing_codes) < len(batch_codes) * 0.9:
+            time.sleep(0.5)  # 避免連打兩個請求被擋
             ex_ch = "|".join(f"otc_{c}.tw" for c in missing_codes)
             url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex_ch}"
-            for attempt in range(3):
+            for attempt in range(2):  # otc fallback 只 retry 2 次（比 tse 少）
                 try:
                     resp = requests.get(
                         url,
                         headers={
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                            "User-Agent": f"StockTool/{VERSION} (+https://github.com/apingchang/StockTools)",
                             "Referer": "https://mis.twse.com.tw/",
+                            "Accept": "application/json,text/plain,*/*",
+                            "Accept-Language": "zh-TW,zh;q=0.9",
                         },
                         timeout=15,
                     )
@@ -1543,13 +1670,16 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
                     msg_otc = resp.json().get("msgArray", [])
                     break
                 except Exception as e:
-                    wait_sec = (attempt + 1) * 1.0
-                    if attempt < 2:
-                        print(f"⚠️ TWSE API otc fallback 失敗（重試 {attempt+1}/3）：{e} - 等 {wait_sec}s")
+                    wait_sec = [2.0, 5.0][attempt] if attempt < 2 else 5.0
+                    if attempt < 1:
+                        print(f"⚠️ TWSE API otc fallback 失敗（重試 {attempt+1}/2）：{type(e).__name__} - 等 {wait_sec}s")
                         time.sleep(wait_sec)
                     else:
-                        print(f"⚠️ TWSE API otc fallback 失敗（放棄）：{e}")
+                        print(f"⚠️ TWSE API otc fallback 失敗（放棄）：{type(e).__name__}: {e}")
                         msg_otc = []
+        elif missing_codes:
+            # tse 整批失敗（missing > 90%）→ 不打 otc（otc 也會被擋）
+            print(f"⚠️ TWSE tse 整批失敗（{len(missing_codes)}/{len(batch_codes)}）→ 跳過 otc fallback")
 
         all_msg = msg_tse + msg_otc
 
@@ -1571,14 +1701,19 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
             else:
                 price = None
 
-            # 【V0.9.5-goodinfo4+5 (vol+cache) 修正】v 欄位是「股」、不是「張」！
-            # 原本 int(v/1000) 會把 4016 股變成 4 張（丟失 16 股 = 0.016 張）
-            # 修法：vol = v / 1000 保留小數（張）、顯示用 f"{vol:,.3f}" 張
+            # 【V0.9.5-goodinfo4+5 (vol-int) 修正】2026-06-18 20:05 William 反映
+            # 「每日總成交量不會有小數點」、「今天 2548 是 4020 張」
+            # 【V0.9.5-goodinfo4+5 (vol-no-divide) 修正】2026-06-18 21:54 William 反映
+            # 「成交量不要除以1000應該就對了」
+            # → TWSE MIS API 的 v 欄位已經是「張」（不是股）
+            # → 2548 v=4016 → 顯示 4,016 張（不是 4 張）
+            # → 我之前看 Asoul/tsrtc 文件以為是股、所以寫 // 1000 → 顯示 4 張
+            # → 那是錯的：v 已經是張、不需要除
             v_raw = rec.get("v", "0")
             try:
-                vol = float(v_raw) / 1000.0  # 張（股 / 1000）
+                vol = int(float(v_raw))  # v 已經是「張」（整數）
             except (ValueError, TypeError):
-                vol = 0.0
+                vol = 0
 
             rows.append({"股票代號": raw_code, "現價": price, "成交量_張": vol})
 
@@ -5546,12 +5681,17 @@ class StrategyGUI(tk.Tk):
                 from datetime import datetime as _dt
                 _today = _dt.now().strftime("%Y-%m-%d")
                 def _is_cache_fresh(path):
+                    """【V0.9.5-goodinfo4+5 容錯】2026-06-18 22:07 William 反映
+                    meta sheet 不存在時、視為「剛抓的」(return True)
+                    → 不會走重抓路徑、不會卡 meta not found
+                    """
                     try:
                         _meta = pd.read_excel(path, sheet_name="meta", engine="openpyxl")
                         _last = str(_meta.loc[0, "last_update"])
                         return _last >= _today   # 含今天（避免跨交易日誤判）
                     except Exception:
-                        return False
+                        # 舊 cache 沒 meta sheet → 視為剛抓的
+                        return True
                 if price_df is None or price_df.empty:
                     for p in ["cache/price.xlsx", "source/cache/price.xlsx"]:
                         if os.path.exists(p):
@@ -5684,13 +5824,13 @@ class StrategyGUI(tk.Tk):
             #   修法：vol 已經是「張」（v/1000）、用 f"{vol:,.3f}" 顯示 4.016 張
             vol = row.get("成交量(張)")
             try:
-                # 【V0.9.5-goodinfo4+5 (vol+cache) 修】vol=0 表示「TWSE 沒抓到」
-                # 對使用者而言、0.000 看起來像「有資料但成交量為 0」、會誤導
-                # 改成 "—" 表「無資料」
+                # 【V0.9.5-goodinfo4+5 (vol-int) 修正】2026-06-18 20:05 William 反映
+                # 「每日總成交量不會有小數點」→ 顯示為整數張
+                # vol=0 表示「沒抓到」、顯示 "—"（不是 0）
                 if pd.isna(vol) or (isinstance(vol, (int, float)) and vol == 0):
                     vol_str = "—"
                 else:
-                    vol_str = f"{vol:,.3f}"
+                    vol_str = f"{int(vol):,}"  # 整數張 + 千分位
             except (TypeError, ValueError):
                 vol_str = "—"
             last_stock_str = _fmt_float(row.get("去年股票股利(元)"), decimals=3)

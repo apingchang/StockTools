@@ -75,7 +75,9 @@ def test_query_twse_三次都失敗回傳空():
         with patch("time.sleep"):  # skip sleep
             df = st._fetch_twse_realtime_batch(["6669"])
 
-    assert call_count[0] == 6, f"應打 6 次（tse 3 + otc fallback 3）、實際: {call_count[0]}"
+    # V0.9.5-goodinfo4+5 (vol-int) 修：tse 整批失敗時跳過 otc fallback
+    # 所以只打 3 次 tse（不再打 otc）
+    assert call_count[0] == 3, f"應打 3 次（tse only、tse 整批失敗跳過 otc）、實際: {call_count[0]}"
     # 即使全失敗、也要回傳 fallback row（讓 caller 後面用 cache fallback）
     assert '6669' in df["股票代號"].values, "全失敗應有 fallback row、不是空 df"
     assert pd.isna(df[df["股票代號"]=="6669"].iloc[0]["現價"])
@@ -92,17 +94,17 @@ def test_vol_0_顯示橫線不是0_000():
     William 19:25 反映：「成交量還是不對」→ 5386 顯示 0.000
     修法：vol=0 也視為「無資料」、顯示 "—"
     """
-    # 模擬 _ms_display_results 的 vol_str 邏輯
+    # 模擬 _ms_display_results 的 vol_str 邏輯（V0.9.5-goodinfo4+5 vol-int 版本）
     def format_vol(vol):
         if pd.isna(vol):
             return "—"
         if isinstance(vol, (int, float)) and vol == 0:
             return "—"
-        return f"{vol:,.3f}"
+        return f"{int(vol):,}"  # 整數張 + 千分位
 
     assert format_vol(0) == "—", f"vol=0 應為 '—'、實際: '{format_vol(0)}'"
     assert format_vol(0.0) == "—", f"vol=0.0 應為 '—'、實際: '{format_vol(0.0)}'"
-    assert format_vol(4.016) == "4.016", f"vol=4.016 應為 '4.016'、實際: '{format_vol(4.016)}'"
+    assert format_vol(4020) == "4,020", f"vol=4020 應為 '4,020'、實際: '{format_vol(4020)}'"
     assert format_vol(None) == "—", f"vol=None 應為 '—'、實際: '{format_vol(None)}'"
     assert format_vol(float('nan')) == "—", f"vol=NaN 應為 '—'、實際: '{format_vol(float('nan'))}'"
     print("PASS: test_vol_0_顯示橫線不是0_000")

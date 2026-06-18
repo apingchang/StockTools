@@ -54,7 +54,8 @@ def test_現價欄位型態():
         result = st._fetch_twse_realtime_batch(["TEST"])
         row = result.iloc[0]
         assert row["現價"] == 100.5
-        assert row["成交量_張"] == 5.0
+        # V0.9.5-goodinfo4+5 (vol-no-divide)：v 已是張、不除 1000
+        assert row["成交量_張"] == 5000
     finally:
         requests.get = orig
 
@@ -172,14 +173,18 @@ def test_股票代號字串潔化():
 
 
 def test_成交量單位是張():
-    """【單位守護】TWSE 回 v=5000（股）→ 輸出應為 5.0 張（/1000）"""
+    """【單位守護】TWSE 回 v=5000 → 輸出應為 5,000 張（不除 1000）
+
+    V0.9.5-goodinfo4+5 (vol-no-divide) 修正：v 已經是「張」
+    William 2026-06-18 21:54 反映：「成交量不要除以1000應該就對了」
+    """
     msg = [{"c": "VOL01", "z": "50.0", "o": "50.0", "y": "49.0", "v": "5000"}]
     orig, fake = _mock_get_factory(msg)
     requests.get = fake
     try:
         result = st._fetch_twse_realtime_batch(["VOL01"])
-        assert result.iloc[0]["成交量_張"] == 5.0, \
-            f"5000股應為 5.0 張，實際: {result.iloc[0]['成交量_張']}"
+        assert result.iloc[0]["成交量_張"] == 5000, \
+            f"v=5000 應為 5,000 張（不除 1000）、實際: {result.iloc[0]['成交量_張']}"
     finally:
         requests.get = orig
 
