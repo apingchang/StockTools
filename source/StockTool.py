@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-goodinfo4+5 (2026-06-18 17:56)         ║
+║               台灣股市量化選股系統 v0.9.5-goodinfo4+5 (2026-06-18 18:12)         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-goodinfo
 【版本資訊】
 Version: v0.9.5-goodinfo4+5
-最後更新: 2026-06-18 18:03 (Asia/Taipei)
+最後更新: 2026-06-18 18:17 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -381,6 +381,37 @@ Python 版本: 3.8+
   - 2442 2019 cash: 1.506 → 0.502 ✓
   - 2542 cash 大多下降（之前是 cash+stock 合計）
   - 9946 2026 cash 保留 1.37（季配 2026 cash=NaN、保留 10Y 加總）
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-goodinfo4+5 (vol + sort) 更新內容】2026-06-18 18:12 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【William 反映】
+1. 「成交量不是我要的今日成交量！」 → 拿掉盤中/收盤後切換邏輯
+2. 「順便將篩選結果依照營收累計YoY由大到小排序」
+
+【修法 1：成交量直接顯示今日量】
+- 【原本 V0.9.5-twser3】盤中 → "-"，收盤後 → 總成交量
+- 【V0.9.5-goodinfo4+5 修正】拿掉 _is_market_hours() 判斷、直接顯示 price_df 的「成交量(張)」
+- William 說「就是要看今日即時量」→ 盤中的累積量也是有意義的
+
+【修法 2：主排序改為營收累計YoY 降序】
+- 【原本】sort = [_yld_has_data, _sort_yld, _sort_stock, _sort_rev, _sort_pe]
+  → 殖利率有資料、殖利率高、股票股利高、營收YoY 高、PE 低
+- 【新】sort = [_sort_rev, _yld_has_data, _sort_yld, _sort_stock, _sort_pe]
+  → 營收YoY 高、殖利率有資料、殖利率高、股票股利高、PE 低
+- 主排序從「殖利率」改為「營收累計YoY」
+- 同營收YoY 時、還是依殖利率排序
+- None 排最後（用 -9999 作 sort key）
+
+【pytest】
+- test_ms_vol_rev_sort.py（6 個新守護 test）
+  - test_成交量_直接顯示今日量_不管時段
+  - test_成交量_None_顯示橫線
+  - test_成交量_盤中不再顯示橫線（regression 守護：盤中也不再 "-"）
+  - test_排序_以營收累計YoY_降序為主
+  - test_排序_同_營收YoY_時_殖利率高排前
+  - test_排序_None_排最後
+- test_ms_no_stock_yield_vol_display.py 重寫（拿掉舊的盤中/收盤後 test）
 
 ════════════════════════════════════════════════════════════════════════════════
 
@@ -2182,6 +2213,10 @@ def _run_manual_selection(
     # 11. 排序：殖利率有值 > 殖利率高 > 股票股利高 > 營收 YoY 高 > PE 低
     # 【重點】殖利率有資料（vs None）排前面、殖利率高的排前面、None 排後面
     # V0.9.5-goodinfo3：拿掉 10Y 平均殖利率 sort key（William 不需要）
+    # 【V0.9.5-goodinfo4+5 修 Bug】2026-06-18 18:12 William 反映：
+    #   「順便將篩選結果依照營收累計YoY由大到小排序」
+    #   → 主要 sort 改為營收累計YoY 降序（高增長排前面）
+    #   → 原本是「殖利率 > 股票股利 > 營收YoY > PE」、現在改成「營收YoY > 殖利率 > 股票股利 > PE」
     result["_yld_has_data"] = result["今年現金殖利率(%)"].notna().astype(int)
     # 殖利率直接作 sort key、不加負號→降序時殖利率高排前
     result["_sort_yld"] = result["今年現金殖利率(%)"].fillna(-9999)
@@ -2190,7 +2225,8 @@ def _run_manual_selection(
     result["_sort_pe"] = result["PE"].fillna(9999)
 
     result = result.sort_values(
-        ["_yld_has_data", "_sort_yld", "_sort_stock", "_sort_rev", "_sort_pe"],
+        # 主排序：營收累計YoY 降序、其次殖利率、再來股票股利、最後 PE
+        ["_sort_rev", "_yld_has_data", "_sort_yld", "_sort_stock", "_sort_pe"],
         ascending=[False, False, False, False, True]
     ).reset_index(drop=True)
 
@@ -4839,9 +4875,9 @@ class StrategyGUI(tk.Tk):
         #   並修正之前 key 錯位（找「今年股票股利(元)」但欄位是「今年股票股利」）
         # 【V0.9.5-twser3 修 Bug】2026-06-18 William 反映：
         #   1. 「今股票殖%」/「去年股票殖%」拿掉（不需要看股票殖利率）
-        #   2. 「成交量(張)」盤中顯示 "-"、收盤後才顯示總成交量
-        #     - 盤中：TWSE 即時 API 給的累積量每 15-20 秒變動、顯示沒意義
-        #     - 收盤後：13:30 後量才固定、顯示才是當日真實總量
+        # 【V0.9.5-goodinfo4+5 修 Bug】2026-06-18 18:12 William 反映：
+        #   1. 「成交量不是我要的今日成交量」→ 拿掉盤中/收盤後切換、直接顯示 price_df 的「成交量(張)」
+        #   2. 「順便將篩選結果依照營收累計YoY由大到小排序」→ 主排序改為營收累計YoY 降序
         cols = ("勾選","代號","名稱","現價","累計YoY%",
                 "今股票","今現金","今現金殖%",
                 "PE","成交量(張)",
@@ -5462,21 +5498,16 @@ class StrategyGUI(tk.Tk):
             cash_div_str = _fmt_float(row.get("今年現金股利(元)"), decimals=3)
             cash_str = _fmt_float(row.get("今年現金殖利率(%)"))
             pe_str = _fmt_float(row.get("PE"))
-            # 【V0.9.5-twser3 修 Bug】2026-06-18 William 反映：
-            #   盤中不顯示成交量（顯示 "-"）、收盤後才顯示總成交量
-            #   - 盤中 TWSE 即時 API 每 15-20 秒更新累積量、顯示沒意義還會誤導
-            #   - 收盤後（13:30）後量才固定、顯示才是當日真實總量
-            #   - 週末（週六日）→ 不開盤、量也算「收盤後」狀態（沿用上週五總量）
+            # 【V0.9.5-twser3 原始】盤中 → 收盤後總量
+            # 【V0.9.5-goodinfo4+5 修正】2026-06-18 18:12 William 反映：
+            #   「成交量不是我要的今日成交量！」
+            #   → 拿掉盤中/收盤後切換邏輯、直接顯示 price_df 的「成交量(張)」（今日成交量）
+            #   → 盤中雖然是累積量、但 William 就是要看今日即時量
             vol = row.get("成交量(張)")
-            if _is_market_hours():
-                # 盤中：顯示 "-"（避免誤導使用者以為是總量）
-                vol_str = "-"
-            else:
-                # 收盤後 / 盤前 / 週末：顯示總成交量
-                try:
-                    vol_str = f"{int(vol):,}" if pd.notna(vol) else "—"
-                except (TypeError, ValueError):
-                    vol_str = "—"
+            try:
+                vol_str = f"{int(vol):,}" if pd.notna(vol) else "—"
+            except (TypeError, ValueError):
+                vol_str = "—"
             last_stock_str = _fmt_float(row.get("去年股票股利(元)"), decimals=3)
             # 【V0.9.5+ Phase 8 新增】去年現金股利金額
             # 【V0.9.5-goodinfo4+5】改 3 位小數
