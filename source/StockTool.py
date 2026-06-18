@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-goodinfo4+5 (2026-06-18 18:34)         ║
+║               台灣股市量化選股系統 v0.9.5-goodinfo4+5 (2026-06-18 19:25)         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-goodinfo
 【版本資訊】
 Version: v0.9.5-goodinfo4+5
-最後更新: 2026-06-18 18:48 (Asia/Taipei)
+最後更新: 2026-06-18 19:34 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -456,6 +456,47 @@ Python 版本: 3.8+
 - 修正前 6669 緯穎「—」、修正後 5130.00
 - 修正前 5386 青雲「—」、修正後 521.00
 - 修正前 5274 信驊「—」、修正後 18960.00
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-goodinfo4+5 (retry+vol) 更新內容】2026-06-18 19:25 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【William 反映 3 點】
+1. 成交量還是不對：5386 顯示 0.000（vol=0）
+2. 這個篩選條件為什麼沒抓到 6669
+3. 還是有很多沒現價的：otc fallback 整批失敗（Connection aborted）
+
+console：⚠️ TWSE API otc fallback 失敗：('Connection aborted.', RemoteDisconnected(...))
+console：⚠️ TWSE API 失敗（批48/48、tse）：('Connection aborted.', ...)
+
+【修法 1：retry 機制】_query_twse 加 3 次 retry
+- 原本 0 retry、48 批連打可能導致後面幾批被 rate limit
+- 修法：重試 3 次、間隔 1.0s / 2.0s / 3.0s 成長退避
+- otc_ fallback 同一份 retry 邏輯
+
+【修法 2：batch 間 sleep】避免連打被 rate limit
+- 原本 0 sleep、48 批連打 0.15s/批 → 連續發 7.2s 請求
+- 修法：batch 1 之後每批 sleep 0.5s
+
+【修法 3：cache 現價 fillna 股價】
+- 【根因】cache 的「現價」欄位可能是 NaN（之前 TWSE 抓不到）、但「股價」有值
+- merge 後 fillna(現價) 拿不到舊值、結果還是 NaN
+- 修法：merge 前先把 cache 現價用股價 fallback 填補
+
+【修法 4：vol=0 顯示 "—" 不是 0.000】
+- 原本 vol=0.0 顯示 "0.000"、看起來像「有資料但成交量為 0」、會誤導
+- 修法：vol=0 一律顯示 "—" 表「無資料」
+
+【6669 為什麼没被抓到】
+- 6669 本益比 = 現價 5130 / EPS 49.46 = 103.7
+- 本益比 ≤ 70 過濾掉是正確的
+- 之前版本 cache 股價較低（可能是 5080）→ PE 102.7 仍 > 70
+- 【真的要看 6669、請把「本益比 (PE) ≤」改為 110 或 150】
+
+【pytest】test_twse_realtime_retry.py（4 個新守護 test）
+- test_query_twse_retry_一次失敗後成功
+- test_query_twse_三次都失敗回傳空
+- test_vol_0_顯示橫線不是0_000
+- test_merge前_cache_現價_fillna_股價
   - test_排序_None_排最後
 - test_ms_no_stock_yield_vol_display.py 重寫（拿掉舊的盤中/收盤後 test）
 
@@ -1438,27 +1479,43 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
             batch_idx * _TWSE_REALTIME_BATCH_SIZE:
             (batch_idx + 1) * _TWSE_REALTIME_BATCH_SIZE
         ]
+        # 【V0.9.5-goodinfo4+5 (vol+cache) 加 batch sleep】2026-06-18 19:25 William 反映
+        # 48 批連打 0.15s/批 → 最一批 7.2s 連續發、容易被 rate limit
+        # 加 0.5s sleep 避免過多 sequential request
+        if batch_idx > 0:
+            time.sleep(0.5)
         # 【V0.9.5-goodinfo4+5 (vol+cache) 修正】2026-06-18 18:34 William 反映
         # 原本 6 開頭 = otc_ 是粗略判斷、有些 6 開頭是上市（例：6669 緯穎）
         # 修法：先全部打 tse_、回傳中沒有 c 欄位的股再用 otc_ 重打
-        def _query_twse(prefix: str) -> list:
-            """打一次 TWSE MIS API、回傳 msgArray（prefix 是 tse 或 otc）"""
+        def _query_twse(prefix: str, max_retries: int = 3) -> list:
+            """打一次 TWSE MIS API、回傳 msgArray（prefix 是 tse 或 otc）
+
+            V0.9.5-goodinfo4+5 (vol+cache) 加 retry：2026-06-18 19:25 William 反映
+            - 原本 0 retry、48 批連打可能導致最後幾批被 rate limit
+            - 加 3 次 retry、間隔 1.0s / 2.0s / 4.0s 成長退避
+            """
             ex_ch = "|".join(f"{prefix}_{c}.tw" for c in batch_codes)
             url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex_ch}"
-            try:
-                resp = requests.get(
-                    url,
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                        "Referer": "https://mis.twse.com.tw/",
-                    },
-                    timeout=15,
-                )
-                resp.raise_for_status()
-                return resp.json().get("msgArray", [])
-            except Exception as e:
-                print(f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}、{prefix}）：{e}")
-                return []
+            for attempt in range(max_retries):
+                try:
+                    resp = requests.get(
+                        url,
+                        headers={
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                            "Referer": "https://mis.twse.com.tw/",
+                        },
+                        timeout=15,
+                    )
+                    resp.raise_for_status()
+                    return resp.json().get("msgArray", [])
+                except Exception as e:
+                    wait_sec = (attempt + 1) * 1.0
+                    if attempt < max_retries - 1:
+                        print(f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}、{prefix}，重試 {attempt+1}/{max_retries}）：{e} - 等 {wait_sec}s")
+                        time.sleep(wait_sec)
+                    else:
+                        print(f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}、{prefix}，放棄）：{e}")
+            return []
 
         # Step 1: 先打 tse_
         msg_tse = _query_twse("tse")
@@ -1466,26 +1523,33 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
         tse_codes = {str(rec.get("c", "")).strip() for rec in msg_tse if rec.get("c")}
         missing_codes = [c for c in batch_codes if c not in tse_codes]
 
-        # Step 2: missing 的股用 otc_ 重打
+        # Step 2: missing 的股用 otc_ 重打（V0.9.5-goodinfo4+5 vol+cache 用同一個 retry helper）
         msg_otc = []
         if missing_codes:
-            time.sleep(0.2)  # 避免連打兩個請求被擋
+            time.sleep(0.3)  # 避免連打兩個請求被擋
             ex_ch = "|".join(f"otc_{c}.tw" for c in missing_codes)
             url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex_ch}"
-            try:
-                resp = requests.get(
-                    url,
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                        "Referer": "https://mis.twse.com.tw/",
-                    },
-                    timeout=15,
-                )
-                resp.raise_for_status()
-                msg_otc = resp.json().get("msgArray", [])
-            except Exception as e:
-                print(f"⚠️ TWSE API otc fallback 失敗：{e}")
-                msg_otc = []
+            for attempt in range(3):
+                try:
+                    resp = requests.get(
+                        url,
+                        headers={
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                            "Referer": "https://mis.twse.com.tw/",
+                        },
+                        timeout=15,
+                    )
+                    resp.raise_for_status()
+                    msg_otc = resp.json().get("msgArray", [])
+                    break
+                except Exception as e:
+                    wait_sec = (attempt + 1) * 1.0
+                    if attempt < 2:
+                        print(f"⚠️ TWSE API otc fallback 失敗（重試 {attempt+1}/3）：{e} - 等 {wait_sec}s")
+                        time.sleep(wait_sec)
+                    else:
+                        print(f"⚠️ TWSE API otc fallback 失敗（放棄）：{e}")
+                        msg_otc = []
 
         all_msg = msg_tse + msg_otc
 
@@ -5420,6 +5484,17 @@ class StrategyGUI(tk.Tk):
                             print(f"✅ TWSE 即時股價完成：耗時 {_elapsed:.1f} 秒")
                             self.logger.log(f"✅ TWSE 即時股價完成：耗時 {_elapsed:.1f} 秒")
                             if not fresh.empty and "現價" in fresh.columns:
+                                # 【V0.9.5-goodinfo4+5 (vol+cache) 修 Bug】2026-06-18 19:25 William 反映
+                                # 「遺是有很多沒現價的」問題根因：cache 的「現價」欄位是 NaN、但「股價」欄位有舊值
+                                #   → merge 後用 fillna(現價) 拿不到舊股價、結果還是 NaN
+                                # 修法：merge 前先把 cache「現價」用「股價」fallback 填補
+                                if "股價" in price_df.columns and "現價" in price_df.columns:
+                                    n_filled = price_df["現價"].isna().sum()
+                                    price_df["現價"] = price_df["現價"].fillna(price_df["股價"])
+                                    if n_filled > 0:
+                                        self.logger.log(
+                                            f"🔄 cache 現價 → 股價 fallback：填補 {n_filled} 檔"
+                                        )
                                 # merge：新價覆蓋舊價、沒抓到的保持原值
                                 fresh_small = fresh[["股票代號"]].copy()
                                 if "現價" in fresh.columns:
@@ -5436,6 +5511,15 @@ class StrategyGUI(tk.Tk):
                                 if "成交量_張_fresh" in price_df.columns:
                                     price_df["成交量_張"] = price_df["成交量_張_fresh"].fillna(price_df["成交量_張"])
                                     price_df = price_df.drop(columns=["成交量_張_fresh"])
+                                # 【V0.9.5-goodinfo4+5 (vol+cache) 加 log】看哪些股 TWSE 還是沒抓到
+                                missing_price = price_df[price_df["現價"].isna()]["股票代號"].astype(str).str.strip().tolist()
+                                if missing_price:
+                                    n_missing = len(missing_price)
+                                    sample = missing_price[:10]
+                                    self.logger.log(
+                                        f"⚠️ TWSE 沒抓到且 cache 沒股價：{n_missing} 檔 (例: {sample})"
+                                    )
+                                    print(f"⚠️ TWSE 沒抓到且 cache 沒股價：{n_missing} 檔 (例: {sample})")
                                 print(f"✅ 即時股價完成：覆蓋 {len(fresh)} 檔")
 
                                 # 【V0.9.5-goodinfo4+5 (vol+cache) 新增】2026-06-18 18:34 William 反映：
@@ -5600,7 +5684,13 @@ class StrategyGUI(tk.Tk):
             #   修法：vol 已經是「張」（v/1000）、用 f"{vol:,.3f}" 顯示 4.016 張
             vol = row.get("成交量(張)")
             try:
-                vol_str = f"{vol:,.3f}" if pd.notna(vol) else "—"
+                # 【V0.9.5-goodinfo4+5 (vol+cache) 修】vol=0 表示「TWSE 沒抓到」
+                # 對使用者而言、0.000 看起來像「有資料但成交量為 0」、會誤導
+                # 改成 "—" 表「無資料」
+                if pd.isna(vol) or (isinstance(vol, (int, float)) and vol == 0):
+                    vol_str = "—"
+                else:
+                    vol_str = f"{vol:,.3f}"
             except (TypeError, ValueError):
                 vol_str = "—"
             last_stock_str = _fmt_float(row.get("去年股票股利(元)"), decimals=3)
