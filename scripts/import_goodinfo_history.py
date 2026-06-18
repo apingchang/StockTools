@@ -143,7 +143,15 @@ def load_goodinfo(folder: str, suffix_map: dict) -> pd.DataFrame:
 # 1. 寫入 dividend_history.db
 # ─────────────────────────────────────────
 def import_dividend(dry: bool = False):
-    """把 goodinfo 現金股利 + 股票股利年度加總寫入 dividend_history.db"""
+    """把 goodinfo 現金股利 + 股票股利年度加總寫入 dividend_history.db
+
+    【V0.9.5-goodinfo4+5 修 Bug】goodinfo 10Y_div 欄位是「合計股利」（cash+stock）
+    - William 2026-06-18 17:56 反映：「dividend10Y 的股利是股票＋現金股利所以要減掉 Share10Y 的股票股利」
+    - 證據：2442 2025 10Y_div=0.237, 10Y_share=0.158, 公開 cash=0.079（0.237-0.158=0.079 ✓）
+    - 2017-2025 也都吃這個 bug、不只是 2026（之前我以為只有 2026 開始才改格式、其實是十年都是合計）
+    - 正確算法：cash = 10Y_div - 10Y_share（扣掉 stock 才得 cash）
+    - 2017-2025 cash=0 9 成是 stock 也是 0、所以看起來 cash=10Y_div 沒錯、是錯覺
+    """
     print("\n" + "="*70)
     print("【1/3】匯入股利資料 → dividend_history.db")
     print("="*70)
@@ -167,11 +175,12 @@ def import_dividend(dry: bool = False):
     share_year_nums = sorted(set(year_num(c) for c in share_years if year_num(c)))
     print(f"  現金股利年份: {cash_year_nums}")
     print(f"  股票股利年份: {share_year_nums}")
+    print(f"  【V0.9.5-goodinfo4+5】cash = 10Y_div - 10Y_share（扣 stock 才得 cash）")
 
     # 按 stock_id + year 分組加總
     # 規則：同一 stock_id + year，三個價位帶的加總（理論上不重複，但保險起見）
-    cash_agg: dict = defaultdict(lambda: {"cash": 0.0, "stock": 0.0})
-    share_agg: dict = defaultdict(lambda: {"cash": 0.0, "stock": 0.0})
+    cash_agg: dict = defaultdict(lambda: {"div": 0.0, "stock": 0.0})
+    share_agg: dict = defaultdict(lambda: {"div": 0.0, "stock": 0.0})
 
     for df, agg in [(div_cash, cash_agg), (div_share, share_agg)]:
         years = cash_years if df is div_cash else share_years
@@ -186,24 +195,27 @@ def import_dividend(dry: bool = False):
                     continue
                 key = (sid, yr)
                 if df is div_cash:
-                    agg[key]["cash"] += float(val)
+                    agg[key]["div"] += float(val)  # 10Y_div = 合計 (cash+stock)
                 else:
-                    agg[key]["stock"] += float(val)
+                    agg[key]["stock"] += float(val)  # 10Y_share = 股票股利
 
-    # 【V0.9.5-goodinfo3 修 Bug】合併 cash + stock 同一張表
-    # 【原本 bug】{**cash_agg, **share_agg} 用 dict unpack、後者覆蓋前者
-    #   結果：對 cash 跟 share 都有資料的股票（ex: 5386 2018 cash=2.5/share=1.5），
-    #         share_agg 的 {"cash":0,"stock":1.5} 會覆蓋 cash_agg 的 {"cash":2.5,"stock":0}
-    #         → DB cash=0, stock=1.5（cash 被洗成 0！）
-    # 【修法】明確取 cash_agg.cash + share_agg.stock（兩個來源不同、不會衝突）
-    #   cash = sum(cash_agg.cash)        ← 只來自 cash 檔
-    #   stock = sum(share_agg.stock)     ← 只來自 share 檔
+    # 【V0.9.5-goodinfo4+5 修 Bug】cash = 10Y_div - 10Y_share
+    # 原本：cash = 10Y_div（誤以為是現金、其實是合計）
+    # 修正：cash = 10Y_div - 10Y_share（10Y_div 是合計、扣 stock 才得 cash）
     all_agg: dict = {}
     all_keys = set(cash_agg.keys()) | set(share_agg.keys())
     for (sid, yr) in all_keys:
-        cash_vals = cash_agg.get((sid, yr), {}).get("cash", 0.0)
-        stock_vals = share_agg.get((sid, yr), {}).get("stock", 0.0)
-        all_agg[(sid, yr)] = {"cash": cash_vals, "stock": stock_vals}
+        # 10Y_div (合計) 和 10Y_share (股票) 都有可能缺資料
+        div_total = cash_agg.get((sid, yr), {}).get("div", 0.0)  # 合計
+        stock_val = share_agg.get((sid, yr), {}).get("stock", 0.0)  # 股票
+        # 現金 = 合計 - 股票（10Y_div 是 cash+stock 合計）
+        cash = div_total - stock_val
+        # 安全：cash 不可能負（10Y_share 應該 <= 10Y_div）、負值設 0
+        if cash < 0:
+            print(f"  ⚠️  {sid} {yr}: 10Y_div={div_total}, 10Y_share={stock_val}, "
+                  f"cash={cash} < 0！設定為 0（可能 goodinfo 資料異常）")
+            cash = 0.0
+        all_agg[(sid, yr)] = {"cash": cash, "stock": stock_val}
 
     print(f"  合計 {len(all_agg)} 筆 (stock_id, year) 組合")
 
@@ -263,146 +275,13 @@ def import_dividend(dry: bool = False):
 #   → 取 2026 範圍（期別是「2026」、「26H1」、「26H2」、「26Q1~Q4」），同股加總
 # ─────────────────────────────────────────────────────────
 
-def import_2026_dividend(dry: bool = False):
-    """【V0.9.5-goodinfo4+5 修 Bug】從 2026 單年檔覆寫 DB 的 2026 cash/stock
-
-    為什麼需要這個 function？
-    goodinfo 從 2026 開始把 10Y 檔的「現金股利」欄位改成存「合計股利」
-    → 必須用 2026 單年檔（有完整 現金/股票/合計 三欄）才能拿到正確的現金
-    """
-    print("\n" + "="*70)
-    print("【1.5/3】修 2026 cash bug：用 2026 單年檔覆寫")
-    print("="*70)
-
-    # 2026 單年檔：3 個價位帶
-    SINGLE_YEAR_FILES = [
-        ("P50U",   "P50U_2026股利股息.xls"),
-        ("P20-50", "P20-50_2026股利股息.xls"),
-        ("P20L",   "P20L_2026股利股息.xls"),
-    ]
-
-    frames = []
-    for gkey, fname in SINGLE_YEAR_FILES:
-        fpath = EXPORT_DIR / "dividend" / fname
-        if not fpath.exists():
-            print(f"  ⚠️  找不到 {fpath}、跳過")
-            continue
-        df = pd.read_html(fpath)[0]
-        df["_group"] = gkey
-        frames.append(df)
-
-    if not frames:
-        print(f"  ❌ 2026 單年檔完全不見、不執行修補")
-        return
-
-    all_div = pd.concat(frames, ignore_index=True)
-    print(f"  2026 單年檔合計: {len(all_div)} 列 / {all_div['代號'].nunique()} 檔")
-
-    # 取 2026 範圍的 record
-    # 期別可能是「2026」/「26H1」/「26H2」/「26Q1」~「26Q4」
-    # 不取「2025」/「2027」/「25H1」/「25H2」（那是別年度）
-    def is_2026(period: str) -> bool:
-        if pd.isna(period):
-            return False
-        s = str(period).strip()
-        return s == "2026" or s.startswith("26H") or s.startswith("26Q")
-
-    all_div["_is_2026"] = all_div["股利發放期別"].apply(is_2026)
-    sub_2026 = all_div[all_div["_is_2026"]].copy()
-    print(f"  2026 範圍 record: {len(sub_2026)} 列")
-
-    # 同一股可能多筆（H1+H2 或 Q1~Q4）、加總
-    # 【重要】skipna=False：保留 NaN 避免「有資料」以為「全 0」
-    # 例：9946 26Q4 現金=NaN、股票=0.0、原本要保留「該年現金未公佈」語意
-    agg = (
-        sub_2026.groupby("代號")
-        .agg({
-            "現金股利": lambda s: s.sum(skipna=False),  # 保留 NaN
-            "股票股利": lambda s: s.sum(skipna=False),  # 保留 NaN
-            "除息交易日": "first",  # 除息交易日只有年度、配一次
-        })
-        .reset_index()
-    )
-    agg["代號"] = agg["代號"].astype(str).str.strip()
-    agg["_ex_date"] = agg["除息交易日"].apply(_parse_roc_short_date)
-    print(f"  2026 加總後股票數: {len(agg)} 檔")
-
-    # 跳過沒資料的股（兩項都是 NaN 才是真的沒資料）
-    # 【重要】不要 fillna(0.0) ！會讓 cash=NaN 變成 cash=0、失去「未公布」語意
-    agg = agg[agg["現金股利"].notna() | agg["股票股利"].notna()]
-    print(f"  有效資料: {len(agg)} 檔（現金或股票至少一項有值）")
-
-    if dry:
-        print(f"\n  🟡 Dry run — 前 10 筆預覽：")
-        for _, r in agg.head(10).iterrows():
-            sid = r["代號"]
-            cash = r["現金股利"] if not pd.isna(r["現金股利"]) else 0.0
-            stock = r["股票股利"] if not pd.isna(r["股票股利"]) else 0.0
-            ex = r["_ex_date"]
-            print(f"    {sid}: 現金={cash:.3f}, 股票={stock:.3f}, 除息日={ex}")
-        return
-
-    # UPSERT 進 DB：覆寫 cash/stock + 順便寫 ex_date、保留殖利率（殖利率從 10Y rate 檔來、已對）
-    # 【重要】必須用 UPDATE 而不是 INSERT OR REPLACE
-    #   INSERT OR REPLACE 會洗掉 cash_yield_pct / share_yield_pct 這兩個欄位
-    #   改用 UPDATE：只動 cash/stock/ex_date/三個欄位、保留殖利率不變
-    _init_div_db(str(DB_DIV))
-    conn = sqlite3.connect(str(DB_DIV))
-    cur = conn.cursor()
-
-    updated = 0
-    inserted = 0
-    skipped_no_data = 0
-    for _, r in agg.iterrows():
-        sid = str(r["代號"]).strip()
-        cash_raw = r["現金股利"]
-        stock_raw = r["股票股利"]
-        ex_date = r["_ex_date"]
-
-        cash_is_nan = pd.isna(cash_raw)
-        stock_is_nan = pd.isna(stock_raw)
-
-        # 兩個都是 NaN → 完全沒資料、跳過
-        if cash_is_nan and stock_is_nan:
-            skipped_no_data += 1
-            continue
-
-        # 取得現有 cash/stock（保留 NaN 那邊、避免蓋掉既有 10Y 加總的 data）
-        existing = cur.execute(
-            "SELECT cash, stock, cash_yield_pct, share_yield_pct FROM dividend_history WHERE stock_id=? AND year=?",
-            (sid, 2026)
-        ).fetchone()
-
-        if existing is not None:
-            old_cash, old_stock = existing[0], existing[1]
-            # 只覆寫「有資料」的欄位、另一欄位保留 DB 原值
-            # 例：9946 季配 2026、cash=NaN stock=0.0 → 保留 old_cash（可能是各季加總）
-            new_cash = round(float(cash_raw), 6) if not cash_is_nan else old_cash
-            new_stock = round(float(stock_raw), 6) if not stock_is_nan else old_stock
-            cur.execute(
-                """UPDATE dividend_history
-                   SET cash=?, stock=?, ex_date=?, fetched_at=datetime('now','localtime')
-                   WHERE stock_id=? AND year=?""",
-                (new_cash, new_stock, ex_date, sid, 2026)
-            )
-            updated += 1
-        else:
-            # 新 record：cash NaN 預設 0.0、stock NaN 預設 0.0
-            cash = round(float(cash_raw), 6) if not cash_is_nan else 0.0
-            stock = round(float(stock_raw), 6) if not stock_is_nan else 0.0
-            cur.execute(
-                """INSERT INTO dividend_history
-                   (stock_id, year, cash, stock, source, ex_date, ex_date_close, cash_yield_pct, share_yield_pct)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (sid, 2026, cash, stock, "goodinfo", ex_date, None, None, None)
-            )
-            inserted += 1
-
-    conn.commit()
-    conn.close()
-    print(f"\n  ✅ 覆寫完成：{updated} 筆 UPDATE、{inserted} 筆 INSERT、{skipped_no_data} 筆跳過（未公布）")
-    print(f"     DB 路徑: {DB_DIV}")
-
+# 【V0.9.5-goodinfo4+5 拿掉 import_2026_dividend()】
+# William 17:56 發現 2017-2025 也吃「10Y_div 是合計」的 bug
+# 修正：import_dividend() 直接用 cash = 10Y_div - 10Y_share 處理全部 2017-2026
+# 不需要額外用 2026 單年檔覆寫、原本的 import_2026_dividend() 函式已經過時、拿掉
+#
+# 【V0.9.5-goodinfo4+5 也拿掉 import_dividend_2026_exdate() 嗎？】
+# 不拿掉、這個 function 還是有用：把 2026 單年檔的 ex_date 寫入 DB（ex_date 是除息交易日、跟 cash 無關）
 
 def _init_div_db(db_path: str):
     """初始化 dividend_history.db schema（V0.9.5-goodinfo 加殖利率欄）"""
@@ -790,9 +669,8 @@ def main():
     start = datetime.now()
 
     if args.only in [None, "div"]:
+        # 【V0.9.5-goodinfo4+5 修 Bug】goodinfo 10Y_div 是「合計」、cash = 10Y_div - 10Y_share
         import_dividend(dry=args.dry)
-        # 【V0.9.5-goodinfo4+5 修 Bug】2026 cash 誤存合計 → 用 2026 單年檔覆寫
-        import_2026_dividend(dry=args.dry)
 
     if args.only in [None, "yield"]:
         import_yield_rate(dry=args.dry)

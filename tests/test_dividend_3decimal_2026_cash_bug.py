@@ -232,6 +232,74 @@ def test_2442_2026_cash_等於_2_0_不是_2_7():
     print("PASS: test_2442_2026_cash_等於_2_0_不是_2_7")
 
 
+def test_2442_2025_cash_等於_0_079_不是_0_237():
+    """【V0.9.5-goodinfo4+5 整合守護】2442 新美齊 2025 cash 必須是 0.079
+
+    William 2026-06-18 17:56 反映：「去年現金應該是 0.079」
+    - 原本 DB: 0.237 (錯、是 10Y_div 合計)
+    - 修正後: 0.079 (10Y_div=0.237 - 10Y_share=0.158)
+    - 證據：goodinfo 公開資料 2442 2025 現金股利=0.079
+    """
+    import sqlite3
+    db_path = os.path.join(os.path.dirname(__file__), "..", "source", "dividend_history.db")
+    if not os.path.exists(db_path):
+        print("SKIP: test_2442_2025_cash_等於_0_079_不是_0_237 (DB not found)")
+        return
+
+    conn = sqlite3.connect(db_path)
+    db = conn.execute(
+        "SELECT cash, stock FROM dividend_history WHERE stock_id=? AND year=?",
+        ("2442", CY - 1)
+    ).fetchone()
+    conn.close()
+    if db is None:
+        print(f"SKIP: 2442 {CY-1} 不存在")
+        return
+    cash, stock = db
+    assert abs(cash - 0.079) < 0.001, (
+        f"2442 {CY-1} cash 應為 0.079、實際: {cash}\n"
+        f"（William 2026-06-18 17:56 確認 = 0.079、原 0.237 是 10Y_div 合計）"
+    )
+    assert abs(stock - 0.158) < 0.001, f"2442 {CY-1} stock 應為 0.158、實際: {stock}"
+    print("PASS: test_2442_2025_cash_等於_0_079_不是_0_237")
+
+
+def test_2442_歷年_cash_符合_10Y_div_扣_10Y_share():
+    """【V0.9.5-goodinfo4+5 整合守護】2442 歷年 cash 都要符合 cash = 10Y_div - 10Y_share
+
+    對照 goodinfo 10Y 驗證 2019-2025 所有年度的 cash 都對
+    """
+    import sqlite3
+    db_path = os.path.join(os.path.dirname(__file__), "..", "source", "dividend_history.db")
+    if not os.path.exists(db_path):
+        print("SKIP: test_2442_歷年_cash_符合_10Y_div_扣_10Y_share (DB not found)")
+        return
+
+    conn = sqlite3.connect(db_path)
+    # 2442 公開資料歷年 cash（從 goodinfo 10Y 推算）
+    # 2019: 0.502, 2020: 0, 2021: 0.102, 2022: 0.204, 2023: 0.051, 2024: 0.110, 2025: 0.079
+    expected = {
+        2019: 0.502, 2020: 0.0, 2021: 0.102, 2022: 0.204,
+        2023: 0.051, 2024: 0.110, 2025: 0.079, CY: 2.0,
+    }
+    failed = []
+    for year, exp in expected.items():
+        db = conn.execute(
+            "SELECT cash FROM dividend_history WHERE stock_id=? AND year=?",
+            ("2442", year)
+        ).fetchone()
+        if db is None:
+            if exp == 0.0: continue  # 沒 record 也算 0
+            failed.append(f"  {year}: 無 record、預期 {exp}")
+            continue
+        cash = db[0]
+        if abs(cash - exp) > 0.005:
+            failed.append(f"  {year}: 預期 {exp}、實際 {cash:.3f}")
+    conn.close()
+    assert len(failed) == 0, f"2442 歷年 cash 異常:\n" + "\n".join(failed)
+    print("PASS: test_2442_歷年_cash_符合_10Y_div_扣_10Y_share")
+
+
 def test_2548_2026_cash_等於_8_0_不是_8_5():
     """【V0.9.5-goodinfo4+5 整合守護】2548 華固 2026 cash 必須是 8.0（不是 8.5）"""
     import sqlite3
@@ -406,6 +474,8 @@ if __name__ == "__main__":
     test_DB_2026_cash_不等於_cash_plus_stock()
     test_2442_2026_cash_等於_2_0_不是_2_7()
     test_2548_2026_cash_等於_8_0_不是_8_5()
+    test_2442_2025_cash_等於_0_079_不是_0_237()
+    test_2442_歷年_cash_符合_10Y_div_扣_10Y_share()
     test_import_2026_dividend_保留_殖利率()
     test_季配股_2026_cash_未公布_保留_既有值()
     print("\nAll V0.9.5-goodinfo4+5 tests passed!")
