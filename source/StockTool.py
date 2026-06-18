@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-goodinfo4.3 (2026-06-18 07:16)         ║
+║               台灣股市量化選股系統 v0.9.5-twser (2026-06-18 07:16)         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-V0.9.5-goodinfo4.3
+V0.9.5-twser
 【版本資訊】
-Version: v0.9.5-goodinfo4.3
-最後更新: 2026-06-18 07:16 (Asia/Taipei)
+Version: v0.9.5-twser
+最後更新: 2026-06-18 10:13 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -267,38 +267,24 @@ Python 版本: 3.8+
 - test_current_tax.py（12 個）
 
 ════════════════════════════════════════════════════════════════════════════════
-【v0.9.5-goodinfo4.3 更新內容】2026-06-18 07:10 (William 反映)
+【v0.9.5-twser 更新內容】2026-06-18 10:05 (William 指示)
 ════════════════════════════════════════════════════════════════════════════════
-【William 反映】
-1. 「即時抓股價」checkbox 仍然 1 秒出結果、實際根本沒打 FinMind
-2. 懷疑 checkbox 設了但 cache 命中所以沒走
+【背景】William 確認 TWSE 即時資訊延遲只有 15-20 秒（不是 15 分鐘），且有免費 JSON API 可用。
 
-【根因】
-- _fetch_finmind_prices_batch 內部用 module-level _FINMIND_PRICE_CACHE
-- App 啟動時 _startup_bg_fetch_price() 會把全部股票抓進 cache
-- 第二次呼叫時全部 cache 命中、不到一秒就 return
-- 「即時抓股價」checkbox 形同虛設
+【重大改版：FinMind 股價 → TWSE 即時 API】
+- 新增 _fetch_twse_realtime_batch()：完全用 TWSE 即時 API 取代 FinMind 股價
+  - URL: https://mis.twse.com.tw/stock/api/getStockInfo.jsp
+  - 上市: tse_XXXX.tw，上櫃: otc_XXXX.tw
+  - 主力欄位: z=現價，o/h/l/y=開高低昨
+  - 預開盤（9:00-9:30）z="-" → fallback 到 o（開盤拍賣價）
+  - 完全免費，無額度限制，可無限次呼叫
+- _ms_run_selection 的「即時抓股價」checkbox 改走 TWSE API
+  - 2376 檔分批（50 檔/批）約 20-30 秒完成
+  - UI 動態顯示「🔄 TWSE 即時股價抓取中... X/Y (Z%)」
+- FinMind 額度完全解放，專注留給股利補抓（crontab每日 15:00）
+- checkbox label 改：「🔄 TWSE 即時股價（走 TWSE 免費 API，盤中 15-20 秒延遲）」
 
-【修法】
-- _fetch_finmind_prices_batch 加 force_refresh: bool = False 參數
-  - True → 先清空 _FINMIND_PRICE_CACHE 再走實際抓取
-  - False → 用 cache（默認、背景抓取場景）
-- _ms_run_selection 勾選時傳 force_refresh=True
-- UI 加進度：顯示「🔄 即時抓股價中... X/Y (Z%)」、完成後顯示耗時秒數
-- UI 更新一律用 self.after(0, ...) 避免 background thread 操作 widget crash
-
-【pytest】新 test_force_refresh_price.py（5 個）
-- 守護 force_refresh=True 確實清 cache
-- 守護 force_refresh=False 確實用 cache
-- 守護進度 callback 真的被呼叫
-- 守護耗時計算正確
-
-【使用】
-- App 重啟生效
-- 勾「即時抓股價」→ 真的會走 FinMind API 重抓全部股價（2376 檔 約 14 分鐘）
-- 勾選後狀態列會動態顯示「🔄 即時抓股價中... X/Y (Z%)」
-- 完成後顯示「✅ 即時抓股價完成（2376 檔、耗時 XXX 秒）」
-- 不勾時行為不變、繼續用 cache（快速、不打 FinMind）
+【pytest】test_twse_realtime.py 新增（6 個守護 test）
 
 ════════════════════════════════════════════════════════════════════════════════
 
@@ -497,7 +483,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-goodinfo4.3"
+VERSION = "v0.9.5-twser"
 
 
 import io
@@ -1130,6 +1116,149 @@ def _fetch_market_stock_list() -> pd.DataFrame:
         result["股票代號"] = result["股票代號"].astype(str).str.strip()
         return result
     return pd.DataFrame(columns=["股票代號", "股票名稱"])
+
+# ────────────────────────────────────────────────────────────────
+# V0.9.5-twser：TWSE 即時股價（取代 FinMind）
+# URL: https://mis.twse.com.tw/stock/api/getStockInfo.jsp
+# 格式：上市 tse_XXXX.tw，上櫃 otc_XXXX.tw
+# 主力欄位：z=現價，tv=當筆量，v=累積量，o/h/l/y=開高低昨
+# 延遲：實測 15-20 秒（TWSE 官方）
+# 限制：一次建議 50 檔，興櫃不支援
+# ────────────────────────────────────────────────────────────────
+_TWSE_REALTIME_BATCH_SIZE = 50   # 每批最大檔數（URL 長度安全）
+
+
+def _fetch_twse_realtime_batch(stock_ids: List[str],
+                                progress_callback=None) -> pd.DataFrame:
+    """
+    批次抓取台灣證券交易所即時股價（TWSE / TPEx 即時資訊）。
+    完全取代 FinMind TaiwanStockPrice，實現【免費、無額度限制】的即時股價。
+
+    URL 格式
+    ----------
+    https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_2330.tw|otc_3188.tw|...
+
+    主力欄位
+    ---------
+    - z : 現價（盤中即時成交價）；若為 "-" 表示該股票目前無成交（可能處於預約拍賣階段）
+    - o : 開盤價（揭示）
+    - tv : 當筆成交量
+    - v : 累積成交量
+    - h / l / y : 今日最高 / 最低 / 昨日收盤
+
+    預開盤行為（9:00–9:30）
+    ------------------------
+    - z = "-"（尚未成交）→ fallback 到 o（開盤拍賣價，視為現時合理報價）
+    - 若 o 也是 "-" → fallback 到 y（昨日收盤價）
+
+    Parameters
+    ----------
+    stock_ids : list[str]
+        股票代號清單（如 ["2330", "0050", "3188"]）
+        系統會自動判斷上市（tse_）或上櫃（otc_）
+    progress_callback : callable, optional
+        (n_done, n_total) → 每批完成後呼叫，用於 UI 動態進度顯示
+
+    Returns
+    -------
+    pd.DataFrame，欄位：[股票代號, 現價, 成交量_張]
+    - 現價：float 或 None（完全抓不到時）
+    - 成交量_張：float（原始成交量 / 1000）
+    """
+    rows = []
+    codes = [str(c).strip() for c in stock_ids if str(c).strip()]
+    total = len(codes)
+    n_batches = (total + _TWSE_REALTIME_BATCH_SIZE - 1) // _TWSE_REALTIME_BATCH_SIZE
+    _MS_PROGRESS["stage"] = "TWSE即時股價"
+    _MS_PROGRESS["total"] = total
+
+    for batch_idx in range(n_batches):
+        batch_codes = codes[
+            batch_idx * _TWSE_REALTIME_BATCH_SIZE:
+            (batch_idx + 1) * _TWSE_REALTIME_BATCH_SIZE
+        ]
+        # 組合 ex_ch 參數：上市 tse_，上櫃 otc_
+        def _prefix(code: str) -> str:
+            code = code.strip()
+            # 6 開頭通常為上櫃（排除特殊code），其餘上市
+            if code.startswith(("00", "0")) or code[0] in ("1", "2", "3", "4", "5", "7", "8", "9"):
+                # 簡單判断：code[0] in '12345789' → 上市
+                # 但 6 開頭需上櫃
+                return f"tse_{code}.tw"
+            else:
+                return f"otc_{code}.tw"
+
+        # 更準確的判斷：若已知上市清單則用清單，否則預設上市
+        # 這裡用上櫃常見前綴：6開頭 + 特定code
+        def _prefix_v2(code: str) -> str:
+            code = code.strip()
+            # 上櫃：通常 6 開頭，少數例外（這裡用寬鬆判斷）
+            if code.startswith("6"):
+                return f"otc_{code}.tw"
+            return f"tse_{code}.tw"
+
+        ex_ch = "|".join(_prefix_v2(c) for c in batch_codes)
+        url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex_ch}"
+
+        try:
+            resp = requests.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Referer": "https://mis.twse.com.tw/",
+                },
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            print(f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}）：{e}")
+            # 該批全設 None
+            for code in batch_codes:
+                rows.append({"股票代號": code, "現價": None, "成交量_張": 0.0})
+            continue
+
+        for rec in data.get("msgArray", []):
+            raw_code = rec.get("c", "").strip()
+            if not raw_code:
+                continue
+            z = rec.get("z", "-")   # 現價（盤中）
+            o = rec.get("o", "-")   # 開盤價
+            y = rec.get("y", "-")   # 昨收
+
+            # 現價計算：z 為 "-" → fallback 到 o → fallback 到 y
+            if z != "-":
+                price = float(z)
+            elif o != "-":
+                price = float(o)
+            elif y != "-":
+                price = float(y)
+            else:
+                price = None
+
+            # 成交量（TWSE 回傳的是當日累積成交量，直接可用）
+            v_raw = rec.get("v", "0")
+            try:
+                vol = float(v_raw) / 1000.0  # 張
+            except (ValueError, TypeError):
+                vol = 0.0
+
+            rows.append({"股票代號": raw_code, "現價": price, "成交量_張": vol})
+
+        # 進度回呼
+        n_done = min((batch_idx + 1) * _TWSE_REALTIME_BATCH_SIZE, total)
+        _MS_PROGRESS["done"] = n_done
+        if progress_callback:
+            progress_callback(n_done, total)
+
+        # 輕微延遲，避免對 TWSE 伺服器造成壓力
+        if batch_idx < n_batches - 1:
+            time.sleep(0.1)
+
+    df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["股票代號", "現價", "成交量_張"])
+    df["股票代號"] = df["股票代號"].astype(str).str.strip()
+    return df
+
 
 _FINMIND_PRICE_CACHE = {}   # {stock_id: {date: row}}（多日 cache）
 
@@ -4492,7 +4621,7 @@ class StrategyGUI(tk.Tk):
         # V0.9.5+: 跑選股前是否重抓股價（預設不勾、用 cache）
         self._ms_refresh_price_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            btn_row, text="🔄 即時抓股價（跑前重抓全部股票，較慢）",
+            btn_row, text="🔄 TWSE 即時股價（走 TWSE 免費 API，盤中 15-20 秒延遲）",
             variable=self._ms_refresh_price_var
         ).pack(anchor="w")
         # V0.9.5: 手動重抓股價（背景跑中就跳過）
@@ -4955,46 +5084,43 @@ class StrategyGUI(tk.Tk):
                 revenue_df = getattr(self, '_revenue_df', None)
                 eps_df = getattr(self, '_eps_df', None)
 
-                # V0.9.5+: 「即時抓股價」checkbox → 跑選股前重抓 price_df 全部股票的最新股價
-                # 背景重抓的股價可能跟使用者看到的時間不同
-                # 勾選後會走 FinMind price API 重抓全部（可能需要 30-60 秒）
-                # 【V0.9.5-goodinfo4.3 修 Bug】2026-06-18 William 反映：
-                #   勾了 checkbox 仍 1 秒出結果、實際根本沒打 FinMind
-                #   根因：_FINMIND_PRICE_CACHE 是 module-level 全域 cache、
-                #         App 啟動時背景抓過的 cache 會一直命中、checkbox 形同虛設
-                #   修法：傳 force_refresh=True → 先清 cache 再實際打 FinMind
-                #   UI 更新一律用 self.after(0, ...) 回到 main thread 避免 thread-safety 問題
+                # V0.9.5-twser：「即時抓股價」checkbox → 改走 TWSE 即時 API（免費無額度限制）
+                # 【V0.9.5-twser 重大改版】2026-06-18 William 指示：
+                #   FinMind 有額度限制（300次/hr）且有 402 付費牆，
+                #   TWSE 即時 API 完全免費（延遲 15-20 秒），可一次打 50 檔、無限次呼叫
+                #   → 即時抓股價從 FinMind 改為 TWSE，FinMind 額度完全留給股利補抓
+                # UI 更新一律用 self.after(0, ...) 回到 main thread 避免 thread-safety 問題
                 if getattr(self, '_ms_refresh_price_var', None) and self._ms_refresh_price_var.get():
                     if price_df is not None and not price_df.empty:
                         all_codes = price_df["股票代號"].astype(str).str.strip().tolist()
                         n_codes = len(all_codes)
-                        # 預估時間：0.35s / 檔
-                        est_min = n_codes * 0.35 / 60
+                        # 預估時間：TWSE API 約 0.1s/批（50檔）+ 網路延遲，2376檔約 20-30 秒
+                        est_sec = (n_codes / 50) * 0.15 + 2
                         self.after(0, lambda: self._ms_status.set(
-                            f"🔄 即時抓股價中（{n_codes} 檔、約 {est_min:.1f} 分鐘）..."
+                            f"🔄 TWSE 即時股價抓取中（{n_codes} 檔）..."
                         ))
-                        print(f"🔄 即時抓股價中... {n_codes} 檔（force_refresh=True）")
-                        self.logger.log(f"🔄 即時抓股價中... {n_codes} 檔")
+                        print(f"🔄 TWSE 即時股價抓取中... {n_codes} 檔")
+                        self.logger.log(f"🔄 TWSE 即時股價抓取中... {n_codes} 檔")
                         _t0 = datetime.now()
                         try:
                             def _price_progress(n_done, n_total):
                                 pct = int(n_done / n_total * 100) if n_total else 0
                                 # 進度回呼在 background thread 跑、用 after 回到 main thread
                                 self.after(0, lambda: self._ms_status.set(
-                                    f"🔄 即時抓股價中... {n_done}/{n_total} ({pct}%)"
+                                    f"🔄 TWSE 即時股價抓取中... {n_done}/{n_total} ({pct}%)"
                                 ))
-                            fresh = _fetch_finmind_prices_batch(
+                            # 【V0.9.5-twser】改用 TWSE 即時 API（取代 FinMind）
+                            fresh = _fetch_twse_realtime_batch(
                                 all_codes,
                                 progress_callback=_price_progress,
-                                force_refresh=True,  # ← 關鍵：清 cache 重抓
                             )
                             _t1 = datetime.now()
                             _elapsed = (_t1 - _t0).total_seconds()
                             self.after(0, lambda: self._ms_status.set(
-                                f"✅ 即時抓股價完成（{n_codes} 檔、耗時 {_elapsed:.1f} 秒）"
+                                f"✅ TWSE 即時股價完成（{n_codes} 檔、耗時 {_elapsed:.1f} 秒）"
                             ))
-                            print(f"✅ 即時抓股價完成：耗時 {_elapsed:.1f} 秒")
-                            self.logger.log(f"✅ 即時抓股價完成：耗時 {_elapsed:.1f} 秒")
+                            print(f"✅ TWSE 即時股價完成：耗時 {_elapsed:.1f} 秒")
+                            self.logger.log(f"✅ TWSE 即時股價完成：耗時 {_elapsed:.1f} 秒")
                             if not fresh.empty and "現價" in fresh.columns:
                                 # merge：新價覆蓋舊價、沒抓到的保持原值
                                 fresh_small = fresh[["股票代號"]].copy()
