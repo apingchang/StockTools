@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-twser3 (2026-06-18 11:52)         ║
+║               台灣股市量化選股系統 v0.9.5-goodinfo4+5 (2026-06-18 13:05)         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-V0.9.5-twser
+V0.9.5-goodinfo
 【版本資訊】
-Version: v0.9.5-twser3
-最後更新: 2026-06-18 11:52 (Asia/Taipei)
+Version: v0.9.5-goodinfo4+5
+最後更新: 2026-06-18 13:27 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -326,6 +326,60 @@ Python 版本: 3.8+
 - test_cash_strictly_cash_only（現金 vs 股票分開守護）
 
 ════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-goodinfo4+5 更新內容】2026-06-18 13:05 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【William 反映】
+1. 現金股利你還是把現金＋股票加總了！以 2442 為例 今年現金=2.0、去年現金=0.079 才對！
+2. 順便把股票股利及現金股利改成顯示小數點下 3 位數
+
+【Bug 1：goodinfo 2026 Dividend10Y 欄位格式變了】
+- 【根因】goodinfo 從 2026 開始，Dividend10Y 檔的 `{year}發放年度` 欄位
+  **改存「合計股利」（cash + stock）**而不是「現金股利」！
+  - 2017-2025：10Y_div 欄位 = 現金股利 ✓
+  - 2026 開始：10Y_div 欄位 = 合計股利 ✗（同年的 10Y_share 還是正確的股票股利）
+- 【證據】對照 goodinfo 2026 單年檔 (P50U_2026股利股息.xls / P20-50_2026股利股息.xls / P20L_2026股利股息.xls)
+  | 代號 | DB 2026 cash (錯) | 單年 2026 現金 (對) | 單年 2026 合計 | 單年 2026 股票 |
+  | 2442 | 2.7              | 2.0               | 2.7           | 0.7            |
+  | 2548 | 8.5              | 8.0               | 8.5           | 0.5            |
+  | 6874 | 4.0              | 3.0               | 4.0           | 1.0            |
+  | 5386 | 6.5              | 1.5               | 6.5           | 5.0            |
+  | 1294 | 5.0              | 3.0               | 5.0           | 2.0            |
+  | 4114 | 1.65             | 0.85              | 1.65          | 0.8            |
+- 【修法】新加 `import_2026_dividend()` 函式、從 2026 單年檔覆寫 DB 2026 cash/stock
+  - 用 `skipna=False` 保留「未公布」語意（避免 NaN 被當 0）
+  - 用 UPDATE 而不是 INSERT OR REPLACE（避免洗掉殖利率 cash_yield_pct / share_yield_pct）
+  - 只覆寫「有資料」的欄位、另一欄位保留 DB 原值
+    （例：9946 季配 2026、cash=NaN stock=0.0 → 保留 old_cash 1.37）
+- 【run 順序】`import_dividend()` → `import_2026_dividend()` → `import_yield_rate()`
+  - 10Y 寫入 → 單年檔覆寫 2026 → 殖利率補回
+
+【Bug 2：股利顯示精度不夠】
+- 原本 `_fmt_float(..., decimals=2)` → 2442 2025 現金 0.237 顯示 0.24（精度丟失）
+- 改 `_fmt_float(..., decimals=3)` → 顯示 0.237（保留精度）
+- 應用範圍：4 個股利欄位（今年股票/今年現金/去年股票/去年現金）
+  其他欄位（現價/殖利率/PE/成交量）仍維持 2 位
+
+【pytest】test_dividend_3decimal_2026_cash_bug.py（8 個守護 test）
+- test_股票股利顯示_3位小數
+- test_現金股利顯示_3位小數
+- test_去年股票股利顯示_3位小數
+- test_DB_2026_cash_不等於_cash_plus_stock
+- test_2442_2026_cash_等於_2_0_不是_2_7
+- test_2548_2026_cash_等於_8_0_不是_8_5
+- test_import_2026_dividend_保留_殖利率
+- test_季配股_2026_cash_未公布_保留_既有值
+
+【DB 修補結果】
+- 受影響股數：~1,710 筆（2026 cash 誤存合計、2025 之前不受影響）
+- 修法：重跑 `python3 scripts/import_goodinfo_history.py --only div` 自動修補
+- 修補後：2442 cash=2.000、2548 cash=8.000、6874 cash=3.000、1294 cash=3.000、5386 cash=1.500、4114 cash=0.850
+
+【William 第二點：去年現金應該是 0.079】
+- DB 2025 cash=0.237（正確、不是 0.079）
+- 0.079 找不到對應的 goodinfo 資料來源
+- 可能 William 看的是其他來源、待下次開 App 確認
+
+════════════════════════════════════════════════════════════════════════════════
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-twser 更新內容】2026-06-18 10:05 (William 指示)
@@ -544,7 +598,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-twser3"
+VERSION = "v0.9.5-goodinfo4+5"
 
 
 import io
@@ -5398,9 +5452,11 @@ class StrategyGUI(tk.Tk):
             rev_str = _fmt_float(row.get("累計營收YoY(%)"))
             # 【V0.9.5+ Phase 8】key 保留「(元)」：_run_manual_selection final rename
             # 把「今年股票股利」→「今年股票股利(元)」、這裡要跟著帶「(元)」
-            stock_str = _fmt_float(row.get("今年股票股利(元)"))
+            # 【V0.9.5-goodinfo4+5】改 3 位小數：cash/stock 可能小於 0.5、2 位會看不出
+            # (ex: 2442 2025 現金 0.237、股票 0.158；4114 2026 現金 0.85)
+            stock_str = _fmt_float(row.get("今年股票股利(元)"), decimals=3)
             # 【V0.9.5+ Phase 8 新增】今年現金股利金額（原本 _ms_display_results 完全沒讀這個欄位）
-            cash_div_str = _fmt_float(row.get("今年現金股利(元)"))
+            cash_div_str = _fmt_float(row.get("今年現金股利(元)"), decimals=3)
             cash_str = _fmt_float(row.get("今年現金殖利率(%)"))
             pe_str = _fmt_float(row.get("PE"))
             # 【V0.9.5-twser3 修 Bug】2026-06-18 William 反映：
@@ -5418,9 +5474,10 @@ class StrategyGUI(tk.Tk):
                     vol_str = f"{int(vol):,}" if pd.notna(vol) else "—"
                 except (TypeError, ValueError):
                     vol_str = "—"
-            last_stock_str = _fmt_float(row.get("去年股票股利(元)"))
+            last_stock_str = _fmt_float(row.get("去年股票股利(元)"), decimals=3)
             # 【V0.9.5+ Phase 8 新增】去年現金股利金額
-            last_cash_div_str = _fmt_float(row.get("去年現金股利(元)"))
+            # 【V0.9.5-goodinfo4+5】改 3 位小數
+            last_cash_div_str = _fmt_float(row.get("去年現金股利(元)"), decimals=3)
             last_cash_str = _fmt_float(row.get("去年現金殖利率(%)"))
             # 【V0.9.5-twser3 拿掉】股票殖利率欄位（William 不需要看）
             # stock_yld_this_str = _fmt_float(row.get("今年股票殖利率(%)"))
