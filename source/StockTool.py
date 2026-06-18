@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-twser2 (2026-06-18 10:31)         ║
+║               台灣股市量化選股系統 v0.9.5-twser3 (2026-06-18 11:52)         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-twser
 【版本資訊】
-Version: v0.9.5-twser2
-最後更新: 2026-06-18 10:56 (Asia/Taipei)
+Version: v0.9.5-twser3
+最後更新: 2026-06-18 11:52 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -292,6 +292,40 @@ Python 版本: 3.8+
 【pytest】test_dividend_yield_fix.py（5 個守護 test）
 
 ════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-twser3 更新內容】2026-06-18 11:16 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【William 反映】
+1. 現金股利你還是把現金＋股票加總了！所以殖利率是錯的數字！
+   → 【查證結果】DB 跟螢幕值完全一致、現金股利確實是 cash only：
+     - DB cash + stock 是分開存分開顯示（goodinfo 6 檔：3 現金 + 3 股票）
+     - 2548 華固：DB cash=8.5, stock=0.5 → 螢幕「今現金=8.50, 今股票=0.50」✓
+     - 2442 新美齊：DB cash=2.7, stock=0.7 → 螢幕「今現金=2.70, 今股票=0.70」✓
+   - 殖利率也是從 goodinfo cash_yield_pct 直接拿（不是現金/現價 算出來的）
+   - 【為什麼看起來「錯」】goodinfo 用「除息日前 5 日均價」（= ex-date close）
+     算殖利率、跟現價不同 → 2548 cash=8.5、殖利率 6.53% → 隱含價 130.17（不是現價 107）
+   - 應不會有加總問題、但加了 test_cash_strictly_cash_only 整合測試守護
+2. 篩選結果中不需要看股票殖利率、盤中不顯示成交量（顯示 "-"）、收盤後顯示總成交量
+
+【修法 1：Treeview 拿掉股票殖利率欄】
+- 原本 15 欄 → 改後 13 欄
+- 拿掉「今股票殖%」、「去年股票殖%」（Treeview header + display values）
+- DataFrame 還是產出 stock_yield 欄位（Excel 匯出還想保留）
+
+【修法 2：盤中成交量顯示 "-"、收盤後顯示總成交量】
+- 用 _is_market_hours() 判斷盤中（週一~五 09:00~13:30）
+- 盤中 → vol_str = "-"（TWSE 即時 API 每 15-20 秒更新累積量、顯示沒意義還會誤導）
+- 收盤後（含週末）→ 維持原本邏輯、顯示千分位總成交量
+
+【pytest】test_ms_no_stock_yield_vol_display.py（7 個守護 test）
+- test_treeview_columns_拿掉股票殖利率（13 欄結構守護）
+- test_成交量_盤中顯示橫線（盤中邏輯守護）
+- test_成交量_收盤後顯示總量（收盤後邏輯守護）
+- test_成交量_收盤後None顯示橫線（None 守護）
+- test_成交量_週末收盤後顯示總量（週末守護）
+- test_run_manual_selection_還是產出_stock_yield_欄位（Excel 匯出守護）
+- test_cash_strictly_cash_only（現金 vs 股票分開守護）
+
+════════════════════════════════════════════════════════════════════════════════
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-twser 更新內容】2026-06-18 10:05 (William 指示)
@@ -510,7 +544,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-twser2"
+VERSION = "v0.9.5-twser3"
 
 
 import io
@@ -4746,14 +4780,20 @@ class StrategyGUI(tk.Tk):
         #   殖利率沒對照到原始股利金額、無法驗算是否正確
         #   修法：加「今現金」/「去年現金」欄位（股利金額，原始股數）
         #   並修正之前 key 錯位（找「今年股票股利(元)」但欄位是「今年股票股利」）
+        # 【V0.9.5-twser3 修 Bug】2026-06-18 William 反映：
+        #   1. 「今股票殖%」/「去年股票殖%」拿掉（不需要看股票殖利率）
+        #   2. 「成交量(張)」盤中顯示 "-"、收盤後才顯示總成交量
+        #     - 盤中：TWSE 即時 API 給的累積量每 15-20 秒變動、顯示沒意義
+        #     - 收盤後：13:30 後量才固定、顯示才是當日真實總量
         cols = ("勾選","代號","名稱","現價","累計YoY%",
-                "今股票","今現金","今現金殖%","今股票殖%",
+                "今股票","今現金","今現金殖%",
                 "PE","成交量(張)",
-                "去年股票","去年現金","去年現金殖%","去年股票殖%")
+                "去年股票","去年現金","去年現金殖%")
         self._ms_tree = ttk.Treeview(right_frame, columns=cols, show="headings",
                                      selectmode="none", height=25)
-        col_widths = (40, 60, 100, 70, 70, 60, 60, 80, 80,
-                      50, 80, 60, 60, 80, 80)
+        # 13 欄（拿掉 2 個股票殖利率）：原本 15 欄 - 2 = 13
+        col_widths = (40, 60, 100, 70, 70, 60, 60, 80,
+                      50, 80, 60, 60, 80)
         for col, w in zip(cols, col_widths):
             self._ms_tree.heading(col, text=col)
             self._ms_tree.column(col, width=w, anchor="center")
@@ -5363,26 +5403,37 @@ class StrategyGUI(tk.Tk):
             cash_div_str = _fmt_float(row.get("今年現金股利(元)"))
             cash_str = _fmt_float(row.get("今年現金殖利率(%)"))
             pe_str = _fmt_float(row.get("PE"))
+            # 【V0.9.5-twser3 修 Bug】2026-06-18 William 反映：
+            #   盤中不顯示成交量（顯示 "-"）、收盤後才顯示總成交量
+            #   - 盤中 TWSE 即時 API 每 15-20 秒更新累積量、顯示沒意義還會誤導
+            #   - 收盤後（13:30）後量才固定、顯示才是當日真實總量
+            #   - 週末（週六日）→ 不開盤、量也算「收盤後」狀態（沿用上週五總量）
             vol = row.get("成交量(張)")
-            try:
-                vol_str = f"{int(vol):,}" if pd.notna(vol) else "—"
-            except (TypeError, ValueError):
-                vol_str = "—"
+            if _is_market_hours():
+                # 盤中：顯示 "-"（避免誤導使用者以為是總量）
+                vol_str = "-"
+            else:
+                # 收盤後 / 盤前 / 週末：顯示總成交量
+                try:
+                    vol_str = f"{int(vol):,}" if pd.notna(vol) else "—"
+                except (TypeError, ValueError):
+                    vol_str = "—"
             last_stock_str = _fmt_float(row.get("去年股票股利(元)"))
             # 【V0.9.5+ Phase 8 新增】去年現金股利金額
             last_cash_div_str = _fmt_float(row.get("去年現金股利(元)"))
             last_cash_str = _fmt_float(row.get("去年現金殖利率(%)"))
-            # V0.9.5-goodinfo：股票殖利率（goodinfo 來源）
-            stock_yld_this_str = _fmt_float(row.get("今年股票殖利率(%)"))
-            stock_yld_last_str = _fmt_float(row.get("去年股票殖利率(%)"))
+            # 【V0.9.5-twser3 拿掉】股票殖利率欄位（William 不需要看）
+            # stock_yld_this_str = _fmt_float(row.get("今年股票殖利率(%)"))
+            # stock_yld_last_str = _fmt_float(row.get("去年股票殖利率(%)"))
 
             tag = "checked" if self._ms_checked.get(code, False) else "unchecked"
+            # 【V0.9.5-twser3】Treeview 從 15 欄變 13 欄（拿掉 2 個股票殖利率）
             self._ms_tree.insert("", "end", iid=code, values=(
                 "☑" if self._ms_checked.get(code, False) else "☐",
                 code, name, price_str, rev_str,
-                stock_str, cash_div_str, cash_str, stock_yld_this_str,
+                stock_str, cash_div_str, cash_str,
                 pe_str, vol_str,
-                last_stock_str, last_cash_div_str, last_cash_str, stock_yld_last_str
+                last_stock_str, last_cash_div_str, last_cash_str
             ), tags=(tag,))
 
         self._ms_status.set(f"✅ 符合條件：{len(result)} 檔（上限 {self._ms_limit_var.get()} 檔）｜排序：營收YoY > 今年股票 > 今年現金殖% > PE")
