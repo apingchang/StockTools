@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-etf-gui (2026-06-19 23:30)         ║
+║               台灣股市量化選股系統 v0.9.5-etf-fix (2026-06-19 23:40)         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-etf-gui
-最後更新: 2026-06-19 23:35 (Asia/Taipei)
+Version: v0.9.5-etf-fix
+最後更新: 2026-06-19 23:43 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -97,6 +97,41 @@ Python 版本: 3.8+
 - pytest：262 passed（+15 新）、3 pre-existing fail（跟本次無關）
 - 語法檢查通過
 - GUI 尚未實體測試、需 William 開 App 看
+
+═══════════════════════════════════════════════════════════════════════════════
+【v0.9.5-etf-fix 修 Bug 內容】2026-06-19 23:40 (William 23:37 反映)
+═══════════════════════════════════════════════════════════════════════════════
+【問題】William 開 App 重現：
+```
+NameError: cannot access free variable 'e' where it is not associated with a value in enclosing scope
+  File "StockTool.py", line 6928, in <lambda>
+    self.after(0, lambda: self._etf_refresh_done(None, str(e)))
+```
+連兩個 lambda 都是。
+
+【根因】Python closure trap：
+- `except Exception as e` 在 except 區塊結束後、變數 `e` 會被釋放
+- lambda 是 closure、變數名稱是「綁定到外面 scope」、不是 copy 值
+- `self.after(0, lambda: ...)` 是「延遲 callback」、跑到時 except 已結束 → NameError
+
+【修法】用 default argument 鎖住變數值
+- `self.after(0, lambda err=str(e): self._x(None, err))`
+- lambda 參數預設值在 lambda 建立當下就 freeze、不受 scope 釋放影響
+- 這是 Python 常見 idiom、`functools.partial` 也可但沒那麼簡潔
+
+【同時套用到兩處】
+- `_etf_refresh_holdings` 的 worker（line 6926、6930）
+- `_etf_auto_startup_fetch` 的 worker（line 7073、7075）
+- 都涉及 threading + after(0, ...) + except e 的模式
+
+【pytest 新增 3 個】test_etf_closure.py
+- test_closure_default_arg_locks_value：用 default arg 鎖住的 lambda 可正常取值
+- test_closure_default_arg_normal_lambda_will_fail：反向驗證、沒鎖的 lambda 真的會 NameError
+- test_dataclass_arg_locks_agg_df：DataFrame 也用 default arg 鎖
+
+【驗證】
+- pytest：265 passed（+3 新）、3 pre-existing fail（跟本次無關）
+- 語法檢查通過
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-scrollfix 更新內容】2026-06-19 22:15 (William 反映)
@@ -6922,10 +6957,12 @@ class StrategyGUI(tk.Tk):
                 price_df = self._load_price_df()
                 agg_df = aggregate_etf_holdings(long_df, price_df)
 
-                self.after(0, lambda: self._etf_refresh_done(agg_df, None, long_df=long_df))
+                # 【V0.9.5-etf-gui fix 2026-06-19】避免 closure trap：agg_df/long_df 用 default arg 鎖住
+                self.after(0, lambda a=agg_df, l=long_df: self._etf_refresh_done(a, None, long_df=l))
             except Exception as e:
                 self.logger.log(f"❌ ETF 持股抓取例外：{e}")
-                self.after(0, lambda: self._etf_refresh_done(None, str(e)))
+                # 【V0.9.5-etf-gui fix 2026-06-19】用 default arg 鎖住 e
+                self.after(0, lambda err=str(e): self._etf_refresh_done(None, err))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -7069,10 +7106,12 @@ class StrategyGUI(tk.Tk):
                     return
                 price_df = self._load_price_df()
                 agg_df = aggregate_etf_holdings(long_df, price_df)
-                self.after(0, lambda: self._etf_auto_startup_done(agg_df, None, long_df=long_df))
+                # 【V0.9.5-etf-gui fix 2026-06-19】避免 closure trap：agg_df/long_df 用 default arg 鎖住
+                self.after(0, lambda a=agg_df, l=long_df: self._etf_auto_startup_done(a, None, long_df=l))
             except Exception as e:
                 self.logger.log(f"❌ [ETF] 開機抓取例外：{e}")
-                self.after(0, lambda: self._etf_auto_startup_done(None, str(e)))
+                # 【V0.9.5-etf-gui fix 2026-06-19】用 default arg 鎖住 e（except 離開後 e 會被釋放）
+                self.after(0, lambda err=str(e): self._etf_auto_startup_done(None, err))
 
         threading.Thread(target=_worker, daemon=True).start()
 
