@@ -6,12 +6,41 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-cache-vol
-最後更新: 2026-06-19 22:10 (Asia/Taipei)
+最後更新: 2026-06-19 22:17 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
 ════════════════════════════════════════════════════════════════════════════════
-【v0.9.5-cache-savelist 更新內容】2026-06-19 22:10 (William 要求)
+【v0.9.5-cache-scrollfix 更新內容】2026-06-19 22:15 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 22:12 本機測試反映 2 點：
+1. 「手動選股左邊欄位沒有全部顯示時請提供 scroll bar 可以 scroll」
+2. 「匯出 excel 所生成 file 可以為回策略參數中的選股來源嗎？果可以只要這個功能即可」
+
+【改動 1】手動選股左面板加垂直捲軸
+- 原實作：left_frame = ttk.LabelFrame(paned) → widget 比視窗高被裁掉
+- 新實作：left_container = Frame(paned) + Canvas + Scrollbar（參考策略參數 Tab pattern）
+- left_frame 改放在 Canvas 內、bind <Configure> 更新 scrollregion
+- 加 <MouseWheel> 滑鼠滾輪支援
+
+【改動 2】「📤 匯出 Excel」補上使用提示
+- 結論：匯出的檔可以直接當「使用 Excel 股票清單」讀取
+  · load_stock_list_from_excel 透過 find_col 找「股票代號」欄
+  · 多餘欄位（殖利率、現價等）不影響
+- 原本上版新增的「💾 存成 Excel 股票清單」按鈕 → 拿掉
+  · 與「📤 匯出 Excel」重複
+  · 多餘複雜度、撥亂反正
+- messagebox.showinfo 加訊息：「💡 這個檔案可以直接給「策略參數 → 使用 Excel 股票清單」讀取使用」
+
+【pytest 調整】
+- 刪除 tests/test_ms_save_stock_list.py（4 個 test、針對已拿掉的方法）
+- 新增 tests/test_ms_export_excel_compat.py（1 個整合測試）
+
+【驗證】
+- pytest：237 passed（-4 +1）、3 pre-existing fail（跟本次無關）
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-cache-savelist 更新內容】2026-06-19 22:10 (William 要求）
 ════════════════════════════════════════════════════════════════════════════════
 【背景】William 22:05 本機測試：「手動選股頁少了一個 Save 按鈕」
 - 要求：「勾選要的股票後可以儲存為 excel file」
@@ -5388,9 +5417,33 @@ class StrategyGUI(tk.Tk):
         paned = ttk.PanedWindow(parent, orient="horizontal")
         paned.pack(fill="both", expand=True, padx=6, pady=6)
 
-        # ── 左面板：篩選條件 + Preset ──
-        left_frame = ttk.LabelFrame(paned, text="🔎 篩選條件", padding=8)
-        paned.add(left_frame, weight=0)
+        # ── 左面板：篩選條件 + Preset + 按鈕 ──
+        # 【V0.9.5-cache-scrollfix 改】2026-06-19 22:12 William 反映：
+        # 「window size 不夠大、手動選股左邊欄位沒有全部顯示時請提供 scroll bar 可以 scroll」
+        # 原實作 left_frame = ttk.LabelFrame(paned) → widget 比視窗高就被裁掉
+        # 改為：外層 left_container（含 Canvas + scrollbar）→ 內層 left_frame（LabelFrame）
+        left_container = ttk.Frame(paned)
+        paned.add(left_container, weight=0)
+
+        # Canvas + scrollbar（參考策略參數 Tab 的 scroll pattern）
+        left_canvas = tk.Canvas(left_container, width=380, highlightthickness=0)
+        left_scrollbar = ttk.Scrollbar(left_container, orient="vertical", command=left_canvas.yview)
+        left_canvas.configure(yscrollcommand=left_scrollbar.set)
+        left_scrollbar.pack(side="right", fill="y")
+        left_canvas.pack(side="left", fill="both", expand=True)
+
+        # 滑鼠滾輪支援
+        def _on_mousewheel(event):
+            left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        left_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # 真正的內容在 left_frame 裡、embed 到 canvas
+        left_frame = ttk.LabelFrame(left_canvas, text="🔎 篩選條件", padding=8)
+        left_canvas.create_window((0, 0), window=left_frame, anchor="nw")
+        left_frame.bind(
+            "<Configure>",
+            lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")),
+        )
 
         # Preset 管理
         preset_top = ttk.Frame(left_frame)
@@ -5485,13 +5538,6 @@ class StrategyGUI(tk.Tk):
                    command=self._ms_select_none).pack(fill="x", pady=1)
         ttk.Button(btn_row, text="📤 匯出 Excel",
                    command=self._ms_export_excel).pack(fill="x", pady=1)
-        # 【V0.9.5-cache-savelist 新增】2026-06-19 22:05 William 要求：
-        # 「在手動選股頁可以存成 excel file、之後餵給策略參數頁的『使用 Excel 股票清單』」
-        # 不同於 _ms_export_excel（完整資料含門檻欄）：
-        #   - 只存「股票代號」+「股票名稱」兩欄（乾淨、可直接被 load_stock_list_from_excel 讀取）
-        #   - 至少要勾選一隻
-        ttk.Button(btn_row, text="💾 存成 Excel 股票清單",
-                   command=self._ms_save_stock_list).pack(fill="x", pady=1)
 
         # ── 右面板：結果列表 ──
         right_frame = ttk.LabelFrame(paned, text="📊 篩選結果", padding=4)
@@ -6360,111 +6406,21 @@ class StrategyGUI(tk.Tk):
                 ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 30)
 
             wb.save(filepath)
-            messagebox.showinfo("匯出成功", f"已匯出 {len(result)} 檔\n→ {filepath}")
+            # 【V0.9.5-cache-savelist-fix2】2026-06-19 22:15 William 反映：
+            # 「匯出 excel 可以餵回策略參數中的選股來源嗎？可以就只要這個功能」
+            # 是的：load_stock_list_from_excel 只要「股票代號」欄（find_col 找「股票/code」）
+            # 這個檔案包含「股票代號」+「股票名稱」+ 其他欄位 → load 只讀代號、其它忽略
+            # 所以不需要額外加「存成 Excel 股票清單」按鈕、這個檔案直接就能用。
+            messagebox.showinfo(
+                "匯出成功",
+                f"已匯出 {len(result)} 檔\n→ {filepath}\n\n"
+                f"💡 這個檔案可以直接給「策略參數 → 使用 Excel 股票清單」讀取使用\n"
+                f"   （只取「股票代號」欄、其他欄位會被忽略）",
+            )
         except Exception as e:
             messagebox.showerror("匯出失敗", str(e))
 
     # ── Preset 管理 ──
-    def _ms_save_stock_list(self):
-        """【V0.9.5-cache-savelist】存勾選的股票為乾淨 Excel 股票清單
-        設計目標：
-        - 只存「股票代號」+「股票名稱」兩個欄位
-        - 可被 load_stock_list_from_excel 直接讀取（只需要「股票代號」欄位）
-        - 適用於「選股來源」→「使用 Excel 股票清單」功能
-
-        流程：
-        1. 檢查是否已選股、Treeview 有資料
-        2. 檢查是否勾選至少一隻
-        3. 彈檔案儲存對話框、預設檔名 stock_list_YYYYMMDD.xlsx
-        4. 寫入「股票代號」、「股票名稱」兩欄
-        5. 提示成功、並告訴 user 下一步怎麼用
-        """
-        if not hasattr(self, '_ms_result_df') or self._ms_result_df is None or self._ms_result_df.empty:
-            messagebox.showwarning("無資料", "請先按「選股」執行篩選")
-            return
-
-        checked = [code for code, v in self._ms_checked.items() if v]
-        if not checked:
-            messagebox.showwarning(
-                "未勾選",
-                "請先勾選要儲存的股票（至少一隻）\n\n"
-                "提示：點 Treeview 第一欄的 ☐ 可以切換勾選狀態。",
-            )
-            return
-
-        # 從 _ms_result_df 篩出勾選的、只取「股票代號」+「股票名稱」
-        result = self._ms_result_df[
-            self._ms_result_df["股票代號"].astype(str).str.strip().isin(checked)
-        ].copy()
-
-        code_col = find_col(result.columns, ["股票代號"])
-        name_col = find_col(result.columns, ["股票名稱"])
-        if code_col is None:
-            messagebox.showerror("錯誤", "_ms_result_df 缺「股票代號」欄位")
-            return
-
-        out_df = pd.DataFrame({
-            "股票代號": result[code_col].astype(str).str.strip().values,
-            "股票名稱": result[name_col].astype(str).str.strip().values if name_col else "",
-        })
-
-        filepath = filedialog.asksaveasfilename(
-            title="存成 Excel 股票清單（供「使用 Excel 股票清單」讀取）",
-            defaultextension=".xlsx",
-            filetypes=["Excel 活頁簿 (*.xlsx)"],
-            initialfile=f"stock_list_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-        )
-        if not filepath:
-            return
-
-        try:
-            from openpyxl import Workbook
-            from openpyxl.styles import Font, PatternFill, Alignment
-
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "股票清單"
-
-            headers = list(out_df.columns)
-            ws.append(headers)
-
-            header_fill = PatternFill("solid", fgColor="4472C4")
-            header_font = Font(color="FFFFFF", bold=True)
-            for cell in ws[1]:
-                cell.fill = header_fill
-                cell.font = header_font
-                cell.alignment = Alignment(horizontal="center")
-
-            for row_data in out_df.values.tolist():
-                ws.append(row_data)
-
-            ws.column_dimensions["A"].width = 12  # 股票代號
-            ws.column_dimensions["B"].width = 24  # 股票名稱
-
-            wb.save(filepath)
-
-            self._ms_status.set(
-                f"💾 已存 {len(out_df)} 檔為 Excel 股票清單：{filepath}"
-            )
-            self.logger.log(
-                f"💾 已存 {len(out_df)} 檔為 Excel 股票清單：{filepath}"
-            )
-
-            messagebox.showinfo(
-                "存檔成功",
-                f"已存 {len(out_df)} 檔為 Excel 股票清單：\n\n"
-                f"📄 {filepath}\n\n"
-                f"💡 使用方式：\n"
-                f"  1. 切到「⚙️ 策略參數」Tab\n"
-                f"  2. 勾選「使用 Excel 股票清單」\n"
-                f"  3. 「Excel 檔案」欄位設成上面這個檔案路徑\n"
-                f"  4. 按「💾 儲存設定」保存\n"
-                f"  5. 按「▶ 執行策略」會以這個清單為選股來源",
-            )
-        except Exception as e:
-            self.logger.log(f"❌ 存成 Excel 股票清單失敗：{e}")
-            messagebox.showerror("存檔失敗", str(e))
-
     def _ms_get_presets(self) -> dict:
         raw = self.cfg.to_dict().get("manual_select_presets", {})
         return raw if isinstance(raw, dict) else {}
