@@ -1,14 +1,49 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-cache-info (2026-06-19 17:00)        ║
+║               台灣股市量化選股系統 v0.9.5-cache-vol (2026-06-19 18:00)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-cache-info
-最後更新: 2026-06-19 17:35 (Asia/Taipei)
+Version: v0.9.5-cache-vol
+最後更新: 2026-06-19 18:15 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-cache-vol 更新內容】2026-06-19 18:00 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-19 17:52 本機測試截圖反映 3 點：
+1. 「成交量(張)」、「資料日期」欄位全顯示 —（cache 沒有這兩個欄位）
+2. 視窗標題還是寫 v0.9.5-goodinfo4+5（忘記更新 VERSION 變數）
+3. 「提示」框位置太下面被捲拉遮住、難讀
+
+【改動 1】VERSION 變數更新（修視窗標題）
+- VERSION = "v0.9.5-goodinfo4+5" → "v0.9.5-cache-vol"
+- self.title() 用 VERSION、視窗標題會自動更新
+
+【改動 2】fetch_prices 順便抓成交量
+- TWSE STOCK_DAY_ALL 有 TradeVolume（股）、TPEx 有 TradingShares（股）
+- 兩者都是「股」單位 → /1000 變「張」
+- 統一存為 成交量_張 欄位
+- 邊界：API 沒 volume 欄位 → 成交量_張 = None、不 crash
+- 倒果：之前 cache_cleanup1 拿掉「即時抓股價」checkbox、沒人抓成交量
+  → Treeview 一直顯示 —。這修補了這個 regression。
+
+【改動 3】「提示」框位置調整
+- 原本：放在 console 下方、被捲拉遮住
+- 改為：放在 console 標題同一行（標題左、提示右）
+- 提示內容也縮短成一行、字體調小
+
+【pytest 新增】
+- tests/test_data_date_column.py 加 3 個成交量 test：
+  · TWSE TradeVolume 股→張
+  · TPEx TradingShares 股→張
+  · API 沒 volume 欄位不 crash
+
+【驗證】
+- pytest：234 passed（+3 新 test）、3 pre-existing fail
+- 順便驗證 fetch_prices mock 測試：2330 25000 張、6547 5000 張 都能正確轉換
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-info 更新內容】2026-06-19 17:00 (William 決定)
@@ -923,7 +958,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-goodinfo4+5"
+VERSION = "v0.9.5-cache-vol"
 
 
 import io
@@ -3032,6 +3067,12 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
 
     _twse_date_col = find_col(twse.columns, ["Date", "資料日期"])
     _tpex_date_col = find_col(tpex.columns, ["Date", "資料日期"])
+    # 【V0.9.5-cache-vol 新增】2026-06-19 William 反映：成交量不會顯示「—」
+    # TWSE STOCK_DAY_ALL 有 TradeVolume (股數)
+    # TPEx tpex_mainboard_quotes 有 TradingShares (股數)
+    # 兩者都是「股」單位、要 /1000 才變「張」
+    _twse_vol_col = find_col(twse.columns, ["TradeVolume"])
+    _tpex_vol_col = find_col(tpex.columns, ["TradingShares", "TradeVolume"])
 
     # 【V0.9.5-cache-info 防呆】若某 API 完全失敗（empty df）→ 補上必要欄位
     # 否則後面 twse[["股票代號", ...]] 會 KeyError
@@ -3046,6 +3087,7 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         find_col(twse.columns, ["收盤價", "ClosingPrice"]): "股價",
         find_col(twse.columns, ["漲跌價差", "Change"]): "漲跌",
         **({_twse_date_col: "_raw_date"} if _twse_date_col else {}),
+        **({_twse_vol_col: "_raw_volume"} if _twse_vol_col else {}),
     })
 
     tpex = tpex.rename(columns={
@@ -3054,6 +3096,7 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         find_col(tpex.columns, ["Close", "收盤", "ClosingPrice"]): "股價",
         find_col(tpex.columns, ["Change", "漲跌"]): "漲跌",
         **({_tpex_date_col: "_raw_date"} if _tpex_date_col else {}),
+        **({_tpex_vol_col: "_raw_volume"} if _tpex_vol_col else {}),
     })
 
     # 【V0.9.5-cache-info 新增】2026-06-19 William 要求：
@@ -3080,14 +3123,31 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         twse["_raw_date"] = ""
     if "_raw_date" not in tpex.columns:
         tpex["_raw_date"] = ""
+    # 【V0.9.5-cache-vol 防呆】若某 API 沒 volume 欄位 → 以空代替
+    if "_raw_volume" not in twse.columns:
+        twse["_raw_volume"] = None
+    if "_raw_volume" not in tpex.columns:
+        tpex["_raw_volume"] = None
 
-    price = pd.concat([twse[["股票代號", "公司名稱_來源", "股價", "漲跌", "_raw_date"]],
-                       tpex[["股票代號", "公司名稱_來源", "股價", "漲跌", "_raw_date"]]], ignore_index=True)
+    # 【V0.9.5-cache-vol】股數轉張、只保留「張」（不存原始股數）
+    def _vol_to_kilos(s):
+        """TradeVolume (e.g. "43019553" 股) → 張 (e.g. 43019.553)"""
+        try:
+            v = pd.to_numeric(s, errors="coerce")
+            if pd.isna(v):
+                return None
+            return v / 1000.0
+        except Exception:
+            return None
+
+    price = pd.concat([twse[["股票代號", "公司名稱_來源", "股價", "漲跌", "_raw_date", "_raw_volume"]],
+                       tpex[["股票代號", "公司名稱_來源", "股價", "漲跌", "_raw_date", "_raw_volume"]]], ignore_index=True)
     price["股票代號"] = price["股票代號"].astype(str).str.strip()
     price["股價"] = pd.to_numeric(price["股價"], errors="coerce")
     price["漲跌"] = pd.to_numeric(price["漲跌"], errors="coerce")
     price["data_date"] = price["_raw_date"].map(_roc_to_ad)
-    price = price.drop(columns=["_raw_date"])
+    price["成交量_張"] = price["_raw_volume"].map(_vol_to_kilos)
+    price = price.drop(columns=["_raw_date", "_raw_volume"])
     price = price.drop_duplicates("股票代號").reset_index(drop=True)
     return price
 
@@ -4726,7 +4786,16 @@ class StrategyGUI(tk.Tk):
         self.clear_btn.pack(fill="x", pady=2)
 
         # 右側 Console
-        ttk.Label(right, text="📝 執行記錄 (Program Console)", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        # 【V0.9.5-cache-info 調位置】標題 + 提示放在同一行（提示原本在 console 下面、被擋住）
+        title_row = ttk.Frame(right)
+        title_row.pack(fill="x")
+        ttk.Label(title_row, text="📝 執行記錄 (Program Console)", font=("Segoe UI", 12, "bold")).pack(side="left")
+        tip = ttk.Label(
+            title_row,
+            text="💡 v0.9.2 Top10 回測 ｜儲存設定自動載入｜左側可滾動",
+            foreground="#555", justify="right", font=("Helvetica", 8),
+        )
+        tip.pack(side="right")
 
         console_frame = ttk.Frame(right)
         console_frame.pack(fill="both", expand=True, pady=(6, 0))
@@ -4737,12 +4806,6 @@ class StrategyGUI(tk.Tk):
 
         self.console.pack(side="left", fill="both", expand=True)
         console_scrollbar.pack(side="right", fill="y")
-
-        tip = ("💡 提示:\n"
-               "   - v0.9.2 新增: Top10 基本面回測模式\n"
-               "   - 參數調整後可按「儲存設定」保存，下次啟動自動載入\n"
-               "   - 左側面板可滾動查看所有參數")
-        ttk.Label(right, text=tip, foreground="#555", justify="left").pack(anchor="w", pady=(6, 0))
 
     def _add_entry(self, parent, label, key, var_cls, default):
         row = ttk.Frame(parent)

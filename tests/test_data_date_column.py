@@ -192,3 +192,46 @@ if __name__ == "__main__":
     test_run_manual_selection_保留data_date()
     print("✅ test_run_manual_selection_保留data_date")
     print("\n🎉 All data_date tests passed!")
+
+# ==========================================================
+# 【V0.9.5-cache-vol 新增】fetch_prices 抓成交量
+# ==========================================================
+
+def test_fetch_prices_TWSE有成交量_轉成張():
+    """【V0.9.5-cache-vol】TWSE TradeVolume 25000000 股 → 25000 張"""
+    twse = [
+        {"Date": "1150618", "Code": "2330", "Name": "台積電",
+         "ClosingPrice": "950.0", "Change": "+5.0", "TradeVolume": "25000000"},
+    ]
+    s = _mock_session_factory(twse_data=twse)
+    df = st.fetch_prices(s, st.StrategyConfig())
+    assert "成交量_張" in df.columns
+    assert df.iloc[0]["成交量_張"] == 25000.0, (
+        f"TradeVolume=25000000 應為 25000 張、實際: {df.iloc[0]['成交量_張']}"
+    )
+
+
+def test_fetch_prices_TPEx有成交量_轉成張():
+    """【V0.9.5-cache-vol】TPEx TradingShares 5000000 股 → 5000 張"""
+    tpex = [
+        {"Date": "1150618", "SecuritiesCompanyCode": "6547",
+         "CompanyName": "高端", "Close": "15.0", "Change": "0", "TradingShares": "5000000"},
+    ]
+    s = _mock_session_factory(tpex_data=tpex)
+    df = st.fetch_prices(s, st.StrategyConfig())
+    assert df.iloc[0]["成交量_張"] == 5000.0, (
+        f"TradingShares=5000000 應為 5000 張、實際: {df.iloc[0]['成交量_張']}"
+    )
+
+
+def test_fetch_prices_沒成交量欄位_不crash_回None():
+    """【V0.9.5-cache-vol 邊界】API 沒 TradeVolume / TradingShares 欄位 → 成交量_張 = None"""
+    twse = [
+        # 故意不放 TradeVolume
+        {"Date": "1150618", "Code": "2330", "Name": "台積電",
+         "ClosingPrice": "950.0", "Change": "0"},
+    ]
+    s = _mock_session_factory(twse_data=twse)
+    df = st.fetch_prices(s, st.StrategyConfig())
+    assert "成交量_張" in df.columns
+    assert df.iloc[0]["成交量_張"] is None, "沒成交量欄位應回 None、不 crash"
