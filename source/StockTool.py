@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-cache-info
-最後更新: 2026-06-19 17:28 (Asia/Taipei)
+最後更新: 2026-06-19 17:35 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -72,8 +72,8 @@ Python 版本: 3.8+
 - 想重抓 cache close：原本就有「🔄 重新抓股價」按鈕（強制重抓、走 fetch_prices）
 
 【pre-commit hook 擴充】
-- 原本 regex：`v0.9.5-(goodinfo|twser)\d+(?:\.\d+)?`
-- 改為：`v0.9.5-(goodinfo|twser|cache)[a-z0-9]*(?:\.\d+)?`
+- 原本 regex：`v0.9.5-(goodinfo|twser)[0-9]+([.][0-9]+)?`
+- 改為：`v0.9.5-(goodinfo|twser|cache)[a-z0-9]*([.][0-9]+)?`
 - 讓 cache 系列也能自動更新 fileheader 時間戳
 
 【驗證】
