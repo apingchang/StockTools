@@ -1,14 +1,54 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-cache-cleanup1 (2026-06-19 14:17)        ║
+║               台灣股市量化選股系統 v0.9.5-cache-info (2026-06-19 17:00)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-cache-cleanup1
-最後更新: 2026-06-19 14:29 (Asia/Taipei)
+Version: v0.9.5-cache-info
+最後更新: 2026-06-19 17:28 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-cache-info 更新內容】2026-06-19 17:00 (William 決定)
+════════════════════════════════════════════════════════════════════════════════
+【背景】2026-06-19 14:17 William 延續討論：「手動選股筛選結果中增加一個欄位
+顯示個股資料所參考的最新日期」。這樣可以一眼看出筛選結果用的是哪天的收盤資料，
+避免「股價跟我看到的不一樣」混淆。
+
+【改動 1】Treeview 加「資料日期」欄位
+- fetch_prices 加 data_date 欄位（從 TWSE/TPEx 的 Date 欄位）
+  · TWSE / TPEx Date 都是民國年格式 "1150618" → 西元 "2026-06-18"
+  · 內部實作 _roc_to_ad() 轉換
+  · 邊界：API 沒 Date 欄位或格式不對 → 回空字串、不 crash
+- _run_manual_selection 的 price_cols / out_cols / final_cols 都加 data_date
+- _ms_display_results 在 Treeview 最右邊加「資料日期」欄位（14 欄變 15 欄）
+- 顯示規則：有 date 顯示日期、無 date 顯示 "—"
+
+【改動 2】_is_market_hours() 加半日盤例外
+- 新增 _HALF_DAY_DATES set（清單內容：過年封關日、其他需要提前收盤的特殊交易日）
+- 目前只有 "2026-02-13"（2026 過年封關日、除夕 2/16 前最後交易日）
+- 預設 半日盤 13:00 收盤（平日 13:30 收盤）
+- 註解標明來源：台灣證交所公告的「市場開休市日程」
+
+【改動 3】_on_bg_price_done 在 status bar 加股價更新時間 + 資料日期
+- 原本：「✅ 股價資料就緒（啓動時自動、2376 筆）｜可點「選股」」
+- 改為：「✅ 股價資料就緒（...）｜股價更新：2026-06-19 17:00:00｜資料日期：2026-06-18｜可點「選股」」
+- 讓使用者不用切到手動選股 Tab 也看得到更新時間
+
+【pytest 新增】
+- tests/test_market_hours.py 加 5 個半日盤 test（含清單包含 2026 封關日）
+- tests/test_data_date_column.py 新檔、7 個 test：
+  · 民國年轉西元（正常 / 民國 100 / 民國 114 / 格式錯誤）
+  · API 沒 Date 欄位不 crash
+  · TPEx 股也有 data_date
+  · _run_manual_selection 保留 data_date
+
+【驗證】
+- python -c "import ast; ast.parse(...)" → ✅ syntax OK
+- pytest：231 passed（+12 新 test 全綠）、3 pre-existing fail（test_dividend_yield_fix、跟本次改動無關）
+- 比 v0.9.5-cache-cleanup1 的 219 passed 多 12
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-cleanup1 更新內容】2026-06-19 14:17 (William 決定)
@@ -1168,13 +1208,28 @@ def load_cache(file_path):
     return df, last_update
 
 
+# 【V0.9.5-cache-info 新增】2026-06-19 William 要求：
+#   「_is_market_hours() 要處理台股半日盤（過年前封關日 13:00 收盤）」
+#   每年封關日不同、需手動維護此表
+#   來源：台灣證券交易所公告的「市場開休市日程」
+_HALF_DAY_DATES = {
+    "2026-02-13",  # 2026 過年封關日（除夕 2/16 前最後交易日、週五），13:00 收盤
+    # "2027-02-05",  # 2027 過年封關日（待驗證）
+    # 每年加新日期之前先查證：https://www.twse.com.tw/zh/holidaySchedule/holiday
+}
+
+
 def _is_market_hours(now: Optional[datetime] = None) -> bool:
-    """判斷是否在台股盤中時段（週一~五 09:00 ~ 13:30）
+    """判斷是否在台股盤中時段
 
     V0.9.5+ Phase 7 新規則（William 2026-06-15 09:56）：
-    - 09:00 開盤後到 13:30 收盤前：股價會一直變 → 任何需要現價的功能都要 refresh
-    - 13:30 收盤後到隔天 09:00 開盤前：股價已固定 → 一天只要 refresh 一次
+    - 平日 09:00 開盤後到收盤前：股價會一直變 → 任何需要現價的功能都要 refresh
+    - 收盤後到隔天 09:00 開盤前：股價已固定 → 一天只要 refresh 一次
     - 週末（週六、週日）：不開盤 → 用上週五收盤價、一天只要 refresh 一次
+
+    V0.9.5-cache-info 新規則（William 2026-06-19 14:17）：
+    - 半日盤（過年封關日等）：13:00 收盤、不是 13:30
+    - 依據 _HALF_DAY_DATES 清單判斷
 
     Returns
     -------
@@ -1188,9 +1243,13 @@ def _is_market_hours(now: Optional[datetime] = None) -> bool:
     # 週末（週六=5、週日=6）不開盤
     if now.weekday() >= 5:
         return False
-    # 平日 09:00 ~ 13:30 為台股盤中
+    # 半日盤 → 13:00 收盤；一般交易日 → 13:30 收盤
+    is_half_day = now.strftime("%Y-%m-%d") in _HALF_DAY_DATES
+    if is_half_day:
+        market_close = now.replace(hour=13, minute=0, second=0, microsecond=0)
+    else:
+        market_close = now.replace(hour=13, minute=30, second=0, microsecond=0)
     market_open = now.replace(hour=9, minute=0, second=0, microsecond=0)
-    market_close = now.replace(hour=13, minute=30, second=0, microsecond=0)
     return market_open <= now <= market_close
 
 
@@ -2307,7 +2366,8 @@ def _run_manual_selection(
         if name_col:
             price_cols.append(name_col)
         # 如果 cache 也有「股價」或「現價」也一起拉進來
-        for cc in ["股價", "現價", "成交量", "成交量_張", "漲跌"]:
+        # 【V0.9.5-cache-info】data_date 也要帶進來（Treeview 「資料日期」欄位用）
+        for cc in ["股價", "現價", "成交量", "成交量_張", "漲跌", "data_date"]:
             if cc in price_df.columns and cc not in price_cols:
                 price_cols.append(cc)
         base = price_df[price_cols].drop_duplicates("股票代號").copy()
@@ -2579,7 +2639,8 @@ def _run_manual_selection(
                 "去年現金股利", "去年股票股利", "去年現金殖利率(%)", "EPS本期",
                 f"{cy}現金股利", f"{cy - 1}現金股利", f"{cy - 2}現金股利",
                 # V0.9.5-goodinfo3：殖利率加強欄位（10Y 平均殖利率已拿掉，William 不需要）
-                "今年股票殖利率(%)", "去年股票殖利率(%)"]
+                "今年股票殖利率(%)", "去年股票殖利率(%)",
+                "data_date"]  # 【V0.9.5-cache-info】Treeview 「資料日期」欄位用
     out_cols = [c for c in out_cols if c in result.columns]
     # 整理重複的現金股利（保留乾淨的今年/去年/前年）
     result = result[out_cols].rename(columns={
@@ -2599,7 +2660,8 @@ def _run_manual_selection(
                   "今年股票股利", "今年現金股利", "今年現金殖利率(%)",
                   "去年股票股利", "去年現金股利", "去年現金殖利率(%)",
                   "今年股票殖利率(%)", "去年股票殖利率(%)",
-                  "PE", "成交量(張)", "EPS本期"]
+                  "PE", "成交量(張)", "EPS本期",
+                  "data_date"]  # 【V0.9.5-cache-info】Treeview 「資料日期」欄位用
     final_cols = [c for c in final_cols if c in result.columns]
     return result[final_cols].rename(columns={
         "今年現金股利": "今年現金股利_原始",
@@ -2968,11 +3030,22 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         print("❌ 無法讀取任何股價資料")
         return pd.DataFrame()
 
+    _twse_date_col = find_col(twse.columns, ["Date", "資料日期"])
+    _tpex_date_col = find_col(tpex.columns, ["Date", "資料日期"])
+
+    # 【V0.9.5-cache-info 防呆】若某 API 完全失敗（empty df）→ 補上必要欄位
+    # 否則後面 twse[["股票代號", ...]] 會 KeyError
+    if twse.empty:
+        twse = pd.DataFrame(columns=["股票代號", "公司名稱_來源", "股價", "漲跌"])
+    if tpex.empty:
+        tpex = pd.DataFrame(columns=["股票代號", "公司名稱_來源", "股價", "漲跌"])
+
     twse = twse.rename(columns={
         find_col(twse.columns, ["證券代號", "Code"]): "股票代號",
         find_col(twse.columns, ["證券名稱", "Name"]): "公司名稱_來源",
         find_col(twse.columns, ["收盤價", "ClosingPrice"]): "股價",
         find_col(twse.columns, ["漲跌價差", "Change"]): "漲跌",
+        **({_twse_date_col: "_raw_date"} if _twse_date_col else {}),
     })
 
     tpex = tpex.rename(columns={
@@ -2980,13 +3053,41 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         find_col(tpex.columns, ["CompanyName", "公司名稱", "Name"]): "公司名稱_來源",
         find_col(tpex.columns, ["Close", "收盤", "ClosingPrice"]): "股價",
         find_col(tpex.columns, ["Change", "漲跌"]): "漲跌",
+        **({_tpex_date_col: "_raw_date"} if _tpex_date_col else {}),
     })
 
-    price = pd.concat([twse[["股票代號", "公司名稱_來源", "股價", "漲跌"]],
-                       tpex[["股票代號", "公司名稱_來源", "股價", "漲跌"]]], ignore_index=True)
+    # 【V0.9.5-cache-info 新增】2026-06-19 William 要求：
+    #   「篩選結果中增加一個欄位顯示個股資料所參考的最新日期」
+    #   從 TWSE/TPEx 的 Date 欄位（民國年格式 "1150618"）轉西元 "2026-06-18"
+    #   用來區分「cache 抓取日」vs「個股本身最後交易日」（個股暫停交易時這兩個會不同）
+    def _roc_to_ad(s: str) -> str:
+        """民國年 YYYMMDD (e.g. "1150618") → 西元 YYYY-MM-DD (e.g. "2026-06-18")
+        民國年 = 西元年 - 1911
+        """
+        try:
+            s = str(s).strip()
+            if len(s) != 7 or not s.isdigit():
+                return ""
+            roc_y = int(s[:3])
+            m = int(s[3:5])
+            d = int(s[5:7])
+            return f"{roc_y + 1911:04d}-{m:02d}-{d:02d}"
+        except Exception:
+            return ""
+
+    # 【V0.9.5-cache-info 防呆】若某 API 沒 date 欄位 → 以空字串代替
+    if "_raw_date" not in twse.columns:
+        twse["_raw_date"] = ""
+    if "_raw_date" not in tpex.columns:
+        tpex["_raw_date"] = ""
+
+    price = pd.concat([twse[["股票代號", "公司名稱_來源", "股價", "漲跌", "_raw_date"]],
+                       tpex[["股票代號", "公司名稱_來源", "股價", "漲跌", "_raw_date"]]], ignore_index=True)
     price["股票代號"] = price["股票代號"].astype(str).str.strip()
     price["股價"] = pd.to_numeric(price["股價"], errors="coerce")
     price["漲跌"] = pd.to_numeric(price["漲跌"], errors="coerce")
+    price["data_date"] = price["_raw_date"].map(_roc_to_ad)
+    price = price.drop(columns=["_raw_date"])
     price = price.drop_duplicates("股票代號").reset_index(drop=True)
     return price
 
@@ -5220,12 +5321,14 @@ class StrategyGUI(tk.Tk):
         cols = ("勾選","代號","名稱","現價","累計YoY%",
                 "今股票","今現金","今現金殖%",
                 "PE","成交量(張)",
-                "去年股票","去年現金","去年現金殖%")
+                "去年股票","去年現金","去年現金殖%",
+                "資料日期")
         self._ms_tree = ttk.Treeview(right_frame, columns=cols, show="headings",
                                      selectmode="none", height=25)
-        # 13 欄（拿掉 2 個股票殖利率）：原本 15 欄 - 2 = 13
+        # 14 欄（拿掉 2 個股票殖利率 + 加 1 個資料日期）：原本 15 欄 - 2 + 1 = 14
         col_widths = (40, 60, 100, 70, 70, 60, 60, 80,
-                      50, 80, 60, 60, 80)
+                      50, 80, 60, 60, 80,
+                      90)
         for col, w in zip(cols, col_widths):
             self._ms_tree.heading(col, text=col)
             self._ms_tree.column(col, width=w, anchor="center")
@@ -5341,8 +5444,30 @@ class StrategyGUI(tk.Tk):
             self._price_df = df
             self._price_last_update = datetime.now()
             self._update_price_status_label()
-            self._ms_status.set(f"✅ 股價資料就緒（{source}、{len(df)} 筆）｜可點「選股」")
-            self.logger.log(f"✅ {source}股價完成：{len(df)} 筆")
+            # 【V0.9.5-cache-info】順手加股價更新時間到 status bar
+            # 讓使用者不管在哪個 Tab 都看得到「最後更新時間」
+            update_str = self._price_last_update.strftime("%Y-%m-%d %H:%M:%S")
+            # 【V0.9.5-cache-info】順手顯示 cache 的 data_date（個股最後交易日）
+            # 若 df 有 data_date 欄位且有資料，顯示該日期
+            data_date_hint = ""
+            try:
+                if "data_date" in df.columns:
+                    _dates = df["data_date"].dropna().astype(str)
+                    _dates = _dates[_dates != ""]
+                    if not _dates.empty:
+                        _latest = _dates.iloc[0]
+                        # 如果有多个不同日期、顯示範圍
+                        _unique_dates = sorted(set(_dates.tolist()))
+                        if len(_unique_dates) == 1:
+                            data_date_hint = f"｜資料日期：{_latest}"
+                        else:
+                            data_date_hint = f"｜資料日期：{_unique_dates[0]} ~ {_unique_dates[-1]}"
+            except Exception:
+                pass
+            self._ms_status.set(
+                f"✅ 股價資料就緒（{source}、{len(df)} 筆）｜股價更新：{update_str}{data_date_hint}｜可點「選股」"
+            )
+            self.logger.log(f"✅ {source}股價完成：{len(df)} 筆、股價更新：{update_str}{data_date_hint}")
         else:
             self._ms_status.set(f"⚠️ {source}股價完成但無資料")
             self.logger.log(f"⚠️ {source}股價完成但無資料")
@@ -5823,13 +5948,20 @@ class StrategyGUI(tk.Tk):
             # stock_yld_last_str = _fmt_float(row.get("去年股票殖利率(%)"))
 
             tag = "checked" if self._ms_checked.get(code, False) else "unchecked"
+            # 【V0.9.5-cache-info】加「資料日期」欄位（從 price_df.data_date）
+            # 顯示個股本身的「最後交易日」、不是 cache 抓取日
+            # 例：週五 13:35 抓的 cache、某些股週五暫停交易 → 顯示「2026-06-18」而不是「2026-06-19」
+            data_date = str(row.get("data_date", "")).strip()
+            data_date_str = data_date if data_date else "—"
             # 【V0.9.5-twser3】Treeview 從 15 欄變 13 欄（拿掉 2 個股票殖利率）
+            # 【V0.9.5-cache-info】再加 1 欄「資料日期」變 14 欄
             self._ms_tree.insert("", "end", iid=code, values=(
                 "☑" if self._ms_checked.get(code, False) else "☐",
                 code, name, price_str, rev_str,
                 stock_str, cash_div_str, cash_str,
                 pe_str, vol_str,
-                last_stock_str, last_cash_div_str, last_cash_str
+                last_stock_str, last_cash_div_str, last_cash_str,
+                data_date_str
             ), tags=(tag,))
 
         self._ms_status.set(f"✅ 符合條件：{len(result)} 檔（上限 {self._ms_limit_var.get()} 檔）｜排序：營收YoY > 今年股票 > 今年現金殖% > PE")
