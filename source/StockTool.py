@@ -6,9 +6,56 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-cache-vol
-最後更新: 2026-06-19 22:17 (Asia/Taipei)
+最後更新: 2026-06-19 23:08 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-etf 新增內容】2026-06-19 23:05 (William 要求）
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 22:53 需求：「增加一個 ETF 成股 Tab」
+- 列出所有台股主動式 ETF 的成股（代號、名稱、最新收盤價、屬於幾個 ETF）
+- cursor 移到 ETF 數字 → popup 顯示包含此股票的 ETF 列表
+- 排序依 ETF 數量大到小
+- 存成 excel、高亮與手動選股一致
+
+【資料源設計】找 TWSE 官方 API
+- 主動式 ETF 列表：TWSE `/rwd/zh/ETF/activeList` （官方、JSON、有 19 檔 domestic）
+- 前 10 大成股：etfinfo.tw `/etf/{code}` （總覽頁 HTML、SSR 表格、可 parse）
+- 個股收盤價：複用既有 `cache/price.xlsx`
+
+【改動】新增 4 個函式在 StockTool.py（fetch_csv_requests 之前）：
+1. `fetch_active_etf_list`：抓 TWSE activeList、過濾只留 domestic
+   · 回傳 DataFrame (etf_code, etf_name)
+   · 拿掉 foreign (海外)、bfIncome (債券) 類別
+2. `fetch_etf_top10_holdings`：從 etfinfo.tw parse HTML
+   · 找「前 10 大成股」section
+   · 用 regex parse `<a href="/stock/{code}">{code}</a>`、名稱、權重
+   · 回傳 list of dict (stock_code, stock_name, weight)
+3. `build_etf_holdings_table`：完整 long-format table
+   · 走 19 檔 ETF、每檔抓前 10 大
+   · 合併為 (stock_code, stock_name, etf_code, etf_name, weight)
+   · 邊界：單檔失敗不中斷整個抓取
+4. `aggregate_etf_holdings`：合併去重 + 計算 etf_count
+   · 以 stock_code groupby、計算被幾檔 ETF 持有
+   · 組合成 `etf_list` 字串 ("00981A 主動統一台股增長(9.68%) | 00403A ..."）
+   · merge price_df 取收盤價
+   · 排序：依 etf_count 由大到小、同票數依股票代號升冪
+
+【實測驗證】
+- 19 檔 domestic ETF、3 檔 sample 抓 30 筆耗時 2.8 秒
+- 全部 19 檔預估 17 秒可抓完
+- 實例：2330 被 3 檔 ETF 持有 → etf_list = "00980A 主動野村臺灣優選(9.37%) | 00982A 主動群益台灣強棒(8.71%) | 00981A 主動統一台股增長(9.68%)"
+
+【pytest 新增 10 個】test_etf_holdings.py
+- fetch_active_etf_list_過濾只留domestic
+- fetch_etf_top10_holdings 正常 / 找不到 section / 解析失敗
+- build_etf_holdings_table 合併多檔 / 單檔失敗仍繼續
+- aggregate_etf_holdings 計算 etf_count / etf_list 字串 / merge 收盤價 / 股價 df 空白
+
+【驗證】
+- pytest：247 passed（+10 新）、3 pre-existing fail（跟本次無關）
+- 下個 commit：加 ETF Tab GUI
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-scrollfix 更新內容】2026-06-19 22:15 (William 反映)
@@ -3171,6 +3218,190 @@ def get_stock_history(session, cfg, stock_id, logger, history_months):
     df_new = update_stock_history(session, cfg, stock_id, df_old)
     save_cache(file_path, df_new)
     return df_new
+
+
+# ==========================================================
+# 【V0.9.5-etf 新增】2026-06-19 William 要求：
+#   主動式 ETF 成份股 Tab
+#   - 來源 1：TWSE 官方 API `/rwd/zh/ETF/activeList` 拿 18 檔 domestic 主動式 ETF
+#   - 來源 2：etfinfo.tw `/etf/{code}` 總覽頁、parse「前 10 大成分股」HTML 表格
+# ==========================================================
+
+ETF_ACTIVELIST_URL = "https://www.twse.com.tw/rwd/zh/ETF/activeList"
+ETFINFO_ETF_URL = "https://www.etfinfo.tw/etf/{code}"
+
+def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame:
+    """【V0.9.5-etf】抓 TWSE 主動式 ETF 列表、只保留 domestic（台股）
+    回傳 DataFrame: code, name, category
+    """
+    r = session.get(
+        ETF_ACTIVELIST_URL,
+        timeout=cfg.timeout,
+        verify=cfg.verify_ssl,
+        headers={
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf",
+            "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
+        },
+    )
+    r.raise_for_status()
+    data = r.json()
+    if data.get("status") != "ok":
+        raise RuntimeError(f"TWSE ETF activeList 回傳非 ok：{data}")
+    df = pd.DataFrame(data["data"], columns=data["fields"])
+    # 只留 domestic（台股）、拿掉 foreign (海外) 和 bfIncome (債券)
+    df = df[df["ETF分類"] == "domestic"].copy()
+    df = df.rename(columns={
+        "證券代號": "etf_code",
+        "證券簡稱": "etf_name",
+    })
+    df["etf_code"] = df["etf_code"].astype(str).str.strip()
+    df = df[["etf_code", "etf_name"]].reset_index(drop=True)
+    return df
+
+
+def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
+                              etf_code: str) -> list:
+    """【V0.9.5-etf】抓 etfinfo.tw 總覽頁的「前 10 大成分股」
+
+    回傳 list of (stock_code, stock_name, weight_pct)
+    例：[(2330, '台積電', 9.68), (2327, '國巨*', 8.67), ...]
+    """
+    import re as _re
+    url = ETFINFO_ETF_URL.format(code=etf_code)
+    r = session.get(
+        url,
+        timeout=cfg.timeout,
+        verify=cfg.verify_ssl,
+        headers={
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf",
+            "Referer": "https://www.etfinfo.tw/",
+        },
+    )
+    r.raise_for_status()
+    html = r.text
+
+    # 抓「前 10 大成分股」section
+    section_start = html.find("前 10 大成分股")
+    if section_start < 0:
+        raise RuntimeError(f"{etf_code} 找不到「前 10 大成分股」section")
+
+    # 只看 section 後 5000 字元
+    section = html[section_start:section_start + 5000]
+
+    # Parse HTML 表格（SSR 渲染、可靠）
+    rows = _re.findall(
+        r'<a href="/stock/(\d+)"[^>]*>(\d+)</a></td>\s*'
+        r'<td[^>]*><span[^>]*>([^<]+)</span></td>\s*'
+        r'<td[^>]*><strong[^>]*>([0-9.]+)%',
+        section,
+        _re.DOTALL,
+    )
+    holdings = []
+    for stock_code, _, stock_name, weight in rows:
+        holdings.append({
+            "stock_code": stock_code.strip(),
+            "stock_name": stock_name.strip(),
+            "weight": float(weight),
+        })
+    if not holdings:
+        raise RuntimeError(f"{etf_code} 解析前 10 大失敗")
+    return holdings
+
+
+def build_etf_holdings_table(session: requests.Session, cfg: StrategyConfig,
+                              logger) -> pd.DataFrame:
+    """【V0.9.5-etf】完整 ETF 持股 table
+    1. 抓 18 檔 domestic ETF 列表
+    2. 對每檔 ETF 抓前 10 大
+    3. 合併為長表 (stock_code, stock_name, etf_code, etf_name, weight)
+    """
+    etfs = fetch_active_etf_list(session, cfg)
+    logger.log(f"📋 [ETF] 抓到 {len(etfs)} 檔台股主動式 ETF（domestic）")
+
+    all_rows = []
+    for _, row in etfs.iterrows():
+        etf_code = row["etf_code"]
+        etf_name = row["etf_name"]
+        try:
+            holdings = fetch_etf_top10_holdings(session, cfg, etf_code)
+            for h in holdings:
+                all_rows.append({
+                    "stock_code": h["stock_code"],
+                    "stock_name": h["stock_name"],
+                    "etf_code": etf_code,
+                    "etf_name": etf_name,
+                    "weight": h["weight"],
+                })
+            logger.log(f"  ✅ [{etf_code}] {etf_name} 抓到 {len(holdings)} 檔前 10 大")
+        except Exception as e:
+            logger.log(f"  ⚠️ [{etf_code}] {etf_name} 抓取失敗：{e}")
+
+    df = pd.DataFrame(all_rows)
+    if df.empty:
+        return df
+
+    # 整理型別
+    df["stock_code"] = df["stock_code"].astype(str).str.strip()
+    df["stock_name"] = df["stock_name"].astype(str).str.strip()
+    df["weight"] = pd.to_numeric(df["weight"], errors="coerce")
+    return df
+
+
+def aggregate_etf_holdings(holdings_long: pd.DataFrame, price_df: pd.DataFrame) -> pd.DataFrame:
+    """【V0.9.5-etf】合併去重、計算「被幾檔 ETF 持有」、merge 收盤價
+
+    holdings_long: long-format (stock_code, stock_name, etf_code, etf_name, weight)
+    price_df: stockTool price cache (股票代號, 公司名稱_來源, 股價, data_date, 成交量_張)
+
+    回傳 wide-format:
+    - 股票代號、股票名稱、收盤價
+    - etf_count：被幾檔 ETF 持有
+    - etf_list：字串 "00981A 主動統一台股增長(9.68%), 00403A 主動統一升級50(18.29%)..."
+    - 排序：依 etf_count 由大到小
+    """
+    if holdings_long.empty:
+        return pd.DataFrame()
+
+    # 1. 計算每檔個股的 etf_count + 整合 etf_list 字串
+    grouped = holdings_long.groupby("stock_code")
+    rows = []
+    for stock_code, g in grouped:
+        # 該檔個股被多檔 ETF 持有、每檔一個 (etf_code, etf_name, weight)
+        etf_entries = []
+        for _, r in g.iterrows():
+            etf_entries.append(
+                f"{r['etf_code']} {r['etf_name']}({r['weight']:.2f}%)"
+            )
+        rows.append({
+            "股票代號": stock_code,
+            "股票名稱": g["stock_name"].iloc[0],  # 取第一個當主名
+            "etf_count": len(g),
+            "etf_list": " | ".join(etf_entries),
+        })
+
+    result = pd.DataFrame(rows)
+
+    # 2. merge 收盤價
+    if price_df is not None and not price_df.empty:
+        price_map = price_df[["股票代號", "股價"]].copy()
+        price_map["股票代號"] = price_map["股票代號"].astype(str).str.strip()
+        price_map["股價"] = pd.to_numeric(price_map["股價"], errors="coerce")
+        result = result.merge(
+            price_map,
+            on="股票代號",
+            how="left",
+        )
+        result = result.rename(columns={"股價": "收盤價"})
+    else:
+        result["收盤價"] = None
+
+    # 3. 排序：依 etf_count 由大到小
+    result = result.sort_values(
+        by=["etf_count", "股票代號"],
+        ascending=[False, True],
+    ).reset_index(drop=True)
+
+    return result
 
 
 def fetch_csv_requests(session: requests.Session, url: str, cfg: StrategyConfig,
