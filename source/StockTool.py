@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-cache-vol (2026-06-19 18:00)        ║
+║               台灣股市量化選股系統 v0.9.5-etf-gui (2026-06-19 23:30)         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-cache-vol
-最後更新: 2026-06-19 23:08 (Asia/Taipei)
+Version: v0.9.5-etf-gui
+最後更新: 2026-06-19 23:35 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -56,6 +56,47 @@ Python 版本: 3.8+
 【驗證】
 - pytest：247 passed（+10 新）、3 pre-existing fail（跟本次無關）
 - 下個 commit：加 ETF Tab GUI
+   （已隨 Commit 2 完成）
+
+═══════════════════════════════════════════════════════════════════════════════
+【v0.9.5-etf-gui 新增內容】2026-06-19 23:30 (William 23:11 要求）
+═══════════════════════════════════════════════════════════════════════════════
+【背景】接續 Commit 1 (860360b fetcher)、依 William 23:11「接著做 GUI、不然沒東西可以看」。
+
+【改動】在 StockTool.py 加 ETF Tab UI + 行為
+1. Notebook 註冊新 Tab「📊 主動式 ETF」（在「🔍 手動選股」後面）
+2. `_build_etf_tab`：左面板（篩選 + 按鈕 Canvas+Scrollbar）、右面板（Treeview 5 欄）
+3. Treeview 5 欄：勾選/代號/名稱/收盤價/ETF數
+4. Hover 複用手動選股機制（黃色 / 淺藍 / checked/unchecked tag）
+5. Hover 在「ETF數」欄 → Toplevel popup 顯示完整 ETF 列表
+   · 設計：只在 column #5 才顯示 popup、移開其他欄位會關掉
+   · popup 內容：「📊 2330 台積電 被 3 檔 ETF 持有：\n + etf_list」
+6. 勾選複用手動選股 pattern（點第一欄 toggle）
+7. 篩選條件：最少 ETF 數 / 是否限定有收盤價 / 結果上限
+8. 匯出 Excel：跟手動選股同格式、可餵回策略參數 Tab
+9. 開機 2.5 秒自動背景抓取（_etf_auto_startup_fetch）、防止重複的 _etf_fetching flag
+
+【程式位置】
+- _build_etf_tab：line 5640（_build_manual_select_tab 之前）
+- _on_etf_tree_hover / _on_etf_tree_leave / _clear_etf_hover
+- _show_etf_popup / _close_etf_popup
+- _etf_toggle_check / _etf_select_all / _etf_select_none
+- _etf_apply_filter / _etf_refresh_holdings / _etf_refresh_done
+- _etf_display_results
+- _etf_export_excel
+- _etf_auto_startup_fetch / _etf_auto_startup_done
+- _load_price_df
+
+【pytest 新增 15 個】test_etf_tab_gui.py
+- 勾選狀態管理（第一次/第二次/非勾選欄、全選/全不選）
+- 套用篩選（插入/門檻/上限/收盤價過濾）
+- 匯出 Excel 邊界（無資料/未勾選）
+- popup 行為（正常顯示/找不到 iid/close/destroy）
+
+【驗證】
+- pytest：262 passed（+15 新）、3 pre-existing fail（跟本次無關）
+- 語法檢查通過
+- GUI 尚未實體測試、需 William 開 App 看
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-scrollfix 更新內容】2026-06-19 22:15 (William 反映)
@@ -3239,7 +3280,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-gui",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3273,7 +3314,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-gui",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -4984,6 +5025,11 @@ class StrategyGUI(tk.Tk):
         # V0.9.5+ Phase 8：買賣記錄 Tab 開盤 30 秒 refresh 持倉現價的 job id
         self._portfolio_refresh_job_id = None
 
+        # 【V0.9.5-etf】ETF Tab 背景自動抓取 flag（防止重複）
+        self._etf_fetching = False
+        # ETF Tab 背景自動抓（延後 2.5 秒、讙 manual_select 跟 price fetch 先跑）
+        self.after(2500, self._etf_auto_startup_fetch)
+
     def _build_ui(self):
         self.geometry("1280x720")
 
@@ -5004,6 +5050,11 @@ class StrategyGUI(tk.Tk):
         self.manual_select_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.manual_select_tab, text="🔍 手動選股")
         self._build_manual_select_tab(self.manual_select_tab)
+
+        # 【V0.9.5-etf】主動式 ETF 持股 Tab
+        self.etf_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.etf_tab, text="📊 主動式 ETF")
+        self._build_etf_tab(self.etf_tab)
 
         # 綁定 Tab 切換 → 切到買賣記錄時自動 refresh
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
@@ -5628,8 +5679,127 @@ class StrategyGUI(tk.Tk):
         ttk.Button(btn_frame, text="📤 匯出 Excel", command=self._export_portfolio_excel).pack(side="right", padx=2)
 
     # ==========================================================
-    # V0.9.5: 手動選股 Tab
+    # 【V0.9.5-etf】主動式 ETF 持股 Tab
     # ==========================================================
+
+    def _build_etf_tab(self, parent):
+        """【V0.9.5-etf】建立「主動式 ETF」Tab 的 UI
+        - 左面板：篩選條件（最小 ETF 數、是否限定有收盤價） + 按鈕
+        - 右面板：Treeview（5 欄）+ 移到「ETF數」欄顯示 popup
+        """
+        # ---- 上方：狀態列 ----
+        status_frame = ttk.Frame(parent)
+        status_frame.pack(fill="x", padx=8, pady=(6, 0))
+        self._etf_status = tk.StringVar(value="主動式 ETF 持股：首次進入會自動抓取（19 檔 × 前 10 大）")
+        ttk.Label(status_frame, textvariable=self._etf_status,
+                  foreground="#555555", font=("Helvetica", 9)).pack(anchor="w")
+
+        # 進度條
+        self._etf_progress = ttk.Progressbar(status_frame, mode='determinate', length=200)
+        self._etf_progress.pack(anchor="w", pady=(2, 0))
+        self._etf_progress.pack_forget()
+
+        # ---- 主區：左面板 + 右結果 ----
+        paned = ttk.PanedWindow(parent, orient="horizontal")
+        paned.pack(fill="both", expand=True, padx=6, pady=6)
+
+        # ── 左面板：篩選條件 + 按鈕 ──
+        left_container = ttk.Frame(paned)
+        paned.add(left_container, weight=0)
+
+        left_canvas = tk.Canvas(left_container, width=300, highlightthickness=0)
+        left_scrollbar = ttk.Scrollbar(left_container, orient="vertical", command=left_canvas.yview)
+        left_canvas.configure(yscrollcommand=left_scrollbar.set)
+        left_scrollbar.pack(side="right", fill="y")
+        left_canvas.pack(side="left", fill="both", expand=True)
+
+        def _on_mousewheel(event):
+            left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        left_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        left_frame = ttk.LabelFrame(left_canvas, text="🔎 ETF 持股篩選", padding=8)
+        left_canvas.create_window((0, 0), window=left_frame, anchor="nw")
+        left_frame.bind(
+            "<Configure>",
+            lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")),
+        )
+
+        # 最小 ETF 數
+        row1 = ttk.Frame(left_frame)
+        row1.pack(fill="x", pady=2)
+        ttk.Label(row1, text="最少被幾檔 ETF 持有 ≥", width=22).pack(side="left")
+        self._etf_min_count_var = tk.IntVar(value=1)
+        ttk.Entry(row1, textvariable=self._etf_min_count_var, width=8).pack(side="left")
+        ttk.Label(row1, text="檔", width=4).pack(side="left")
+
+        # 只顯示有收盤價
+        self._etf_only_with_price_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            left_frame, text="只顯示有收盤價的股票",
+            variable=self._etf_only_with_price_var,
+        ).pack(anchor="w", pady=2)
+
+        # 結果上限
+        row2 = ttk.Frame(left_frame)
+        row2.pack(fill="x", pady=(6, 0))
+        ttk.Label(row2, text="結果上限：", width=22).pack(side="left")
+        self._etf_limit_var = tk.IntVar(value=500)
+        ttk.Entry(row2, textvariable=self._etf_limit_var, width=8).pack(side="left")
+        ttk.Label(row2, text="檔", width=4).pack(side="left")
+
+        # 按鈕區
+        btn_row = ttk.Frame(left_frame)
+        btn_row.pack(fill="x", pady=(12, 0))
+        ttk.Button(btn_row, text="🔍 套用篩選",
+                   command=self._etf_apply_filter).pack(fill="x", pady=1)
+        ttk.Button(btn_row, text="🔄 重新抓 ETF 持股",
+                   command=self._etf_refresh_holdings).pack(fill="x", pady=1)
+        self._etf_data_status = tk.StringVar(value="ETF 持股：未抓取")
+        ttk.Label(btn_row, textvariable=self._etf_data_status,
+                  font=("Helvetica", 8), foreground="#666666").pack(anchor="w", pady=(0, 4))
+        ttk.Button(btn_row, text="📋 全選",
+                   command=self._etf_select_all).pack(fill="x", pady=1)
+        ttk.Button(btn_row, text="☐ 全不選",
+                   command=self._etf_select_none).pack(fill="x", pady=1)
+        ttk.Button(btn_row, text="📤 匯出 Excel",
+                   command=self._etf_export_excel).pack(fill="x", pady=1)
+
+        # ── 右面板：Treeview ----
+        right_frame = ttk.LabelFrame(paned, text="📊 ETF 成份股持股統計（依 ETF 數排序）", padding=4)
+        paned.add(right_frame, weight=1)
+
+        cols = ("勾選", "代號", "名稱", "收盤價", "ETF數")
+        self._etf_tree = ttk.Treeview(right_frame, columns=cols, show="headings",
+                                      selectmode="none", height=25)
+        col_widths = (40, 70, 130, 80, 70)
+        for col, w in zip(cols, col_widths):
+            self._etf_tree.heading(col, text=col)
+            self._etf_tree.column(col, width=w, anchor="center")
+
+        etf_scroll_y = ttk.Scrollbar(right_frame, orient="vertical", command=self._etf_tree.yview)
+        etf_scroll_x = ttk.Scrollbar(right_frame, orient="horizontal", command=self._etf_tree.xview)
+        self._etf_tree.configure(yscrollcommand=etf_scroll_y.set, xscrollcommand=etf_scroll_x.set)
+        self._etf_tree.pack(fill="both", expand=True)
+        etf_scroll_y.pack(side="right", fill="y")
+        etf_scroll_x.pack(side="bottom", fill="x")
+
+        # 複用手動選股的 hover / 勾選 highlight 配色
+        self._etf_tree.tag_configure("checked", background="#d0e8ff")
+        self._etf_tree.tag_configure("unchecked", background="#ffffff")
+        self._etf_tree.tag_configure("hover", background="#fff3a0")
+        self._etf_hover_iid = None  # 跟手動選股一樣機制
+        # popup 變數
+        self._etf_popup = None  # Toplevel 視窗（若有）
+
+        # Bind events
+        self._etf_tree.bind("<Motion>", self._on_etf_tree_hover)
+        self._etf_tree.bind("<Leave>", self._on_etf_tree_leave)
+        self._etf_tree.bind("<Button-1>", self._etf_toggle_check)
+
+        # 資料儲存（長期持有的 DataFrame）
+        self._etf_long_df = None  # long-format raw（來自 build_etf_holdings_table）
+        self._etf_agg_df = None   # wide-format（來自 aggregate_etf_holdings）
+        self._etf_checked = {}    # iid -> bool（複用手動選股 _ms_checked 機制）
     def _build_manual_select_tab(self, parent):
         """建立「手動選股」Tab 的 UI"""
         # ---- 上方：狀態列 ----
@@ -6569,6 +6739,378 @@ class StrategyGUI(tk.Tk):
         menu.add_command(label="☑ 全選", command=self._ms_select_all)
         menu.add_command(label="☐ 全不選", command=self._ms_select_none)
         menu.post(event.x_root, event.y_root)
+
+    # ==========================================================
+    # 【V0.9.5-etf】主動式 ETF Tab — Hover / Toggle / Filter / Refresh / Export
+    # ==========================================================
+
+    def _on_etf_tree_hover(self, event):
+        """【V0.9.5-etf】ETF Treeview hover：
+        - 移到 cell（任意欄） → 該列 highlight 黃色
+        - 移到「ETF數」欄（column #5） → 顯示 popup 顯示包含此股的 ETF 列表
+        - 移到非 cell 區（捲軸/header） → 清除 hover + 關 popup
+        """
+        region = self._etf_tree.identify("region", event.x, event.y)
+        if region != "cell":
+            self._clear_etf_hover()
+            self._close_etf_popup()
+            return
+        iid = self._etf_tree.identify_row(event.y)
+        if not iid:
+            self._clear_etf_hover()
+            self._close_etf_popup()
+            return
+
+        column = self._etf_tree.identify_column(event.x)
+
+        # 先處理 hover highlight
+        if iid != self._etf_hover_iid:
+            self._clear_etf_hover()
+            self._etf_hover_iid = iid
+            self._etf_tree.item(iid, tags=("hover",))
+
+        # 在「ETF數」欄（第 5 欄 = #5）上才顯示 popup
+        if column == "#5":
+            self._show_etf_popup(iid, event.x_root, event.y_root)
+        else:
+            self._close_etf_popup()
+
+    def _on_etf_tree_leave(self, event):
+        """【V0.9.5-etf】離開 Treeview → 清除 hover + 關 popup"""
+        self._clear_etf_hover()
+        self._close_etf_popup()
+
+    def _clear_etf_hover(self):
+        if not self._etf_hover_iid:
+            return
+        old_iid = self._etf_hover_iid
+        self._etf_hover_iid = None
+        try:
+            if old_iid in self._etf_tree.get_children():
+                checked = self._etf_checked.get(old_iid, False)
+                self._etf_tree.item(
+                    old_iid,
+                    tags=("checked" if checked else "unchecked",),
+                )
+        except tk.TclError:
+            pass
+
+    def _show_etf_popup(self, iid, x_root, y_root):
+        """【V0.9.5-etf】在滑鼠位置顯示 Toplevel 視窗、列出包含該股票的 ETF 列表
+        - ETF 代號、名稱、權重（依權重降序）
+        - 重複呼叫不重建視窗，只更新內容
+        """
+        if self._etf_agg_df is None or self._etf_agg_df.empty:
+            return
+        # iid 是 row 的識別碼、在 _etf_display_results 中設為股票代號
+        stock_code = str(iid)
+        # 取該股的 ETF 列表
+        match = self._etf_agg_df[self._etf_agg_df["股票代號"].astype(str).str.strip() == stock_code]
+        if match.empty:
+            self._close_etf_popup()
+            return
+        etf_list_str = match.iloc[0].get("etf_list", "")
+        if not etf_list_str:
+            self._close_etf_popup()
+            return
+
+        # 建立 popup（一次一個）
+        if self._etf_popup is None or not self._etf_popup.winfo_exists():
+            self._etf_popup = tk.Toplevel(self)
+            self._etf_popup.wm_overrideredirect(True)
+            self._etf_popup.wm_attributes("-topmost", True)
+            self._etf_popup.configure(bg="#fff8dc", relief="solid", borderwidth=1)
+            self._etf_popup_label = tk.Label(
+                self._etf_popup,
+                text="", justify="left",
+                bg="#fff8dc", font=("Helvetica", 9),
+                padx=10, pady=6,
+            )
+            self._etf_popup_label.pack()
+
+        # 內容
+        stock_name = match.iloc[0].get("股票名稱", "")
+        etf_count = match.iloc[0].get("etf_count", 0)
+        title = f"📊 {stock_code} {stock_name} 被 {etf_count} 檔 ETF 持有：\n"
+        self._etf_popup_label.config(text=title + etf_list_str)
+
+        # 位置（滑鼠右邊一點點）
+        # 計算 popup 大小、避免超出螢幕
+        self._etf_popup.update_idletasks()
+        w = self._etf_popup.winfo_reqwidth()
+        h = self._etf_popup.winfo_reqheight()
+        sx = self._etf_popup.winfo_screenwidth()
+        sy = self._etf_popup.winfo_screenheight()
+        px = min(x_root + 10, sx - w - 10)
+        py = min(y_root + 10, sy - h - 10)
+        self._etf_popup.wm_geometry(f"+{px}+{py}")
+
+    def _close_etf_popup(self):
+        if self._etf_popup is not None:
+            try:
+                if self._etf_popup.winfo_exists():
+                    self._etf_popup.destroy()
+            except tk.TclError:
+                pass
+            self._etf_popup = None
+
+    def _etf_toggle_check(self, event):
+        """【V0.9.5-etf】點 ETF Treeview → toggle 勾選"""
+        region = self._etf_tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        column = self._etf_tree.identify_column(event.x)
+        if column != "#1":
+            return
+        item_id = self._etf_tree.identify_row(event.y)
+        if not item_id:
+            return
+        current = self._etf_checked.get(item_id, False)
+        self._etf_checked[item_id] = not current
+        vals = list(self._etf_tree.item(item_id, "values"))
+        vals[0] = "☑" if not current else "☐"
+        self._etf_tree.item(
+            item_id, values=vals,
+            tags=("checked" if not current else "unchecked",),
+        )
+
+    def _etf_select_all(self):
+        for item in self._etf_tree.get_children():
+            self._etf_checked[item] = True
+            vals = list(self._etf_tree.item(item, "values"))
+            vals[0] = "☑"
+            self._etf_tree.item(item, values=vals, tags=("checked",))
+
+    def _etf_select_none(self):
+        for item in self._etf_tree.get_children():
+            self._etf_checked[item] = False
+            vals = list(self._etf_tree.item(item, "values"))
+            vals[0] = "☐"
+            self._etf_tree.item(item, values=vals, tags=("unchecked",))
+
+    def _etf_apply_filter(self):
+        """【V0.9.5-etf】套用左面板篩選、刷新 Treeview
+        - 需要先 _etf_refresh_holdings 有資料
+        """
+        if self._etf_agg_df is None or self._etf_agg_df.empty:
+            messagebox.showwarning("無資料", "請先按「🔄 重新抓 ETF 持股」")
+            return
+        self._etf_display_results(self._etf_agg_df)
+
+    def _etf_refresh_holdings(self):
+        """【V0.9.5-etf】重新抓取 19 檔 ETF 的前 10 大持股 → merge price cache → 重新顯示
+        用 threading 避免凍結 UI
+        """
+        if hasattr(self, '_bg_price_fetching') and self._bg_price_fetching:
+            messagebox.showwarning("請稍後", "股價背景抓取中、請等候完成")
+            return
+
+        self._etf_status.set("⏳ 抓取中...")
+        self._etf_progress.pack(anchor="w", pady=(2, 0))
+        self._etf_progress["mode"] = "indeterminate"
+        self._etf_progress.start(10)
+
+        def _worker():
+            try:
+                # 1) 抓 ETF 列表 + 持股
+                long_df = build_etf_holdings_table(self.session, self.cfg, self.logger)
+                if long_df.empty:
+                    self.after(0, lambda: self._etf_refresh_done(None, "ETF 持股抓取失敗"))
+                    return
+
+                # 2) merge 股價（從 cache）
+                price_df = self._load_price_df()
+                agg_df = aggregate_etf_holdings(long_df, price_df)
+
+                self.after(0, lambda: self._etf_refresh_done(agg_df, None, long_df=long_df))
+            except Exception as e:
+                self.logger.log(f"❌ ETF 持股抓取例外：{e}")
+                self.after(0, lambda: self._etf_refresh_done(None, str(e)))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _etf_refresh_done(self, agg_df, err, long_df=None):
+        self._etf_progress.stop()
+        self._etf_progress.pack_forget()
+        if err or agg_df is None or agg_df.empty:
+            self._etf_status.set(f"❌ ETF 持股抓取失敗：{err or '空資料'}")
+            return
+
+        self._etf_agg_df = agg_df
+        if long_df is not None:
+            self._etf_long_df = long_df
+        self._etf_data_status.set(
+            f"ETF 持股：最後更新 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ({len(agg_df)} 檔個股)"
+        )
+        self._etf_status.set(f"✅ ETF 持股抓取完成：{len(agg_df)} 檔個股被多檔 ETF 持有")
+        # 自動套用一次篩選
+        self._etf_display_results(agg_df)
+
+    def _etf_display_results(self, agg_df):
+        """【V0.9.5-etf】依左面板條件、刷新 Treeview 內容"""
+        df = agg_df.copy()
+
+        # 篩選：最小 ETF 數
+        min_count = self._etf_min_count_var.get()
+        df = df[df["etf_count"] >= min_count]
+
+        # 篩選：是否限定有收盤價
+        if self._etf_only_with_price_var.get():
+            df = df[df["收盤價"].notna()]
+
+        # 結果上限
+        limit = self._etf_limit_var.get()
+        if limit and len(df) > limit:
+            df = df.head(limit)
+
+        # 清空 Treeview + 勾選狀態
+        self._close_etf_popup()
+        self._clear_etf_hover()
+        for item in self._etf_tree.get_children():
+            self._etf_tree.delete(item)
+        self._etf_checked = {}
+
+        # 插入資料（iid = 股票代號、讓 popup 用 iid 直接查 etf_list）
+        for _, row in df.iterrows():
+            iid = str(row["股票代號"]).strip()
+            price = row.get("收盤價", None)
+            if pd.isna(price):
+                price_str = "--"
+            else:
+                price_str = f"{float(price):,.2f}"
+            self._etf_tree.insert(
+                "", "end", iid=iid,
+                values=("☐", iid, str(row.get("股票名稱", "")), price_str, int(row["etf_count"])),
+                tags=("unchecked",),
+            )
+
+        self._etf_status.set(
+            f"✅ 顯示 {len(df)} 檔個股（總資料 {len(agg_df)} 檔）"
+        )
+
+    def _etf_export_excel(self):
+        """【V0.9.5-etf】匯出 ETF 成份股持股到 Excel
+        - 同手動選股的格式、可被策略參數 Tab 讀回
+        - 包含完整欄位（代號、名稱、收盤價、ETF 數、ETF 列表、權重）
+        """
+        if self._etf_agg_df is None or self._etf_agg_df.empty:
+            messagebox.showwarning("無資料", "請先按「🔄 重新抓 ETF 持股」")
+            return
+        checked = [code for code, v in self._etf_checked.items() if v]
+        if not checked:
+            messagebox.showwarning("未勾選", "請先勾選要匯出的股票")
+            return
+
+        result = self._etf_agg_df[
+            self._etf_agg_df["股票代號"].astype(str).str.strip().isin(checked)
+        ].copy()
+
+        filepath = filedialog.asksaveasfilename(
+            title="匯出 ETF 成份股持股",
+            defaultextension=".xlsx",
+            filetypes=["Excel 活頁簿 (*.xlsx)"],
+            initialfile=f"ETF成份股_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        )
+        if not filepath:
+            return
+
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment
+
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "ETF成份股"
+
+            headers = list(result.columns)
+            ws.append(headers)
+            for cell in ws[1]:
+                cell.font = Font(bold=True)
+                cell.fill = PatternFill(start_color="DDEEFF", end_color="DDEEFF", fill_type="solid")
+                cell.alignment = Alignment(horizontal="center")
+
+            for _, row in result.iterrows():
+                ws.append([
+                    "" if pd.isna(v) else v
+                    for v in [row.get(c) for c in headers]
+                ])
+
+            # 欄寬
+            for col_idx, col_name in enumerate(headers, start=1):
+                col_letter = ws.cell(row=1, column=col_idx).column_letter
+                ws.column_dimensions[col_letter].width = max(12, min(50, len(str(col_name)) * 2 + 4))
+
+            wb.save(filepath)
+            messagebox.showinfo(
+                "匯出成功",
+                f"已匯出 {len(result)} 檔 ETF 成份股到：\n{filepath}\n\n"
+                f"📌 此檔可餵給「⚙️ 策略參數」的股票清單載入功能。"
+            )
+            self.logger.log(f"📤 [ETF] 匯出 {len(result)} 檔到 {filepath}")
+        except Exception as e:
+            messagebox.showerror("匯出失敗", str(e))
+            self.logger.log(f"❌ [ETF] 匯出失敗：{e}")
+
+    def _etf_auto_startup_fetch(self):
+        """【V0.9.5-etf】App 開機 2.5 秒後自動抓 ETF 持股（背景跑、不跳 popup）
+        - 重複 fetch 會跳過（用 _etf_fetching flag）
+        - 抓完就會 populate ETF Tab（就算使用者還沒切到該 Tab）
+        """
+        if self._etf_fetching:
+            return
+        self._etf_fetching = True
+        self.logger.log("📊 [ETF] 開機自動抓取 ETF 持股...")
+
+        def _worker():
+            try:
+                long_df = build_etf_holdings_table(self.session, self.cfg, self.logger)
+                if long_df.empty:
+                    self.after(0, lambda: self._etf_auto_startup_done(None, "ETF 持股抓取失敗"))
+                    return
+                price_df = self._load_price_df()
+                agg_df = aggregate_etf_holdings(long_df, price_df)
+                self.after(0, lambda: self._etf_auto_startup_done(agg_df, None, long_df=long_df))
+            except Exception as e:
+                self.logger.log(f"❌ [ETF] 開機抓取例外：{e}")
+                self.after(0, lambda: self._etf_auto_startup_done(None, str(e)))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _etf_auto_startup_done(self, agg_df, err, long_df=None):
+        self._etf_fetching = False
+        if err or agg_df is None or agg_df.empty:
+            self._etf_status.set(f"❌ ETF 開機抓取失敗：{err or '空資料'}")
+            return
+        self._etf_agg_df = agg_df
+        if long_df is not None:
+            self._etf_long_df = long_df
+        self._etf_data_status.set(
+            f"ETF 持股：最後更新 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ({len(agg_df)} 檔個股)"
+        )
+        self._etf_status.set(f"✅ ETF 持股已就緒：{len(agg_df)} 檔個股（依 ETF 數由大到小排序）")
+        # 套用預設篩選顯示
+        self._etf_display_results(agg_df)
+        self.logger.log(f"✅ [ETF] 開機抓取完成：{len(agg_df)} 檔個股")
+
+    def _load_price_df(self):
+        """【V0.9.5-etf】讀取 price 快取 DataFrame、若不存在就 try fetch_prices 一次
+        回傳的 df 至少含欄位：股票代號、股價
+        """
+        try:
+            df, _ = load_cache(get_cache_file("price"))
+            if df is not None and not df.empty and "股票代號" in df.columns:
+                return df
+        except Exception as e:
+            self.logger.log(f"⚠️ [ETF] 讀取 price cache 失敗：{e}")
+        # cache 沒資料 → try fetch_prices 抓一次
+        try:
+            df = fetch_prices(self.session, self.cfg)
+            if df is not None and not df.empty:
+                save_cache(get_cache_file("price"), df)
+            return df if df is not None else pd.DataFrame()
+        except Exception as e:
+            self.logger.log(f"⚠️ [ETF] fetch_prices 也失敗：{e}")
+            return pd.DataFrame()
 
     def _ms_export_excel(self):
         """匯出選中的股票到 Excel"""
