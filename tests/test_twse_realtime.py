@@ -100,16 +100,19 @@ def test_三個股都是零時price為None():
 
 
 def test_批量多檔一次回():
-    """【白箱】50 檔一次回（模擬批量上限）"""
+    """【白箱】10 檔一次回（模擬批量上限，batch_size=10）
+
+    V0.9.5-goodinfo4+5 (rate-mode)：BATCH_SIZE 50→10
+    """
     msg = [{"c": f"ST{i:04d}", "z": str(100 + i), "o": str(100 + i), "y": "99", "v": "1000"}
-           for i in range(50)]
+           for i in range(10)]
     orig, fake = _mock_get_factory(msg)
     requests.get = fake
     try:
-        result = st._fetch_twse_realtime_batch([f"ST{i:04d}" for i in range(50)])
-        assert len(result) == 50
+        result = st._fetch_twse_realtime_batch([f"ST{i:04d}" for i in range(10)])
+        assert len(result) == 10, f'10檔應全回、實際: {len(result)}'
         assert result.iloc[0]["現價"] == 100.0
-        assert result.iloc[49]["現價"] == 149.0
+        assert result.iloc[9]["現價"] == 109.0
     finally:
         requests.get = orig
 
@@ -190,8 +193,8 @@ def test_成交量單位是張():
 
 
 def test_TWSE_batch_size常數():
-    """【架構守護】_TWSE_REALTIME_BATCH_SIZE = 50"""
-    assert st._TWSE_REALTIME_BATCH_SIZE == 50
+    """【架構守護】_TWSE_REALTIME_BATCH_SIZE = 10"""
+    assert st._TWSE_REALTIME_BATCH_SIZE == 10
 
 
 if __name__ == "__main__":
