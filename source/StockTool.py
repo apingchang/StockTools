@@ -1,14 +1,45 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-goodinfo4+5 (2026-06-18 22:07)         ║
+║               台灣股市量化選股系統 v0.9.5-cache-cleanup1 (2026-06-19 14:17)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-V0.9.5-goodinfo
+V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-goodinfo4+5
-最後更新: 2026-06-18 22:44 (Asia/Taipei)
+Version: v0.9.5-cache-cleanup1
+最後更新: 2026-06-19 14:29 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-cache-cleanup1 更新內容】2026-06-19 14:17 (William 決定)
+════════════════════════════════════════════════════════════════════════════════
+【背景】2026-06-19 13:55 William 提出股神股票現價抓取邏輯討論：
+- 「App 隨時要有最新的收盤個股資訊（cache）、開機發現不是最新則去抓」
+- 「手動選股中應該不需要有 TWSE 即時股價的開關」
+
+【改動】手動選股 Tab 拿掉「🔄 TWSE 即時股價」checkbox + 速率模式 radio
+- 拿掉 UI：_ms_refresh_price_var BooleanVar + Checkbutton
+- 拿掉 UI：_ms_twse_slow_mode BooleanVar + 兩個 Radiobutton（🚀快速 / 🐌緩慢）
+- 拿掉 method：_ms_twse_rate_mode_changed() （更新狀態列用）
+- 拿掉 _ms_run_selection 裡的「即時抓股價」if 分支（94 行）
+- _fetch_twse_realtime_batch 拿掉 slow_mode 參數（已無 UI 控件呼喚）
+  · batch sleep 從 `5.0 if slow_mode else 0.3` 簡化為固定 `0.3`
+  · 函式本身保留（未來可能還用得到 batch 抓股價）
+
+【為什麼可以拿掉】
+- 手動選股邏輯：本來就用 cache 的 close 收盤價、即時 tick 會干擾篩選
+- 看即時 tick：去「買賣紀錄」Tab、已有 30 秒 polling
+- 想重抓 cache close：原本就有「🔄 重新抓股價」按鈕（強制重抓、走 fetch_prices）
+
+【pre-commit hook 擴充】
+- 原本 regex：`v0.9.5-(goodinfo|twser)\d+(?:\.\d+)?`
+- 改為：`v0.9.5-(goodinfo|twser|cache)[a-z0-9]*(?:\.\d+)?`
+- 讓 cache 系列也能自動更新 fileheader 時間戳
+
+【驗證】
+- python -c "import ast; ast.parse(...)" → ✅ syntax OK
+- grep 確認 _ms_refresh_price_var / _ms_twse_slow_mode / _ms_twse_rate_mode_changed 在 code 已無引用
+- 跑 pytest：下面報告
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-alpha 更新內容】2026-06-14
@@ -589,7 +620,42 @@ console：⚠️ TWSE API 失敗（批48/48、tse）：('Connection aborted.', .
 【驗證】pytest 217/217 全綠（213 → 217）
 
 【重要教訓】
-- 「新版本加新功能、要保留舊檔案容錯」：save_cache 後加 meta sheet
+- 「新版本加新功能、要保留舊檔案容錯」
+- 「Tkinter Treeview 會把千分位逗號轉成小數點」：locale=zh_TW.UTF-8 時，
+  Treeview values 傳 "4,016" 會顯示成 "4.016"（逗號被當成歐洲小數點）
+  → 解決：vol 是整數、不需要千分位、直接 str(int(vol))
+  → 如果未來需要千分位、Treeview cell 必須避免字串含逗號
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-goodinfo4+5 (rate-mode) 更新內容】2026-06-18 23:59 (William 要求)
+════════════════════════════════════════════════════════════════════════════════
+【William 要求】2026-06-18 23:57
+- 「跑到 14xx 筆時開始有 error message 跟剛才沒什麼差別」
+- TWSE 全批失敗（rate limit）、batch 10 也失敗、耗時 123 秒
+
+【修法】新增 TWSE 速率模式 UI 切換（🚀 快速 / 🐌 緩慢）
+- 🚀 快速：batch delay 0.3s，省時但逾 1,400 批可能被 TWSE 限制
+- 🐌 緩慢：batch delay 5.0s，確保完成（2376 檔約需 20 分鐘）
+- UI：在「TWSE 即時股價」checkbox 下方新增 Radiobutton 切換
+
+【程式碼改動】
+- _fetch_twse_realtime_batch 加 slow_mode 參數
+- batch sleep: if slow_mode → sleep(5.0) else → sleep(0.3)
+- UI 新增 _ms_twse_slow_mode BooleanVar + Radiobutton × 2
+- _ms_twse_rate_mode_changed() 回撥更新狀態列
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-goodinfo4+5 (batch-10+treeview-comma) 更新內容】2026-06-18 23:52
+════════════════════════════════════════════════════════════════════════════════
+【問題】William 2026-06-18 21:54 反映：成交量顯示 4.016（小數點）
+【根因】Tkinter Treeview + locale=zh_TW.UTF-8 → 逗號被當成歐洲數字小數分隔符
+  → 傳入 values=("4,016") 會被渲染成 "4.016"（句點）
+【修法】vol_str = str(int(vol))（不做千分位格式化）
+【附帶】_TWSE_REALTIME_BATCH_SIZE 50→10（避免 rate limit）
+
+【重要教訓】
+- 「Tkinter Treeview 格式化要測試 locale 情境」
+- 「系統 locale 會改變 Tkinter 數字渲染行為」：save_cache 後加 meta sheet
   → 但舊 cache 沒 meta → load_cache crash → 整條 get_or_fetch 中斷
   → 解法：load_cache 容錯讀不到 meta 時用 today 日期 fallback
 - 「忘記更新 fileheader 是新手錯誤」：每次改完要更新版本號
@@ -1526,7 +1592,7 @@ def _fetch_market_stock_list() -> pd.DataFrame:
 # 延遲：實測 15-20 秒（TWSE 官方）
 # 限制：一次建議 50 檔，興櫃不支援
 # ────────────────────────────────────────────────────────────────
-_TWSE_REALTIME_BATCH_SIZE = 50   # 每批最大檔數（URL 長度安全）
+_TWSE_REALTIME_BATCH_SIZE = 10   # 【V0.9.5-goodinfo4+5】降批：50→10（避免TWSE rate limit）
 
 
 def _fetch_twse_realtime_batch(stock_ids: List[str],
@@ -5109,12 +5175,11 @@ class StrategyGUI(tk.Tk):
         btn_row.pack(fill="x", pady=(12, 0))
         ttk.Button(btn_row, text="🔍 開始選股",
                    command=self._ms_run_selection).pack(fill="x", pady=1)
-        # V0.9.5+: 跑選股前是否重抓股價（預設不勾、用 cache）
-        self._ms_refresh_price_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            btn_row, text="🔄 TWSE 即時股價（走 TWSE 免費 API，盤中 15-20 秒延遲）",
-            variable=self._ms_refresh_price_var
-        ).pack(anchor="w")
+        # 【V0.9.5-cache-cleanup1】2026-06-19 William 決定：
+        #   手動選股一律用 cache 的收盤價、不需要「即時抓股價」checkbox
+        #   → 看即時 tick 改去「買賣紀錄」Tab（有 30 秒 polling）
+        #   → 想強制重抓 cache 用「🔄 重新抓股價」按鈕即可
+        #   連帶拿掉：TWSE 速率模式 radio（配 checkbox 用的、失去意義）
         # V0.9.5: 手動重抓股價（背景跑中就跳過）
         ttk.Button(btn_row, text="🔄 重新抓股價",
                    command=self._ms_force_refresh_price).pack(fill="x", pady=1)
@@ -5581,99 +5646,12 @@ class StrategyGUI(tk.Tk):
                 revenue_df = getattr(self, '_revenue_df', None)
                 eps_df = getattr(self, '_eps_df', None)
 
-                # V0.9.5-twser：「即時抓股價」checkbox → 改走 TWSE 即時 API（免費無額度限制）
-                # 【V0.9.5-twser 重大改版】2026-06-18 William 指示：
-                #   FinMind 有額度限制（300次/hr）且有 402 付費牆，
-                #   TWSE 即時 API 完全免費（延遲 15-20 秒），可一次打 50 檔、無限次呼叫
-                #   → 即時抓股價從 FinMind 改為 TWSE，FinMind 額度完全留給股利補抓
-                # UI 更新一律用 self.after(0, ...) 回到 main thread 避免 thread-safety 問題
-                if getattr(self, '_ms_refresh_price_var', None) and self._ms_refresh_price_var.get():
-                    if price_df is not None and not price_df.empty:
-                        all_codes = price_df["股票代號"].astype(str).str.strip().tolist()
-                        n_codes = len(all_codes)
-                        # 預估時間：TWSE API 約 0.1s/批（50檔）+ 網路延遲，2376檔約 20-30 秒
-                        est_sec = (n_codes / 50) * 0.15 + 2
-                        self.after(0, lambda: self._ms_status.set(
-                            f"🔄 TWSE 即時股價抓取中（{n_codes} 檔）..."
-                        ))
-                        print(f"🔄 TWSE 即時股價抓取中... {n_codes} 檔")
-                        self.logger.log(f"🔄 TWSE 即時股價抓取中... {n_codes} 檔")
-                        _t0 = datetime.now()
-                        try:
-                            def _price_progress(n_done, n_total):
-                                pct = int(n_done / n_total * 100) if n_total else 0
-                                # 進度回呼在 background thread 跑、用 after 回到 main thread
-                                self.after(0, lambda: self._ms_status.set(
-                                    f"🔄 TWSE 即時股價抓取中... {n_done}/{n_total} ({pct}%)"
-                                ))
-                            # 【V0.9.5-twser】改用 TWSE 即時 API（取代 FinMind）
-                            fresh = _fetch_twse_realtime_batch(
-                                all_codes,
-                                progress_callback=_price_progress,
-                            )
-                            _t1 = datetime.now()
-                            _elapsed = (_t1 - _t0).total_seconds()
-                            self.after(0, lambda: self._ms_status.set(
-                                f"✅ TWSE 即時股價完成（{n_codes} 檔、耗時 {_elapsed:.1f} 秒）"
-                            ))
-                            print(f"✅ TWSE 即時股價完成：耗時 {_elapsed:.1f} 秒")
-                            self.logger.log(f"✅ TWSE 即時股價完成：耗時 {_elapsed:.1f} 秒")
-                            if not fresh.empty and "現價" in fresh.columns:
-                                # 【V0.9.5-goodinfo4+5 (vol+cache) 修 Bug】2026-06-18 19:25 William 反映
-                                # 「遺是有很多沒現價的」問題根因：cache 的「現價」欄位是 NaN、但「股價」欄位有舊值
-                                #   → merge 後用 fillna(現價) 拿不到舊股價、結果還是 NaN
-                                # 修法：merge 前先把 cache「現價」用「股價」fallback 填補
-                                if "股價" in price_df.columns and "現價" in price_df.columns:
-                                    n_filled = price_df["現價"].isna().sum()
-                                    price_df["現價"] = price_df["現價"].fillna(price_df["股價"])
-                                    if n_filled > 0:
-                                        self.logger.log(
-                                            f"🔄 cache 現價 → 股價 fallback：填補 {n_filled} 檔"
-                                        )
-                                # merge：新價覆蓋舊價、沒抓到的保持原值
-                                fresh_small = fresh[["股票代號"]].copy()
-                                if "現價" in fresh.columns:
-                                    fresh_small["現價"] = fresh["現價"]
-                                if "成交量_張" in fresh.columns:
-                                    fresh_small["成交量_張"] = fresh["成交量_張"]
-                                # 用股票代號對齊覆蓋
-                                price_df = price_df.merge(
-                                    fresh_small, on="股票代號", how="left", suffixes=("", "_fresh")
-                                )
-                                if "現價_fresh" in price_df.columns:
-                                    price_df["現價"] = price_df["現價_fresh"].fillna(price_df["現價"])
-                                    price_df = price_df.drop(columns=["現價_fresh"])
-                                if "成交量_張_fresh" in price_df.columns:
-                                    price_df["成交量_張"] = price_df["成交量_張_fresh"].fillna(price_df["成交量_張"])
-                                    price_df = price_df.drop(columns=["成交量_張_fresh"])
-                                # 【V0.9.5-goodinfo4+5 (vol+cache) 加 log】看哪些股 TWSE 還是沒抓到
-                                missing_price = price_df[price_df["現價"].isna()]["股票代號"].astype(str).str.strip().tolist()
-                                if missing_price:
-                                    n_missing = len(missing_price)
-                                    sample = missing_price[:10]
-                                    self.logger.log(
-                                        f"⚠️ TWSE 沒抓到且 cache 沒股價：{n_missing} 檔 (例: {sample})"
-                                    )
-                                    print(f"⚠️ TWSE 沒抓到且 cache 沒股價：{n_missing} 檔 (例: {sample})")
-                                print(f"✅ 即時股價完成：覆蓋 {len(fresh)} 檔")
+                # 【V0.9.5-cache-cleanup1】2026-06-19 William 決定：
+                #   手動選股一律用 cache 的收盤價、不再提供「即時抓股價」選項
+                #   → 拿掉舊的「即時抓股價」if 分支（原本用 TWSE 即時 API 抓）
+                #   → 仍保留「🔄 重新抓股價」按鈕（強制重抓 cache 用、走正常 fetch_prices）
+                # 詳見上方按鈕區註解
 
-                                # 【V0.9.5-goodinfo4+5 (vol+cache) 新增】2026-06-18 18:34 William 反映：
-                                #   「手動選股有開啟TWSE即時股價時、抓完全部的股價應該要去 update cache」
-                                #   → 抓完後 save_cache 回寫、下次啟動直接讀 cache 不必重抓
-                                try:
-                                    save_cache(get_cache_file("price"), price_df)
-                                    self.logger.log(
-                                        f"💾 即時股價已回寫 cache ({len(price_df)} 檔)"
-                                    )
-                                    self.after(0, lambda: self._ms_status.set(
-                                        f"💾 即時股價已回寫 cache ({len(price_df)} 檔)"
-                                    ))
-                                except Exception as _save_e:
-                                    self.logger.log(
-                                        f"⚠️ 回寫 cache 失敗：{_save_e}（不影響本次使用）"
-                                    )
-                        except Exception as _e:
-                            print(f"⚠️ 即時抓股價失敗：{_e}（用原 cache 繼續）")
 
                 # fallback 1：若 GUI 沒記、但 cache/ 有 → 讀 cache
                 # 注：讀 cache 前先檢查 last_update；若 != today 就走 get_or_fetch 重抓
@@ -5830,7 +5808,9 @@ class StrategyGUI(tk.Tk):
                 if pd.isna(vol) or (isinstance(vol, (int, float)) and vol == 0):
                     vol_str = "—"
                 else:
-                    vol_str = f"{int(vol):,}"  # 整數張 + 千分位
+                    # 【V0.9.5-goodinfo4+5】Tkinter Treeview 會把千分位逗號轉成小數點
+                    # → 直接用 str()、不做千分位格式化
+                    vol_str = str(int(vol))
             except (TypeError, ValueError):
                 vol_str = "—"
             last_stock_str = _fmt_float(row.get("去年股票股利(元)"), decimals=3)

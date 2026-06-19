@@ -1,18 +1,16 @@
 """
 test_ms_refresh_price.py
-驗證 V0.9.5+「即時抓股價」checkbox 的邏輯。
+驗證手動選股的「股價來源」邏輯。
 
-【動機】
-William 2026-06-15 反映：2101 南港我算 2.10%、他預期 1.99%
-trace 結果：殖利率算法 OK、現價時間差（我抓 33.35、他看 35.18）
-
-→ 背景重抓股價的時間跟使用者看見的時間可能不同
-→ 加「即時抓股價」checkbox：勾了 → 跑選股前先抓最新股價
+【V0.9.5-cache-cleanup1 重大改動】2026-06-19 William 決定：
+- 手動選股一律用 cache 的收盤價、不再提供「即時抓股價」選項
+- 拿掉 UI：「🔄 即時抓股價」checkbox、「🚀/🐌 TWSE 速率」radio
+- 看即時 tick：去「買賣紀錄」Tab（有 30 秒 polling）
+- 想重抓 cache close：原本就有「🔄 重新抓股價」按鈕
 
 【設計】
-- 「🔄 即時抓股價」checkbox（預設不勾）
-- 勾了 → _ms_run_selection 跑前先抓 price_df 全部股票的最新股價
-- 不勾 → 用 cache（背景抓的版本、較快）
+- _ms_run_selection 不再主動抓最新股價（永遠走 cache）
+- 股價 merge 邏輯保留下來供未來測試使用
 """
 import os
 import sys
@@ -24,20 +22,12 @@ os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 import StockTool as st  # noqa: E402
 
 
-def test_checkbox_預設False():
-    """【關鍵】checkbox 預設 False（不勾、用 cache 行為）"""
-    # 用 mock 模擬 _ms_refresh_price_var 的預設值
-    # 直接讀 source code 確認預設值
-    import re
-    with open(os.path.join(os.path.dirname(__file__), "..", "source", "StockTool.py")) as f:
-        code = f.read()
-    # 找 _ms_refresh_price_var = tk.BooleanVar(value=...)
-    match = re.search(r"self\._ms_refresh_price_var\s*=\s*tk\.BooleanVar\(value=(\w+)\)", code)
-    assert match, "找不到 _ms_refresh_price_var 設定"
-    assert match.group(1) == "False", f"預設應為 False，實際: {match.group(1)}"
+def test_選股永遠走cache不呼叫finmind_price_batch():
+    """【V0.9.5-cache-cleanup1 守護】手動選股永遠走 cache、不呼叫 finmind 即時抓
 
-
-def test_勾選時會呼叫_finmind_price_batch():
+    - 即使 mock _fetch_finmind_prices_batch、call_log 應為空
+    - 因為已沒有 checkbox 可勾、不會主動呼叫 finmind
+    """
     """【關鍵守護】勾了時、跑選股前應呼叫 _fetch_finmind_prices_batch"""
     # Mock：呼叫 _fetch_finmind_prices_batch 時記 log
     call_log = []
