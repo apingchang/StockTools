@@ -6,9 +6,27 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-cache-vol
-最後更新: 2026-06-19 18:48 (Asia/Taipei)
+最後更新: 2026-06-19 19:00 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-cache-vol-fix2 更新內容】2026-06-19 18:50 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 18:49 本機測試：18:43 按了「🔄 重新抓股價」、cache 抓好了
+- 但 Treeview 「成交量」、「資料日期」還是「—」
+- 原因：手動重抓完成後 _on_bg_price_done 只更新 status bar、沒讓 Treeview 重跑結果
+- 使用者需手動按「選股」才會看到新資料、看起來像是「重抓失敗」
+
+【改動】_on_bg_price_done 自動重跑選股
+- 觸發條件：source == '手動重抓' AND Treeview 已有結果
+- 重跑後 Treeview 立即顯示「成交量」、「資料日期」新資料
+- 不重跑路徑：app 剛起動、Treeview 還是空、使用者沒選過股
+- log 訊息：'自動重跑選股中...'、'✅ 符合條件：N 檔'
+
+【驗證】
+- pytest：12 個 cache_vol test 全綠（fetch_prices 結構、get_or_fetch 遷移）
+- Treeview 仍有水平捲軸 (ms_scroll_x)、14 欄超寬可以左右拉
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-vol-fix 更新內容】2026-06-19 18:35 (William 反映)
@@ -5567,10 +5585,30 @@ class StrategyGUI(tk.Tk):
                             data_date_hint = f"｜資料日期：{_unique_dates[0]} ~ {_unique_dates[-1]}"
             except Exception:
                 pass
-            self._ms_status.set(
-                f"✅ 股價資料就緒（{source}、{len(df)} 筆）｜股價更新：{update_str}{data_date_hint}｜可點「選股」"
+            # 【V0.9.5-cache-vol-fix】2026-06-19 18:50 William 反映：
+            # 手動重抓股價完成後、Treeview 不會自動更新（要按「選股」才會 refresh）
+            # 看起來「什麼都沒變」、使用者誤以為重抓失敗。
+            # 修法：手動重抓完成時、如果 Treeview 已有結果 → 自動重跑選股 refresh Treeview。
+            auto_rerun = (
+                source == "手動重抓"
+                and self._ms_tree is not None
+                and self._ms_tree.get_children()  # Treeview 有結果才重跑
             )
-            self.logger.log(f"✅ {source}股價完成：{len(df)} 筆、股價更新：{update_str}{data_date_hint}")
+            if auto_rerun:
+                self._ms_status.set(
+                    f"✅ {source}完成：{len(df)} 筆、股價更新：{update_str}{data_date_hint}"
+                    f"｜正在自動重跑選股以 refresh 結果..."
+                )
+                self.logger.log(
+                    f"✅ {source}完成：{len(df)} 筆、股價更新：{update_str}{data_date_hint}"
+                    f"｜自動重跑選股中..."
+                )
+                self.after(100, self._ms_run_selection)
+            else:
+                self._ms_status.set(
+                    f"✅ 股價資料就緒（{source}、{len(df)} 筆）｜股價更新：{update_str}{data_date_hint}｜可點「選股」"
+                )
+                self.logger.log(f"✅ {source}股價完成：{len(df)} 筆、股價更新：{update_str}{data_date_hint}")
         else:
             self._ms_status.set(f"⚠️ {source}股價完成但無資料")
             self.logger.log(f"⚠️ {source}股價完成但無資料")
