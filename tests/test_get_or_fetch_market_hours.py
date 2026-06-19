@@ -44,10 +44,14 @@ def _make_fake_cache(file_path: str, last_update: str, df: pd.DataFrame):
 
 
 def _fake_price_df() -> pd.DataFrame:
+    """【V0.9.5-cache-vol】已加成交量_張、data_date 才能讓結構檢查測試通過"""
     return pd.DataFrame({
         "股票代號": ["2330", "2317"],
-        "股票名稱": ["台積電", "鴻海"],
+        "公司名稱_來源": ["台積電", "鴻海"],
         "股價": [600.0, 100.0],
+        "漲跌": [5.0, 1.0],
+        "data_date": ["2026-06-19", "2026-06-19"],
+        "成交量_張": [25000.0, 5000.0],
     })
 
 

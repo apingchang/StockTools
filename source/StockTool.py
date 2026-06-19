@@ -6,9 +6,36 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-cache-vol
-最後更新: 2026-06-19 18:15 (Asia/Taipei)
+最後更新: 2026-06-19 18:48 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-cache-vol-fix 更新內容】2026-06-19 18:35 (William 反映)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 18:35 本機測試：Treeview 「成交量」、「資料日期」還是「—」
+- 原因：cache 是 v0.9.5-goodinfo4+5 拿下的、只有 4 欄（沒 成交量_張 / data_date）
+- 18:29 開 App 是盤後、走 get_or_fetch「last_update==today 用 cache」路徑
+- 所以「啟動時自動」跳過、Treeview 讀舊 cache、顯示「—」
+
+【改動】get_or_fetch 加「結構遷移」檢查
+- 如果 cache 是今天的、但缺 成交量_張 / data_date 欄位 → 自動強制重抓一次
+- 寫入新結構、後續開 App 就正常使用
+- 一次性邏輯、之後 cache 都是新結構不會再觸發
+
+【pytest 新增 2 個】
+- test_get_or_fetch_cache缺欄位_自動重抓（驗證結構檢查觸發重抓）
+- test_get_or_fetch_cache已完整_不重抓（驗證正常情況不被打擾）
+
+【pytest 修正 1 個】
+- test_get_or_fetch_market_hours._fake_price_df：原本只 3 欄、加上新欄位
+  · 公司名稱_來源（原本是「股票名稱」、改成跟程式一致）
+  · 漲跌
+  · data_date / 成交量_張
+
+【驗證】
+- pytest：236 passed（+2 新 test）、3 pre-existing fail
+- 跨區關係：同時保護 cache_cleanup1（拿掉 checkbox）+ cache-info（加 data_date）+ cache-vol（加 成交量_張）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-vol 更新內容】2026-06-19 18:00 (William 反映)
@@ -1309,6 +1336,19 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
         return df
 
     if last_update == today:
+        # 【V0.9.5-cache-vol 結構遷移】2026-06-19 William 反映
+        # 即使 cache 是今天的、也可能是 v0.9.5-goodinfo4+5 以前的舊版（缺 成交量_張 / data_date）
+        # 加一次結構檢查：有缺欄位就強制重抓一次、寫入新結構
+        if name == "price":
+            required_cols = {"成交量_張", "data_date"}
+            missing = required_cols - set(df.columns)
+            if missing:
+                logger.log(
+                    f"♻️ [{name}] cache 缺欄位 {sorted(missing)}、強制重抓一次 → 寫入新結構"
+                )
+                df = fetch_func()
+                save_cache(file_path, df)
+                return df
         logger.log(f"✅ [{name}] 使用快取資料")
         return df
     logger.log(f"♻️ [{name}] 資料過期 → 重新下載")

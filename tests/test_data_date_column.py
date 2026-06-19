@@ -235,3 +235,82 @@ def test_fetch_prices_沒成交量欄位_不crash_回None():
     df = st.fetch_prices(s, st.StrategyConfig())
     assert "成交量_張" in df.columns
     assert df.iloc[0]["成交量_張"] is None, "沒成交量欄位應回 None、不 crash"
+
+
+# ==========================================================
+# 【V0.9.5-cache-vol 結構遷移】get_or_fetch 自動重抓舊版 cache
+# ==========================================================
+
+def test_get_or_fetch_cache缺欄位_自動重抓(monkeypatch, tmp_path):
+    """【V0.9.5-cache-vol】cache 是今天的、但缺 成交量_張 / data_date → 自動重抓一次
+
+    這種情況只發生在一次性的結構遷移、之後 cache 都是新版就不會再觸發
+    """
+    import StockTool as st
+    import pandas as pd
+    import os
+
+    # 1. 寫一個「今天」的舊版 cache（缺 成交量_張、data_date）
+    fake_cache = tmp_path / "price.xlsx"
+    old_df = pd.DataFrame({
+        "股票代號": ["2330", "3188"],
+        "公司名稱_來源": ["台積電", "鑫龍騰"],
+        "股價": [950.0, 32.0],
+        "漲跌": [5.0, 0.5],
+    })
+    st.save_cache(str(fake_cache), old_df)
+
+    # 2. monkeypatch get_cache_file
+    monkeypatch.setattr(st, "get_cache_file", lambda name: str(fake_cache))
+
+    # 3. monkeypatch fetch_func → 計數被呼叫幾次
+    call_count = {"n": 0}
+    def fake_fetch():
+        call_count["n"] += 1
+        new_df = old_df.copy()
+        new_df["data_date"] = ["2026-06-18", "2026-06-18"]
+        new_df["成交量_張"] = [25000.0, 1500.0]
+        return new_df
+
+    # 4. monkeypatch logger
+    class FakeLogger:
+        def log(self, msg):
+            pass
+    df = st.get_or_fetch("price", fake_fetch, FakeLogger())
+
+    # 5. 驗證：fetch 被呼叫、cache 被重寫、df 有新欄位
+    assert call_count["n"] == 1, "cache 缺欄位時 fetch_func 應該被呼叫一次"
+    assert "成交量_張" in df.columns
+    assert "data_date" in df.columns
+    assert df.iloc[0]["成交量_張"] == 25000.0
+
+
+def test_get_or_fetch_cache已完整_不重抓(monkeypatch, tmp_path):
+    """【V0.9.5-cache-vol】cache 已是新結構 → 走快取、不重抓"""
+    import StockTool as st
+    import pandas as pd
+
+    fake_cache = tmp_path / "price.xlsx"
+    new_df = pd.DataFrame({
+        "股票代號": ["2330"],
+        "公司名稱_來源": ["台積電"],
+        "股價": [950.0],
+        "漲跌": [5.0],
+        "data_date": ["2026-06-18"],
+        "成交量_張": [25000.0],
+    })
+    st.save_cache(str(fake_cache), new_df)
+
+    monkeypatch.setattr(st, "get_cache_file", lambda name: str(fake_cache))
+
+    call_count = {"n": 0}
+    def fake_fetch():
+        call_count["n"] += 1
+        return new_df
+
+    class FakeLogger:
+        def log(self, msg):
+            pass
+
+    df = st.get_or_fetch("price", fake_fetch, FakeLogger())
+    assert call_count["n"] == 0, "cache 已有新結構時不該重抓"
