@@ -6,9 +6,38 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-cache-vol
-最後更新: 2026-06-19 19:00 (Asia/Taipei)
+最後更新: 2026-06-19 21:57 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-cache-hover 更新內容】2026-06-19 22:00 (William 要求)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 21:53 本機測試：「現在看起來 so far so good」
+- 要求「滑鼠移到某股票範圍時、把整個 row 都 highlight、這樣比較好讀」
+- 移走時取消、用黃色
+
+【改動】手動選股 Treeview 加 hover highlight
+- 新增 tag_configure：
+  · 'hover'：背景 #fff3a0（黃色）
+  · 'checked'：背景 #d0e8ff（淺藍）
+  · 'unchecked'：背景 #ffffff（白）
+- 新增 event bindings：
+  · <Motion> → _on_tree_hover：進新 row 設 hover tag、離開舊 row 清除
+  · <Leave> → _on_tree_leave：離開 Treeview 時清除 hover
+- 新增 _clear_hover()：根據 _ms_checked 恢復該列原本的 checked/unchecked tag
+- 狀態變數：self._ms_hover_iid 記住目前 hover 的 row iid
+
+【邊界】
+- 滑鼠移到 header 或捲軸 → 不算 cell → 清 hover
+- 重跑選股刪除 Treeview 時會清除舊 iid 的 hover、用 try/except TclError 保護
+- 點 checkbox toggle 仍能改 checked 狀態、不受 hover 干擾
+  （toggle 最後用 self._ms_tree.item(item_id, tags=('checked' if not current else 'unchecked',)) 
+   設個、hover 狀態會被覆蓋；但該列不變、狀態正確）
+
+【驗證】
+- pytest：236 passed、3 pre-existing fail
+- 純 GUI event handler、不易寫 unit test、用本機測試驗證
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-vol-fix2 更新內容】2026-06-19 18:50 (William 反映)
@@ -5461,6 +5490,19 @@ class StrategyGUI(tk.Tk):
         ms_scroll_y.pack(side="right", fill="y")
         ms_scroll_x.pack(side="bottom", fill="x")
 
+        # 【V0.9.5-cache-hover 新增】2026-06-19 William 要求：
+        # 滑鼠移到某 row 時、整列黃色 highlight、移走取消
+        # 實現方式：建立 _hover iid 變數。
+        #   - Motion 進新 row 時：把 _hover 設為該 iid、用 item.configure(tag) 動態改 tag
+        #   - Leave 或 Motion 到別的 row：清掉 _hover、該 row 設回原本 tag
+        # 注意：ttk.Treeview 多 tag 只取第一個生效、所以只動態切換 tag 字串。
+        self._ms_tree.tag_configure("checked", background="#d0e8ff")
+        self._ms_tree.tag_configure("unchecked", background="#ffffff")
+        self._ms_tree.tag_configure("hover", background="#fff3a0")
+        self._ms_hover_iid = None  # 記住目前 hover 的 row iid（若有）
+        self._ms_tree.bind("<Motion>", self._on_tree_hover)
+        self._ms_tree.bind("<Leave>", self._on_tree_leave)
+
         # Click to toggle checkbox
         self._ms_tree.bind("<Button-1>", self._ms_toggle_check)
 
@@ -6125,6 +6167,52 @@ class StrategyGUI(tk.Tk):
                 f"⚠️ FinMind 額度用完（已抓 {done}/{total} 檔），"
                 f"已用 DB 資料顯示部分結果（殖利率欄位可能為 None）"
             )
+
+    def _on_tree_hover(self, event):
+        """【V0.9.5-cache-hover】滑鼠移到 Treeview 任一列時
+        - 若不是 cell (在捲軸/header) → 清除 hover
+        - 若進入同一列 → 不動
+        - 若進入新列 → 離開舊列 hover、進入新列 hover（黃色）
+        - 注意：勾選狀態 (checked/unchecked) 不能被覆蓋。
+          解法：現在用「只設一個 tag」、hover 時設為「hover」、離開時讀 _ms_checked 恢復。
+        """
+        region = self._ms_tree.identify("region", event.x, event.y)
+        if region != "cell":
+            # 滑鼠移到捲軸或 header → 清除 hover
+            self._clear_hover()
+            return
+        iid = self._ms_tree.identify_row(event.y)
+        if not iid:
+            self._clear_hover()
+            return
+        if iid == self._ms_hover_iid:
+            return
+        # 離開舊列（如果還在 hover）
+        self._clear_hover()
+        # 進新列
+        self._ms_hover_iid = iid
+        self._ms_tree.item(iid, tags=("hover",))
+
+    def _on_tree_leave(self, event):
+        """【V0.9.5-cache-hover】滑鼠離開 Treeview → 清除 hover"""
+        self._clear_hover()
+
+    def _clear_hover(self):
+        """【V0.9.5-cache-hover】取消目前 hover、恢復該列原本的 checked/unchecked tag"""
+        if not self._ms_hover_iid:
+            return
+        old_iid = self._ms_hover_iid
+        self._ms_hover_iid = None
+        # 若該列已被刪除（重跑選股）→ tree.item() 會例外、跳過
+        try:
+            if old_iid in self._ms_tree.get_children():
+                checked = self._ms_checked.get(old_iid, False)
+                self._ms_tree.item(
+                    old_iid,
+                    tags=("checked" if checked else "unchecked",),
+                )
+        except tk.TclError:
+            pass
 
     def _ms_toggle_check(self, event):
         """點 Treeview 任一列 → toggle 勾選狀態"""
