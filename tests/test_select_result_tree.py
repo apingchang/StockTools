@@ -29,8 +29,10 @@ def test_run_pipeline_returns_df_sel():
     # 找 run_pipeline 結尾的 return
     import re
     # 找「✅ 完成 → {out_file}」附近、有 return 含 df_sel
-    pattern = rb'out_file.{0,100}return\s*\{[^}]*"df_sel"'
-    m = re.search(pattern, content.encode("utf-8"), re.DOTALL)
+    # 用 regex 容忍空白、避免中文標點 escape 問題
+    # 「out_file}」加一個 } 來避開 out_file_prefix
+    pattern = r'out_file\}\".{0,300}return\s*\{[^}]*"df_sel"'
+    m = re.search(pattern, content, re.DOTALL)
     assert m, (
         "❌ run_pipeline 結尾沒在「✅ 完成」後 return df_sel！\n"
         "應為：\n"

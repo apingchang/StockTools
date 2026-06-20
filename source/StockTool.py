@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3
-最後更新: 2026-06-20 22:39 (Asia/Taipei)
+最後更新: 2026-06-21 00:21 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5423,10 +5423,16 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     logger.log(reason_stats.to_string(index=False) if not reason_stats.empty else "(無交易資料)")
     logger.log(f"\n✅ 完成 → {out_file}")
 
-    # V0.9.5-tab-split-phase3 B-1：回傳 df_sel 給 GUI 顯示
+    # V0.9.5-tab-split-phase3 B-1 fix：top10_codes 只在 use_top10_backtest=True 時賦值
+    # 用 try/except 處理未定義情況
+    try:
+        _top10_codes = top10_codes
+    except NameError:
+        _top10_codes = []
+
     return {
         "df_sel": df_sel,
-        "top10_codes": top10_codes,
+        "top10_codes": _top10_codes,
         "out_file": out_file,
     }
 
