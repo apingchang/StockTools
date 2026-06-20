@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-etf-history
-最後更新: 2026-06-20 18:57 (Asia/Taipei)
+最後更新: 2026-06-20 19:05 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -6401,7 +6401,7 @@ class StrategyGUI(tk.Tk):
         cols = ("勾選", "代號", "名稱", "收盤價", "ETF數", "今日異動")
         self._etf_tree = ttk.Treeview(right_frame, columns=cols, show="headings",
                                       selectmode="none", height=25)
-        col_widths = (40, 70, 130, 80, 70)
+        col_widths = (40, 70, 130, 80, 70, 100)
         for col, w in zip(cols, col_widths):
             self._etf_tree.heading(col, text=col)
             self._etf_tree.column(col, width=w, anchor="center")
