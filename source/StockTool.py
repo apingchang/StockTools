@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-shares-int (2026-06-20 14:13)      ║
+║               台灣股市量化選股系統 v0.9.5-etf-history (2026-06-20 17:54)     ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-shares-int
-最後更新: 2026-06-20 14:17 (Asia/Taipei)
+Version: v0.9.5-etf-history
+最後更新: 2026-06-20 18:23 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -299,6 +299,56 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 【pytest 新增 1 個】test_shares_int.py
 - test_shares_display_is_integer:Treeview cell 的股數欄位是 str(int(...))
 - test_shares_int_helper_works:int() 強制轉 float 顯示整數
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-etf-history ETF 持股歷史庫】2026-06-20 17:54 (William 17:54 需求)
+════════════════════════════════════════════════════════════════════════════════
+【需求】William 開 App 看 ETF Tab：
+1. 統計列表最後加「今日異動」欄（張數）
+2. Hover 顯示各 ETF 分別異動的數量
+3. App 啟動只抓一次、歷史存 local DB
+
+【設計決策】
+- 開新 DB：etf_history.db（避免污染既有 dividend_history.db）
+- 抓取源：etfinfo.tw /etf/{code} 的 SSR 資料（__NUXT_DATA__）
+  → schema dict + 5 values (code, name, weight, shares, unit)
+  → shares 直接是「持股股數」、換成張數 = shares / 1000
+- 異動算法：Σ (today_shares_lots - yesterday_shares_lots)
+  → 新增 ETF = +today_shares_lots
+  → 刪除 ETF = -yesterday_shares_lots
+- 不抓 ETF 規模（用 shares 直接算、不需換算）
+
+【DB schema】
+- etf_holding_history(date, etf_code, stock_code, stock_name, weight_pct, shares, shares_lots, industry, fetched_at)
+- fetch_meta(key, value, updated_at)
+
+【SSR Parse 技術細節】
+- Nuxt 3 flat array 結構
+- schema dict 內欄位都是 ref（指向 index）
+- 不能用固定 layout 偏移（unit 可能 reuse、weight 可能 reuse）
+- 必須用 _resolve_val(nuxt_list, schema[field]) 拿真實值
+- expected_end 計算：unit ref < i + 5 表示 reuse、只佔 5 位置、否則 6 位置
+
+【新增函式】
+- _init_etf_history_db(db_path)：建表
+- _save_etf_holding_snapshot(db, etf_code, holdings, date)：寫入單檔快照
+- _query_etf_holdings_by_date(db, date)：查詢指定日期持股
+- _query_latest_two_dates(db)：查最近兩個有效日期
+- _compute_etf_changes(db)：計算今日 vs 昨日異動張數
+
+【fetcher 改動】
+- fetch_etf_top10_holdings 改抓 shares + industry（從 SSR）
+- 保持既有回傳 list of dict 介面（向下相容）
+
+【下一步】
+- 串接 _etf_auto_startup_fetch：抓完後順便寫 DB
+- _etf_tree 加「今日異動」欄 + hover popup
+- 排序改為依總異動絕對值
+- 第一次啟動無昨日資料、顯示「—」+ 狀態列提示
+
+【pytest 新增 19 個】
+- tests/test_etf_history_db.py（13 個）：DB schema / save / query / compute 邏輯
+- tests/test_etf_ssr_parse.py（6 個）：SSR parse 守護 + 2 個真實整合測試
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-scrollfix 更新內容】2026-06-19 22:15 (William 反映)
@@ -1383,7 +1433,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-shares-int"
+VERSION = "v0.9.5-etf-history"
 
 
 import io
@@ -1832,6 +1882,247 @@ def _init_div_history_db(db_path: str):
             except Exception:
                 pass  # 欄位已存在（重複 migration 安全）
         conn.commit()
+
+
+# ==========================================================
+# 【V0.9.5-etf-history】ETF 持股歷史庫（etf_history.db）
+# ==========================================================
+# William 17:54 需求：
+# - ETF 成份股統計加「今日異動」欄（張）
+# - Hover 顯示各 ETF 異動明細
+# - App 啟動只抓一次、歷史存 local DB
+# 為避免污染既有 dividend_history.db、獨立一個 db
+ETF_HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS etf_holding_history (
+    date          TEXT    NOT NULL,       -- 'YYYY-MM-DD'
+    etf_code      TEXT    NOT NULL,       -- '0050'
+    stock_code    TEXT    NOT NULL,       -- '2330'
+    stock_name    TEXT,                   -- '台積電'
+    weight_pct    REAL    NOT NULL,       -- 佔 ETF 淨值 %（如 57.01）
+    shares        INTEGER NOT NULL,       -- 持股股數（從 etfinfo.tw SSR）
+    shares_lots   REAL    NOT NULL,       -- 持股張數（= shares / 1000）
+    industry      TEXT,                   -- 產業別（從 etfinfo.tw）
+    fetched_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (date, etf_code, stock_code)
+);
+CREATE INDEX IF NOT EXISTS idx_etf_hist_date ON etf_holding_history(date);
+CREATE INDEX IF NOT EXISTS idx_etf_hist_etf ON etf_holding_history(etf_code);
+CREATE INDEX IF NOT EXISTS idx_etf_hist_stock ON etf_holding_history(stock_code);
+CREATE TABLE IF NOT EXISTS fetch_meta (
+    key            TEXT PRIMARY KEY,
+    value          TEXT,
+    updated_at     TEXT
+);
+"""
+
+def _init_etf_history_db(db_path: str = "etf_history.db"):
+    """【V0.9.5-etf-history】建立 ETF 持股歷史庫（etf_history.db）
+
+    Schema：
+    - etf_holding_history(date, etf_code, stock_code, stock_name, weight_pct, shares, shares_lots, industry, fetched_at)
+    - fetch_meta(key, value, updated_at)
+    """
+    import sqlite3
+    os.makedirs(os.path.dirname(os.path.abspath(db_path)) if os.path.dirname(db_path) else ".", exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(ETF_HISTORY_SCHEMA)
+        conn.commit()
+
+
+def _save_etf_holding_snapshot(db_path: str, etf_code: str, holdings: list, date_str: str = None):
+    """【V0.9.5-etf-history】寫入單檔 ETF 持股快照
+
+    holdings: list of dict，每個含 {stock_code, stock_name, weight, shares, industry}
+    date_str: 'YYYY-MM-DD'、None = 今日
+    """
+    import sqlite3
+    from datetime import datetime
+    if date_str is None:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+    rows = []
+    for h in holdings:
+        shares = int(h.get("shares", 0))
+        shares_lots = shares / 1000.0  # 股 → 張
+        rows.append((
+            date_str,
+            etf_code,
+            h["stock_code"],
+            h["stock_name"],
+            float(h.get("weight", 0)),
+            shares,
+            shares_lots,
+            h.get("industry", ""),
+        ))
+    if not rows:
+        return 0
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            """INSERT OR REPLACE INTO etf_holding_history
+               (date, etf_code, stock_code, stock_name, weight_pct, shares, shares_lots, industry)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+        conn.execute(
+            """INSERT OR REPLACE INTO fetch_meta (key, value, updated_at)
+               VALUES (?, ?, datetime('now','localtime'))""",
+            ("last_etf_snapshot_date", date_str),
+        )
+        conn.commit()
+    return len(rows)
+
+
+def _query_etf_holdings_by_date(db_path: str, date_str: str) -> pd.DataFrame:
+    """【V0.9.5-etf-history】查詢指定日期的 ETF 持股快照
+
+    回傳 DataFrame: date, etf_code, stock_code, stock_name, weight_pct, shares, shares_lots, industry
+    """
+    import sqlite3
+    with sqlite3.connect(db_path) as conn:
+        return pd.read_sql_query(
+            """SELECT date, etf_code, stock_code, stock_name,
+                      weight_pct, shares, shares_lots, industry
+               FROM etf_holding_history
+               WHERE date = ?""",
+            conn,
+            params=(date_str,),
+        )
+
+
+def _query_latest_two_dates(db_path: str):
+    """【V0.9.5-etf-history】查詢最近兩個有資料的日期（今日、昨日）
+
+    回傳 (today_str, yesterday_str) 或 (today_str, None) 若沒有昨日資料
+    """
+    import sqlite3
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT date FROM etf_holding_history ORDER BY date DESC LIMIT 2"
+        ).fetchall()
+    if not rows:
+        return (None, None)
+    today = rows[0][0]
+    yesterday = rows[1][0] if len(rows) > 1 else None
+    return (today, yesterday)
+
+
+def _compute_etf_changes(db_path: str, today_str: str = None, yesterday_str: str = None) -> pd.DataFrame:
+    """【V0.9.5-etf-history】計算個股的「今日 ETF 異動張數總和」
+
+    算法：
+    - 對每檔個股、聚合所有持有它的 ETF（today 跟 yesterday 都要有資料）
+    - 異動張數 = Σ (today_shares_lots - yesterday_shares_lots)
+    - 若某個 ETF 今天新增（昨日無資料）→ 算 +today_shares_lots（全部增持）
+    - 若某個 ETF 今天刪除（今日無資料）→ 算 -yesterday_shares_lots（全部減持）
+    - 沒有 yesterday 資料的個股 → 該個股無變化（不列入結果）
+
+    回傳 DataFrame:
+    - stock_code, stock_name, etf_count, today_change_lots, etf_changes_json
+    - etf_changes_json: 各 ETF 異動明細（JSON 格式、給 popup 用）
+    """
+    import json
+    import sqlite3
+    from datetime import datetime
+    if today_str is None:
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+    with sqlite3.connect(db_path) as conn:
+        # 找最近兩個有效日期
+        cur = conn.execute(
+            "SELECT DISTINCT date FROM etf_holding_history ORDER BY date DESC LIMIT 2"
+        )
+        dates = [r[0] for r in cur.fetchall()]
+        if not dates:
+            return pd.DataFrame()
+        if today_str not in dates:
+            return pd.DataFrame()
+        today_str = dates[0]
+        yesterday_str = dates[1] if len(dates) > 1 else None
+
+        if yesterday_str is None:
+            # 沒有昨日資料 → 無法計算異動
+            return pd.DataFrame()
+
+        # 抓 today / yesterday 全部持股
+        today_df = pd.read_sql_query(
+            "SELECT * FROM etf_holding_history WHERE date = ?", conn, params=(today_str,)
+        )
+        yesterday_df = pd.read_sql_query(
+            "SELECT * FROM etf_holding_history WHERE date = ?", conn, params=(yesterday_str,)
+        )
+
+    if today_df.empty and yesterday_df.empty:
+        return pd.DataFrame()
+
+    # 用 (etf_code, stock_code) 作為 join key
+    today_df["key"] = today_df["etf_code"].astype(str) + "_" + today_df["stock_code"].astype(str)
+    yesterday_df["key"] = yesterday_df["etf_code"].astype(str) + "_" + yesterday_df["stock_code"].astype(str)
+
+    # Outer merge：保留兩邊資料（今天新增、今天刪除都要算）
+    merged = today_df.merge(
+        yesterday_df[["key", "shares_lots", "stock_name"]].rename(
+            columns={"shares_lots": "y_lots", "stock_name": "y_name"},
+        ),
+        on="key",
+        how="outer",
+    )
+    # stock_code：today 有就用 today、否則從 yesterday 補
+    if "stock_code" not in merged.columns:
+        merged["stock_code"] = None
+    # 用 yesterday 的 stock_code fillna
+    # 從 key 拆 stock_code 出來
+    merged["key_stock"] = merged["key"].str.split("_").str[1]
+    merged["stock_code"] = merged["stock_code"].fillna(merged["key_stock"])
+
+    merged["t_lots"] = merged["shares_lots"].fillna(0)
+    merged["y_lots"] = merged["y_lots"].fillna(0)
+    merged["change_lots"] = merged["t_lots"] - merged["y_lots"]
+
+    # 聚合到個股層級
+    rows = []
+    for stock_code, g in merged.groupby("stock_code"):
+        change_entries = []
+        total_change = 0.0
+        for _, r in g.iterrows():
+            if r["change_lots"] != 0:
+                # etf_code：today 有就用 today、否則從 key 拆
+                ec = r["etf_code"]
+                if pd.isna(ec):
+                    ec = r["key"].split("_")[0]
+                change_entries.append({
+                    "etf_code": str(ec),
+                    "etf_name": "",
+                    "change_lots": float(r["change_lots"]),
+                })
+                total_change += float(r["change_lots"])
+        # 取 stock_name：今日優先、若今日刪除則用昨日
+        today_name = g["stock_name"].dropna()
+        y_name = g["y_name"].dropna()
+        stock_name = today_name.iloc[0] if not today_name.empty else (y_name.iloc[0] if not y_name.empty else "")
+
+        # 計算「現有 etf 數量」（today 為主、若全刪則從 yesterday 取）
+        etf_count = int(g["etf_code"].notna().sum())
+        if etf_count == 0:
+            etf_count = int((g["y_lots"] > 0).sum())
+
+        if not change_entries:
+            continue
+        rows.append({
+            "stock_code": stock_code,
+            "stock_name": stock_name,
+            "etf_count": etf_count,
+            "today_change_lots": round(total_change, 3),
+            "etf_changes_json": json.dumps(change_entries, ensure_ascii=False),
+        })
+
+    result = pd.DataFrame(rows)
+    if not result.empty:
+        result = result.sort_values(
+            by="today_change_lots",
+            key=lambda s: s.abs(),
+            ascending=False,
+        ).reset_index(drop=True)
+    return result
+
 
 def _upsert_div_history(db_path: str, rows: list):
     """
@@ -3503,7 +3794,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-shares-int",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-history",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3527,8 +3818,17 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
                               etf_code: str) -> list:
     """【V0.9.5-etf】抓 etfinfo.tw 總覽頁的「前 10 大成分股」
 
-    回傳 list of (stock_code, stock_name, weight_pct)
-    例：[(2330, '台積電', 9.68), (2327, '國巨*', 8.67), ...]
+    從 SSR 解析（__NUXT_DATA__ 內含 shares + industry）：
+    範例：`{"code":149,"name":150,"weight":151,"shares":152,"unit":153,"industry":17},"2330","台積電",57.01,519237994,"股","半導體"`
+
+    回傳 list of dict，每個含 {stock_code, stock_name, weight, shares, industry}
+    例：
+    [
+        {"stock_code": "2330", "stock_name": "台積電", "weight": 57.01, "shares": 519237994, "industry": "半導體"},
+        {"stock_code": "2454", "stock_name": "聯發科", "weight": 6.28, "shares": 31410621, "industry": "半導體"},
+    ]
+
+    【V0.9.5-etf-history】shares 是持股股數（如 519237994 股 = 519,237.994 張）
     """
     import re as _re
     url = ETFINFO_ETF_URL.format(code=etf_code)
@@ -3537,7 +3837,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-shares-int",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-history",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -3560,15 +3860,119 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         section,
         _re.DOTALL,
     )
+    if not rows:
+        raise RuntimeError(f"{etf_code} 解析前 10 大失敗")
+
+    # 【V0.9.5-etf-history】從 SSR __NUXT_DATA__ parse shares
+    # 結構（Nuxt 3 flat array）：
+    #   schema: {"code":X,"name":X,"weight":X,"shares":X,"unit":X,"industry":17}
+    #   values: "2330","台積電",57.01,519237994,"股"
+    # 注意：industry=17 指向 None（schema ref、沒有填值）→ 暫時拿不到 industry
+    # → 重點在 shares（計算張數異動）、industry 可後續再補
+    import json as _json
+    nuxt_match = _re.search(r"__NUXT_DATA__[^>]*>([^<]+)</script>", html)
+    nuxt_list = []
+    if nuxt_match:
+        try:
+            nuxt_list = _json.loads(nuxt_match.group(1))
+        except Exception:
+            nuxt_list = []
+
+    # 建立 stock_code → shares 對照
+    # Nuxt 3 flat array 結構：每個 holding 是
+    #   [schema_dict, code_val, name_val, weight_val, shares_val, unit_val]
+    # schema_dict.shares 是指向 shares_val 的 index reference
+    # 注意：unit 通常 reuse 已存在的 "股" ref → 不佔位置
+    # 計算 holding 長度：從 schema dict 後到下一個 schema 之間 = 5 個值（reuse unit）或 6 個值（首次 unit）
+
+    def _resolve_val(arr, idx):
+        """解 Nuxt ref：追蹤整數 ref 直到拿到實際值"""
+        depth = 0
+        while depth < 5:
+            try:
+                v = arr[idx]
+            except IndexError:
+                return None
+            if isinstance(v, int) and 0 <= v < len(arr):
+                idx = v
+                depth += 1
+                continue
+            return v
+        return None
+
+    code_to_shares = {}
+    n = len(nuxt_list)
+    i = 0
+    while i < n:
+        item = nuxt_list[i]
+        # schema dict：{"code":X, "name":X, "weight":X, "shares":X, "unit":X, "industry":X}
+        if not (isinstance(item, dict)
+                and "code" in item and "shares" in item
+                and isinstance(item.get("code"), int)
+                and isinstance(item.get("shares"), int)):
+            i += 1
+            continue
+        # schema dict 後面跟著 5 個值（code, name, weight, shares, unit）
+        # unit 可能 reuse（指向已存在的 "股" ref）→ 計算 layout 長度
+        schema = item
+        # 從 schema 算 holding 結尾：找出 max ref index + 1
+        max_ref = i  # schema 自己
+        for field in ("code", "name", "weight", "shares", "unit"):
+            ref = schema.get(field)
+            if isinstance(ref, int) and ref > max_ref:
+                max_ref = ref
+        # 但 unit 可能指向已存在 ref（< i + 5）、就不會佔新位置
+        # 簡化：假設 holding layout 是 schema + 5 個新值 = 6 位置
+        #       除非 unit ref < i + 5（reuse）、那就只有 5 位置
+        unit_ref = schema.get("unit")
+        expected_end = i + 6  # schema + 5 values
+        if isinstance(unit_ref, int) and unit_ref < i + 5:
+            # unit reuse、不佔新位置
+            expected_end = i + 5
+
+        try:
+            # 用 schema ref 拿真實值（避免 layout 偏移）
+            code_val = _resolve_val(nuxt_list, schema["code"])
+            name_val = _resolve_val(nuxt_list, schema["name"])
+            weight_val = _resolve_val(nuxt_list, schema["weight"])
+            shares_val = _resolve_val(nuxt_list, schema["shares"])
+            if (isinstance(code_val, str) and code_val.isdigit()
+                    and isinstance(shares_val, (int, float))
+                    and shares_val > 0):
+                code_to_shares[code_val] = int(shares_val)
+        except (IndexError, ValueError, TypeError):
+            pass
+
+        # 推進：跳到下一個 schema（使用 expected_end）
+        # 但要驗證下個位置真的是 schema、否則前進 1 格
+        next_i = expected_end
+        if next_i < n:
+            next_item = nuxt_list[next_i]
+            if isinstance(next_item, dict) and "code" in next_item and "shares" in next_item:
+                i = next_i
+            else:
+                i += 1
+        else:
+            i = expected_end
+
     holdings = []
     for stock_code, _, stock_name, weight in rows:
+        stock_code = stock_code.strip()
+        stock_name = stock_name.strip()
+        weight_val = float(weight)
+        shares = code_to_shares.get(stock_code, 0)
         holdings.append({
-            "stock_code": stock_code.strip(),
-            "stock_name": stock_name.strip(),
-            "weight": float(weight),
+            "stock_code": stock_code,
+            "stock_name": stock_name,
+            "weight": weight_val,
+            "shares": shares,
+            "industry": "",  # etfinfo.tw holdings 結構內 industry 是 ref→None、暫拿不到
         })
-    if not holdings:
-        raise RuntimeError(f"{etf_code} 解析前 10 大失敗")
+
+    # 若 shares 全為 0、可能 SSR parse 失敗、警告
+    if holdings and not any(h["shares"] > 0 for h in holdings):
+        print(f"[V0.9.5-etf-history] ⚠️ {etf_code} SSR parse 失敗、shares 全為 0")
+
     return holdings
 
 
