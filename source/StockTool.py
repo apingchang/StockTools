@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-etf-history
-最後更新: 2026-06-20 18:23 (Asia/Taipei)
+最後更新: 2026-06-20 18:57 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5680,6 +5680,9 @@ class StrategyGUI(tk.Tk):
 
         # 【V0.9.5-etf】主動式 ETF 持股 Tab
         self.etf_tab = ttk.Frame(self.notebook)
+
+        # 【V0.9.5-etf-history】ETF 持股歷史庫初始化
+        self._init_etf_history()
         self.notebook.add(self.etf_tab, text="📊 主動式 ETF")
         self._build_etf_tab(self.etf_tab)
 
@@ -6395,7 +6398,7 @@ class StrategyGUI(tk.Tk):
         right_frame = ttk.LabelFrame(paned, text="📊 ETF 成份股持股統計（依 ETF 數排序）", padding=4)
         paned.add(right_frame, weight=1)
 
-        cols = ("勾選", "代號", "名稱", "收盤價", "ETF數")
+        cols = ("勾選", "代號", "名稱", "收盤價", "ETF數", "今日異動")
         self._etf_tree = ttk.Treeview(right_frame, columns=cols, show="headings",
                                       selectmode="none", height=25)
         col_widths = (40, 70, 130, 80, 70)
@@ -7398,7 +7401,9 @@ class StrategyGUI(tk.Tk):
 
         # 在「ETF數」欄（第 5 欄 = #5）上才顯示 popup
         if column == "#5":
-            self._show_etf_popup(iid, event.x_root, event.y_root)
+            self._show_etf_popup(iid, event.x_root, event.y_root, mode="etf_list")
+        elif column == "#6":
+            self._show_etf_popup(iid, event.x_root, event.y_root, mode="changes")
         else:
             self._close_etf_popup()
 
@@ -7422,9 +7427,10 @@ class StrategyGUI(tk.Tk):
         except tk.TclError:
             pass
 
-    def _show_etf_popup(self, iid, x_root, y_root):
-        """【V0.9.5-etf】在滑鼠位置顯示 Toplevel 視窗、列出包含該股票的 ETF 列表
-        - ETF 代號、名稱、權重（依權重降序）
+    def _show_etf_popup(self, iid, x_root, y_root, mode="etf_list"):
+        """【V0.9.5-etf】在滑鼠位置顯示 Toplevel 視窗
+        mode="etf_list"：顯示持有此股的 ETF 列表
+        mode="changes"：【V0.9.5-etf-history】顯示各 ETF 對該股的異動明細
         - 重複呼叫不重建視窗，只更新內容
         """
         if self._etf_agg_df is None or self._etf_agg_df.empty:
@@ -7436,11 +7442,42 @@ class StrategyGUI(tk.Tk):
         if match.empty:
             self._close_etf_popup()
             return
-        etf_list_str = match.iloc[0].get("etf_list", "")
-        if not etf_list_str:
-            self._close_etf_popup()
-            return
-
+        # 【V0.9.5-etf-history】mode="changes"：顯示各 ETF 異動明細
+        if mode == "changes":
+            change_df = getattr(self, "_etf_change_df", None)
+            if change_df is None or change_df.empty:
+                self._close_etf_popup()
+                return
+            stock_changes = change_df[change_df["stock_code"].astype(str).str.strip() == stock_code]
+            if stock_changes.empty:
+                self._close_etf_popup()
+                return
+            change_lines = []
+            total = 0.0
+            for _, cr in stock_changes.iterrows():
+                etf_code = str(cr.get("etf_code", "")).strip()
+                etf_name = str(cr.get("etf_name", etf_code))
+                cl = cr.get("change_lots", 0) or 0
+                if abs(cl) < 0.001:
+                    continue
+                total += cl
+                sign = "+" if cl > 0 else ""
+                change_lines.append(f"{sign}{cl:,.1f}  {etf_code} {etf_name}")
+            if not change_lines:
+                self._close_etf_popup()
+                return
+            sign = "+" if total > 0 else ""
+            change_lines.append("-" * 20)
+            change_lines.append(f"總和 {sign}{total:,.1f} 張")
+            popup_text = "\n".join(change_lines)
+        else:
+            # etf_list mode：顯示持有此股的 ETF 列表
+            etf_list_str = match.iloc[0].get("etf_list", "")
+            if not etf_list_str:
+                self._close_etf_popup()
+                return
+            popup_title = f"{stock_code} {match.iloc[0].get("股票名稱", "")} 被 {match.iloc[0].get("etf_count", 0)} 檔 ETF 持有："
+            popup_text = popup_title + "\n" + etf_list_str
         # 建立 popup（一次一個）
         if self._etf_popup is None or not self._etf_popup.winfo_exists():
             self._etf_popup = tk.Toplevel(self)
@@ -7465,10 +7502,8 @@ class StrategyGUI(tk.Tk):
             self._etf_popup_text.pack()
 
         # 內容
-        stock_name = match.iloc[0].get("股票名稱", "")
-        etf_count = match.iloc[0].get("etf_count", 0)
-        title = f"{stock_code} {stock_name} 被 {etf_count} 檔 ETF 持有："  # 【V0.9.5-etf-popup-spacing】拿掉 📊 icon
-        all_text = title + "\n" + etf_list_str  # 【V0.9.5-etf-popup-fix】etf_list_str 已是 \n 分隔
+        # 【V0.9.5-etf-history】all_text 在 mode block 中已設定
+        all_text = popup_text
 
         # 計算最長行（用於設定 Text widget 寬度）
         # 【V0.9.5-etf-popup-width】中文字算 2、其他算 1（Text widget width 是平均字元寬度）
@@ -7540,6 +7575,54 @@ class StrategyGUI(tk.Tk):
             vals[0] = "☐"
             self._etf_tree.item(item, values=vals, tags=("unchecked",))
 
+
+    # ── ETF 持股歷史庫（V0.9.5-etf-history）────────────────────────────────
+    def _init_etf_history(self):
+        """【V0.9.5-etf-history】ETF 持股歷史庫初始化（App 起動時呼叫一次）"""
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "etf_history.db")
+        _init_etf_history_db(db_path)
+        self._etf_history_db = db_path
+
+    def _save_etf_holdings_to_db(self, long_df):
+        """【V0.9.5-etf-history】把 long_df 寫入 DB"""
+        if long_df is None or long_df.empty:
+            return
+        import sqlite3
+        from datetime import datetime as _dt
+        db_path = getattr(self, "_etf_history_db", None)
+        if db_path is None:
+            return
+        date_str = _dt.now().strftime("%Y-%m-%d")
+        try:
+            with sqlite3.connect(db_path) as conn:
+                for _, r in long_df.iterrows():
+                    shares = int(r.get("shares", 0) or 0)
+                    _save_etf_holding_snapshot(
+                        db_path,
+                        str(r["etf_code"]).strip(),
+                        [{
+                            "stock_code": str(r["stock_code"]).strip(),
+                            "stock_name": str(r.get("stock_name", "")),
+                            "weight": float(r.get("weight", 0) or 0),
+                            "shares": shares,
+                            "industry": str(r.get("industry", "")),
+                        }],
+                        date_str=date_str,
+                    )
+        except Exception as e:
+            self.logger.log(f"⚠️ [ETF] 寫入 etf_history.db 失敗：{e}")
+
+    def _compute_etf_changes_from_db(self):
+        """【V0.9.5-etf-history】從 DB 拿今日 vs 昨日異動"""
+        db_path = getattr(self, "_etf_history_db", None)
+        if db_path is None:
+            return pd.DataFrame()
+        try:
+            return _compute_etf_changes(db_path)
+        except Exception as e:
+            self.logger.log(f"⚠️ [ETF] 計算 ETF 異動失敗：{e}")
+            return pd.DataFrame()
+
     def _etf_apply_filter(self):
         """【V0.9.5-etf】套用左面板篩選、刷新 Treeview
         - 需要先 _etf_refresh_holdings 有資料
@@ -7594,16 +7677,40 @@ class StrategyGUI(tk.Tk):
         self._etf_agg_df = agg_df
         if long_df is not None:
             self._etf_long_df = long_df
+
+        # 【V0.9.5-etf-history】寫入 etf_history.db
+        self._save_etf_holdings_to_db(long_df)
+        # 計算今日異動
+        self._etf_change_df = self._compute_etf_changes_from_db()
         self._etf_data_status.set(
             f"ETF 持股：最後更新 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ({len(agg_df)} 檔個股)"
         )
         self._etf_status.set(f"✅ ETF 持股抓取完成：{len(agg_df)} 檔個股被多檔 ETF 持有")
         # 自動套用一次篩選
-        self._etf_display_results(agg_df)
+        self._etf_display_results(agg_df, self._etf_change_df)
 
-    def _etf_display_results(self, agg_df):
+    def _etf_display_results(self, agg_df, change_df=None):
         """【V0.9.5-etf】依左面板條件、刷新 Treeview 內容"""
         df = agg_df.copy()
+
+        # 【V0.9.5-etf-history】合併今日異動
+        if change_df is None:
+            change_df = getattr(self, "_etf_change_df", None)
+        if change_df is not None and not change_df.empty:
+            stock_change = (
+                change_df.groupby("stock_code", as_index=False)["change_lots"]
+                .sum()
+                .rename(columns={"change_lots": "total_change_lots"})
+            )
+            df = df.merge(
+                stock_change,
+                left_on=df["股票代號"].astype(str).str.strip(),
+                right_on="stock_code",
+                how="left"
+            )
+            df["total_change_lots"] = df["total_change_lots"].fillna(0)
+        else:
+            df["total_change_lots"] = 0.0
 
         # 篩選：最小 ETF 數
         min_count = self._etf_min_count_var.get()
@@ -7612,6 +7719,13 @@ class StrategyGUI(tk.Tk):
         # 篩選：是否限定有收盤價
         if self._etf_only_with_price_var.get():
             df = df[df["收盤價"].notna()]
+
+        # 【V0.9.5-etf-history】依總異動絕對值降序（沒有異動的擺最後）
+        has_change = df["total_change_lots"].abs() > 0.001
+        df = pd.concat([
+            df[has_change].sort_values("total_change_lots", key=lambda x: x.abs(), ascending=False),
+            df[~has_change].sort_values("etf_count", ascending=False),
+        ], ignore_index=True)
 
         # 結果上限
         limit = self._etf_limit_var.get()
@@ -7634,9 +7748,14 @@ class StrategyGUI(tk.Tk):
             else:
                 # 【V0.9.5-locale-comma-fix】不用千分位、Tkinter Treeview 會把 , 轉成 .
                 price_str = f"{float(price):.2f}"
+            change_lots = row.get("total_change_lots", 0) or 0
+            if abs(change_lots) < 0.001:
+                change_str = "--"
+            else:
+                change_str = f"{change_lots:+.1f}"
             self._etf_tree.insert(
                 "", "end", iid=iid,
-                values=("☐", iid, str(row.get("股票名稱", "")), price_str, int(row["etf_count"])),
+                values=("☐", iid, str(row.get("股票名稱", "")), price_str, int(row["etf_count"]), change_str),
                 tags=("unchecked",),
             )
 
@@ -7745,14 +7864,19 @@ class StrategyGUI(tk.Tk):
         self._etf_agg_df = agg_df
         if long_df is not None:
             self._etf_long_df = long_df
-        self._etf_data_status.set(
-            f"ETF 持股：最後更新 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ({len(agg_df)} 檔個股)"
-        )
-        self._etf_status.set(f"✅ ETF 持股已就緒：{len(agg_df)} 檔個股（依 ETF 數由大到小排序）")
-        # 套用預設篩選顯示
-        self._etf_display_results(agg_df)
-        self.logger.log(f"✅ [ETF] 開機抓取完成：{len(agg_df)} 檔個股")
 
+        # 【V0.9.5-etf-history】寫入 etf_history.db
+        self._save_etf_holdings_to_db(long_df)
+        # 計算今日異動
+        self._etf_change_df = self._compute_etf_changes_from_db()
+        if self._etf_change_df is not None and not self._etf_change_df.empty:
+            self._etf_data_status.set(
+            f"ETF 持股：最後更新 {datetime.now().strftime('%%Y-%%m-%%d %%H:%%M:%%S')} ({len(agg_df)} 檔個股) ✅ 有昨日資料可比較"
+            )
+        else:
+            self._etf_data_status.set(
+            f"ETF 持股：最後更新 {datetime.now().strftime('%%Y-%%m-%%d %%H:%%M:%%S')} ({len(agg_df)} 檔個股) ⚠️ 無昨日資料"
+            )
     def _load_price_df(self):
         """【V0.9.5-etf】讀取 price 快取 DataFrame、若不存在就 try fetch_prices 一次
         回傳的 df 至少含欄位：股票代號、股價
