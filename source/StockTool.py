@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-tab-split-phase3 (2026-06-20 22:30)      ║
+║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-B2 (2026-06-21 00:30)      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-tab-split-phase3
-最後更新: 2026-06-21 00:21 (Asia/Taipei)
+Version: v0.9.5-tab-split-phase3-B2
+最後更新: 2026-06-21 00:37 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1433,7 +1433,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-tab-split-phase3"
+VERSION = "v0.9.5-tab-split-phase3-B2"
 
 
 import io
@@ -3794,7 +3794,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-B2",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3837,7 +3837,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-B2",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -5034,6 +5034,8 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
             df_sel = calculate_simple_score(df_sel, cfg)
 
         df_sel = df_sel.sort_values("Score", ascending=False).reset_index(drop=True)
+        # V0.9.5-tab-split-phase3 B-2：套用強勢股過濾
+        df_sel = _apply_strong_filter(df_sel, cfg, logger)
 
         top10_codes = df_sel.head(10)["股票代號"].dropna().astype(str).str.strip().tolist()
         logger.log(f"   Top10 股票: {top10_codes}")
@@ -5102,6 +5104,8 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         logger.log(f"   權重: 營收{w_rev:.0f}% / EPS{w_eps:.0f}% / 殖利率{w_div:.0f}% / PE{w_pe:.0f}%")
 
     df_sel_temp = df_sel_temp.sort_values("Score", ascending=False).reset_index(drop=True)
+    # V0.9.5-tab-split-phase3 B-2：套用強勢股過濾
+    df_sel_temp = _apply_strong_filter(df_sel_temp, cfg, logger)
 
     logger.log(f"5) 抓取前 {cfg.top_n_for_tech} 檔股票的歷史日K...")
 
@@ -5422,6 +5426,45 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     logger.log("\n✅ 出場原因統計:")
     logger.log(reason_stats.to_string(index=False) if not reason_stats.empty else "(無交易資料)")
     logger.log(f"\n✅ 完成 → {out_file}")
+
+    # V0.9.5-tab-split-phase3 B-2：套用強勢股過濾（helper 函式）
+    def _apply_strong_filter(df, cfg, logger):
+        """【V0.9.5-tab-split-phase3 B-2】套用強勢股過濾
+
+        條件（全部都要符合）：
+        - 營收YoY > strong_revenue_yoy
+        - EPS 本期 > 0（獲利）
+        - PE < strong_pe_max
+        - 股價 > strong_price_min
+
+        Args:
+            df: 已 sort by Score desc 的 DataFrame
+            cfg: StrategyConfig
+            logger: GuiLogger
+
+        Returns:
+            過濾後的 DataFrame（如果過濾後為空、log warning 並 return 原 df）
+        """
+        before = len(df)
+        mask = (
+            (df["營收YoY(%)"] > cfg.strong_revenue_yoy) &
+            (df["EPS本期"] > 0) &
+            (df["PE"] < cfg.strong_pe_max) &
+            (df["股價"] > cfg.strong_price_min)
+        )
+        filtered = df[mask].copy()
+        after = len(filtered)
+
+        if after == 0:
+            logger.log(f"⚠️ 強勢股過濾後無股票保留（從 {before} → 0）、使用全部股票")
+            return df
+
+        logger.log(
+            f"💪 強勢股過濾：{before} → {after} 檔 "
+            f"(營收YoY>{cfg.strong_revenue_yoy}% + EPS>0 + PE<{cfg.strong_pe_max} + 股價>{cfg.strong_price_min})"
+        )
+        return filtered
+
 
     # V0.9.5-tab-split-phase3 B-1 fix：top10_codes 只在 use_top10_backtest=True 時賦值
     # 用 try/except 處理未定義情況
@@ -5836,7 +5879,7 @@ class StrategyGUI(tk.Tk):
         ).pack(anchor="w", pady=(5, 0))
         ttk.Label(source_frame, text="  ※ 直接使用評分最高的10檔股票建倉，不經過買點過濾", foreground="gray").pack(anchor="w")
         # 7. 強勢股過濾
-        strong_frame = ttk.LabelFrame(left, text="💪 強勢股過濾 (報表用)", padding=5)
+        strong_frame = ttk.LabelFrame(left, text="💪 強勢股過濾", padding=5)
         strong_frame.pack(fill="x", pady=5)
         self._add_entry(strong_frame, "最低營收YoY (%)", "strong_revenue_yoy", tk.DoubleVar, self.cfg.strong_revenue_yoy)
         self._add_entry(strong_frame, "最高本益比", "strong_pe_max", tk.DoubleVar, self.cfg.strong_pe_max)
