@@ -63,23 +63,37 @@ def test_console_is_global_at_bottom():
             f"V0.9.5-tab-split：console 應為全域、不屬於任何 tab"
         )
 
-    # console 應在 outer_paned 內
-    assert "outer_paned" in content, "❌ 缺少 outer_paned（上下分割）"
-    assert "outer_paned.add(console_container" in content, (
-        "❌ console 沒有被加到 outer_paned"
+    # V0.9.5-tab-split-fix2：console_container 用 side="bottom" pack
+    assert 'side="bottom"' in content, (
+        "❌ console_container 沒有 side='bottom'！\n"
+        "V0.9.5-tab-split-fix2：用 Frame + pack、console 在底"
+    )
+    print("✅ console 為全域、放在 side='bottom'")
+
+
+def test_use_frame_pack_not_paned():
+    """V0.9.5-tab-split-fix2：用 Frame + pack、不是 PanedWindow
+
+    PanedWindow.add() 在 Win10/Win11 上有 notebook 不顯示的 bug
+    改用 Frame + pack 上下切（更可靠）
+    """
+    with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # 不應該有 outer_paned.pack( 或 outer_paned.add(
+    assert "outer_paned.pack(" not in content, (
+        "❌ 還在用 PanedWindow！\n"
+        "V0.9.5-tab-split-fix2：改用 Frame + pack（更穩）"
+    )
+    assert "outer_paned.add(" not in content, (
+        "❌ 還在用 PanedWindow.add()！\n"
+        "改用 Frame + pack"
     )
 
-    # 關鍵守護：console_container 必須是 outer_paned 的 child、不是 self 的 child
-    # 抓錯 parent 會讓 console 顯示在 root 視窗、notebook 區域變空白
-    m = re.search(r"console_container = ttk\.LabelFrame\(\s*([^,]+),", content)
-    assert m, "❌ 找不到 console_container 宣告"
-    parent = m.group(1).strip()
-    assert parent == "outer_paned", (
-        f"❌ console_container 的 parent 是「{parent}」、應該是「outer_paned」！\n"
-        f"若是「self」會導致 console 直接放 root 視窗、\n"
-        f"outer_paned 的 notebook 區域就會被擠壓變空白（William 21:27 反映）"
-    )
-    print("✅ console 為全域、放在 outer_paned 底部、parent 正確")
+    # 必須有 side="top" + side="bottom" 的 split
+    assert 'side="top"' in content, "❌ 缺少 side='top'（notebook 在上）"
+    assert 'side="bottom"' in content, "❌ 缺少 side='bottom'（console 在下）"
+    print("✅ 用 Frame + pack 上下切（不用 PanedWindow）")
 
 
 def test_console_has_vertical_and_horizontal_scrollbar():

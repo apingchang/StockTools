@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split
-最後更新: 2026-06-20 21:30 (Asia/Taipei)
+最後更新: 2026-06-20 21:41 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5872,13 +5872,16 @@ class StrategyGUI(tk.Tk):
         # V0.9.5-tab-split：console 改為全域、稍後在 _build_ui 結尾建構
         # 原本是放在 right 內、階段 1 改成全域底部
 
-        # V0.9.5-tab-split：notebook + 全域 console（用 paned 切上下）
-        outer_paned = ttk.PanedWindow(self, orient="vertical")
-        outer_paned.pack(fill="both", expand=True, padx=8, pady=8)
-        # notebook 放上
-        outer_paned.add(self.notebook, weight=4)
-        # 全域 console 放下（console_container 是 outer_paned 的 child）
-        console_container = ttk.LabelFrame(outer_paned, text="📝 執行記錄 (Program Console) — 全域", padding=2)
+        # V0.9.5-tab-split-fix2：直接用 Frame + pack 上下切（不用 PanedWindow）
+        # PanedWindow.add() 在 Win10/Win11 上有 notebook 不顯示的 bug
+        # 改用兩個 frame 分別 pack(side="top") / pack(side="bottom")
+        top_frame = ttk.Frame(self)
+        top_frame.pack(side="top", fill="both", expand=True, padx=8, pady=(8, 4))
+        self.notebook.pack(in_=top_frame, fill="both", expand=True)
+
+        # 全域 console 放下（直接掛 self、用 LabelFrame 區隔）
+        console_container = ttk.LabelFrame(self, text="📝 執行記錄 (Program Console) — 全域", padding=2)
+        console_container.pack(side="bottom", fill="both", expand=False, padx=8, pady=(4, 8))
         console_frame = ttk.Frame(console_container)
         console_frame.pack(fill="both", expand=True)
         self.console = tk.Text(console_frame, height=10, wrap="word")
@@ -5888,7 +5891,6 @@ class StrategyGUI(tk.Tk):
         self.console.pack(side="left", fill="both", expand=True)
         console_scrollbar_y.pack(side="right", fill="y")
         console_scrollbar_x.pack(side="bottom", fill="x")
-        outer_paned.add(console_container, weight=1)
 
     def _build_backtest_placeholder(self, parent):
         """【V0.9.5-tab-split】回測模擬 tab 的 placeholder UI
