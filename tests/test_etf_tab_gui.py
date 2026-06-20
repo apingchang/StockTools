@@ -209,12 +209,14 @@ def test_etf_export_excel_未勾選_跳警告():
 # ==========================================================
 
 def test_etf_show_popup_正常顯示():
-    """【核心守護】給 iid + 座標 → 建立 Toplevel、顯示 etf_list"""
+    """【核心守護】給 iid + 座標 → 建立 Toplevel + Text widget、顯示 etf_list
+    【V0.9.5-etf-popup-fix】popup widget 從 Label 改成 Text、才能多行顯示
+    """
     s = _make_self()
     s._etf_popup = None  # 一開始沒 popup
-    # mock Toplevel
+    # mock Toplevel + Text（V0.9.5-etf-popup-fix 改用 Text widget）
     with patch.object(st.tk, "Toplevel") as MockToplevel, \
-         patch.object(st.tk, "Label") as MockLabel:
+         patch.object(st.tk, "Text") as MockText:
         toplevel_instance = MagicMock()
         toplevel_instance.winfo_exists.return_value = True
         toplevel_instance.winfo_reqwidth.return_value = 400
@@ -223,16 +225,23 @@ def test_etf_show_popup_正常顯示():
         toplevel_instance.winfo_screenheight.return_value = 1080
         MockToplevel.return_value = toplevel_instance
 
+        text_instance = MagicMock()
+        MockText.return_value = text_instance
+
         st.StrategyGUI._show_etf_popup(s, "2330", 500, 300)
 
         # 應該建立 Toplevel
         MockToplevel.assert_called_once()
-        # 應該 config text 含「2330 台積電」與「被 3 檔 ETF 持有」
-        call_args = MockLabel.return_value.config.call_args
-        text = call_args.kwargs.get("text", "")
-        assert "2330" in text
-        assert "台積電" in text
-        assert "3" in text  # etf_count
+        # 【V0.9.5-etf-popup-fix】應該 insert text 進 Text widget
+        # 找呼叫 .insert("1.0", all_text) 那次
+        insert_calls = text_instance.insert.call_args_list
+        assert insert_calls, "❌ 沒呼叫 _etf_popup_text.insert(...)"
+        # 取出所有 insert 的字串內容
+        all_inserted = " ".join(str(c.args[1]) if len(c.args) > 1 else str(c.kwargs.get("text", ""))
+                                 for c in insert_calls)
+        assert "2330" in all_inserted
+        assert "台積電" in all_inserted
+        assert "3" in all_inserted  # etf_count
 
 
 def test_etf_show_popup_找不到iid_不顯示():

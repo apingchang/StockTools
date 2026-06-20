@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-etf-session-fix (2026-06-20 09:12) ║
+║               台灣股市量化選股系統 v0.9.5-etf-popup-fix (2026-06-20 10:21) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-etf-session-fix
-最後更新: 2026-06-20 09:21 (Asia/Taipei)
+Version: v0.9.5-etf-popup-fix
+最後更新: 2026-06-20 10:39 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -70,7 +70,7 @@ Python 版本: 3.8+
 4. Hover 複用手動選股機制（黃色 / 淺藍 / checked/unchecked tag）
 5. Hover 在「ETF數」欄 → Toplevel popup 顯示完整 ETF 列表
    · 設計：只在 column #5 才顯示 popup、移開其他欄位會關掉
-   · popup 內容：「📊 2330 台積電 被 3 檔 ETF 持有：\n + etf_list」
+   · popup 內容：「📊 2330 台積電 被 3 檔 ETF 持有：」 + 每個 ETF 換行顯示（Text widget）
 6. 勾選複用手動選股 pattern（點第一欄 toggle）
 7. 篩選條件：最少 ETF 數 / 是否限定有收盤價 / 結果上限
 8. 匯出 Excel：跟手動選股同格式、可餵回策略參數 Tab
@@ -169,6 +169,38 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 - pytest 5 個新 test 全綠、總計 270 passed
 - 3 個 pre-existing fail 在 test_dividend_yield_fix.py（test ordering 問題、單跑全綠、跟本次無關）
 - 語法檢查通過
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-etf-popup-fix 修 Bug 內容】2026-06-20 10:21 (William 10:21 反映)
+════════════════════════════════════════════════════════════════════════════════
+【問題】William 開 App 把滑鼠 hover 到「2330 台積電」的「ETF 數 18」欄
+- popup 出現但只能看到「金像電子（股）公司」這種擠在一起的文字
+- 看不出每個 ETF 代號跟名稱、無法閱讀
+
+【根因】
+- aggregate_etf_holdings 用 " | " 把 18 個 ETF 串成一行塞進 etf_list
+- popup 用 Label 顯示、Label 把整段當成一行算寬度 → 被擠壓
+- 結果：原本是「00980A 主動野村臺灣優選(9.37%) | 00982A ...」的一行
+       → 被擠成「金像電子（股）公司」這種難以辨識的 column
+
+【修法】2 個改動
+1. etf_list 分隔符：「 | 」→ 「\n」（每個 ETF 一行）
+2. popup widget：Label → Text widget（以最長那行算寬度、不會被擠壓）
+   · width = max line length
+   · height = min(total_lines, 25)
+   · state="disabled" 唯讀
+
+【pytest 新增 6 個】test_etf_popup_format.py
+- test_etf_list_uses_newline_separator:etf_list 用 \n 分隔、不再用 " | "
+- test_etf_popup_widget_is_text:popup 是 Text widget 不是 Label
+- test_etf_popup_text_uses_max_line_width:width 用 max_line_len 自動算
+- test_etf_popup_text_height_capped:height 用 min(total_lines, 25) 限制
+- test_etf_aggregator_actually_newlines:跑 aggregate_etf_holdings 真驗證換行
+- test_etf_popup_method_compiles:py_compile 編譯通過
+
+【附帶更新 test_etf_tab_gui.py】
+- test_etf_show_popup_正常顯示 從 mock Label 改成 mock Text widget
+  （因為 widget 從 Label 換 Text）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-scrollfix 更新內容】2026-06-19 22:15 (William 反映)
@@ -1253,7 +1285,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-etf-session-fix"
+VERSION = "v0.9.5-etf-popup-fix"
 
 
 import io
@@ -3352,7 +3384,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-session-fix",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-popup-fix",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3386,7 +3418,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-session-fix",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-popup-fix",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -3469,7 +3501,7 @@ def aggregate_etf_holdings(holdings_long: pd.DataFrame, price_df: pd.DataFrame) 
     回傳 wide-format:
     - 股票代號、股票名稱、收盤價
     - etf_count：被幾檔 ETF 持有
-    - etf_list：字串 "00981A 主動統一台股增長(9.68%), 00403A 主動統一升級50(18.29%)..."
+    - etf_list：字串 "00981A 主動統一台股增長(9.68%)\n00403A 主動統一升級50(18.29%)..."
     - 排序：依 etf_count 由大到小
     """
     if holdings_long.empty:
@@ -3489,7 +3521,7 @@ def aggregate_etf_holdings(holdings_long: pd.DataFrame, price_df: pd.DataFrame) 
             "股票代號": stock_code,
             "股票名稱": g["stock_name"].iloc[0],  # 取第一個當主名
             "etf_count": len(g),
-            "etf_list": " | ".join(etf_entries),
+            "etf_list": "\n".join(etf_entries),  # 【V0.9.5-etf-popup-fix】每個 ETF 一行、改用 Text widget 顯示
         })
 
     result = pd.DataFrame(rows)
@@ -6892,19 +6924,40 @@ class StrategyGUI(tk.Tk):
             self._etf_popup.wm_overrideredirect(True)
             self._etf_popup.wm_attributes("-topmost", True)
             self._etf_popup.configure(bg="#fff8dc", relief="solid", borderwidth=1)
-            self._etf_popup_label = tk.Label(
+            # 【V0.9.5-etf-popup-fix】改用 Text widget 顯示多行
+            # Label 在多行時會被擠成「最長那行 + 其他 wrap」、視覺擠在一起
+            # Text widget 會以「max line width」算寬度、每行清楚顯示
+            self._etf_popup_text = tk.Text(
                 self._etf_popup,
-                text="", justify="left",
                 bg="#fff8dc", font=("Helvetica", 9),
                 padx=10, pady=6,
+                relief="flat", borderwidth=0,
+                highlightthickness=0,
+                wrap=tk.NONE,
+                height=10, width=30,  # 預設值、稍後依內容調整
             )
-            self._etf_popup_label.pack()
+            self._etf_popup_text.pack()
 
         # 內容
         stock_name = match.iloc[0].get("股票名稱", "")
         etf_count = match.iloc[0].get("etf_count", 0)
-        title = f"📊 {stock_code} {stock_name} 被 {etf_count} 檔 ETF 持有：\n"
-        self._etf_popup_label.config(text=title + etf_list_str)
+        title = f"📊 {stock_code} {stock_name} 被 {etf_count} 檔 ETF 持有："
+        all_text = title + "\n" + etf_list_str  # 【V0.9.5-etf-popup-fix】etf_list_str 已是 \n 分隔
+
+        # 計算最長行（用於設定 Text widget 寬度）
+        lines = all_text.split("\n")
+        max_line_len = max(len(line) for line in lines) if lines else 30
+        total_lines = len(lines)
+
+        self._etf_popup_text.config(state="normal")
+        self._etf_popup_text.delete("1.0", "end")
+        self._etf_popup_text.insert("1.0", all_text)
+        # 寬度 = 最長行字元數、高度 = 行數（最多 25 行避免超出螢幕）
+        self._etf_popup_text.config(
+            width=max_line_len,
+            height=min(total_lines, 25),
+            state="disabled",
+        )
 
         # 位置（滑鼠右邊一點點）
         # 計算 popup 大小、避免超出螢幕
