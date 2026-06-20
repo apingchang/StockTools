@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-etf-history (2026-06-20 17:54)     ║
+║               台灣股市量化選股系統 v0.9.5-tab-split (2026-06-20 21:20)      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-etf-history
-最後更新: 2026-06-20 19:05 (Asia/Taipei)
+Version: v0.9.5-tab-split
+最後更新: 2026-06-20 21:23 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1433,7 +1433,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-etf-history"
+VERSION = "v0.9.5-tab-split"
 
 
 import io
@@ -3794,7 +3794,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-history",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3837,7 +3837,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-history",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -5661,12 +5661,16 @@ class StrategyGUI(tk.Tk):
         self.geometry("1280x720")
 
         # V0.9.4 Tab 化：notebook 包兩個分頁（不改 V0.9.3 既有 widget 結構）
+        # 2026-06-20 V0.9.5-tab-split：notebook 改成由 outer_paned 管、底部放 console
         self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill="both", expand=True, padx=8, pady=8)
 
-        # Tab 1：策略參數（V0.9.3 原本內容搬進來）
-        strategy_tab = ttk.Frame(self.notebook)
-        self.notebook.add(strategy_tab, text="⚙️ 策略參數")
+        # Tab 1：系統選股（V0.9.5 階段 1：所有參數先放這邊）
+        self.select_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.select_tab, text="📊 系統選股")
+
+        # Tab 2：回測模擬（V0.9.5 階段 1：placeholder）
+        self.backtest_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.backtest_tab, text="🧪 回測模擬")
 
         # Tab 2：買賣記錄（V0.9.4 新增）
         self.portfolio_tab = ttk.Frame(self.notebook)
@@ -5686,11 +5690,16 @@ class StrategyGUI(tk.Tk):
         self.notebook.add(self.etf_tab, text="📊 主動式 ETF")
         self._build_etf_tab(self.etf_tab)
 
+        # V0.9.5-tab-split：回測模擬 tab 內建 placeholder UI
+        self._build_backtest_placeholder(self.backtest_tab)
+
         # 綁定 Tab 切換 → 切到買賣記錄時自動 refresh
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-        # V0.9.3 原本的 container（左參數 + 右 Console），改掛到 strategy_tab 下
-        container = ttk.Frame(strategy_tab)
+        # V0.9.5-tab-split：原本 container 改掛到 select_tab 下
+        # 結構：左=params (scrollable)、右=結果 Treeview
+        # Console 改為全域、放在視窗最底部
+        container = ttk.Frame(self.select_tab)
         container.pack(fill="both", expand=True, padx=4, pady=4)
 
         left_canvas = tk.Canvas(container, width=400)
@@ -5857,15 +5866,64 @@ class StrategyGUI(tk.Tk):
         )
         tip.pack(side="right")
 
-        console_frame = ttk.Frame(right)
-        console_frame.pack(fill="both", expand=True, pady=(6, 0))
+        # V0.9.5-tab-split：console 改為全域、稍後在 _build_ui 結尾建構
+        # 原本是放在 right 內、階段 1 改成全域底部
 
-        self.console = tk.Text(console_frame, height=40, wrap="word")
-        console_scrollbar = ttk.Scrollbar(console_frame, orient="vertical", command=self.console.yview)
-        self.console.configure(yscrollcommand=console_scrollbar.set)
-
+        # V0.9.5-tab-split：notebook + 全域 console（用 paned 切上下）
+        # 先把 notebook 移走、改用 paned 切分
+        self.notebook.pack_forget()
+        outer_paned = ttk.PanedWindow(self, orient="vertical")
+        outer_paned.pack(fill="both", expand=True, padx=8, pady=8)
+        # notebook 放上
+        outer_paned.add(self.notebook, weight=4)
+        # 全域 console 放下
+        console_container = ttk.LabelFrame(self, text="📝 執行記錄 (Program Console) — 全域", padding=2)
+        console_frame = ttk.Frame(console_container)
+        console_frame.pack(fill="both", expand=True)
+        self.console = tk.Text(console_frame, height=10, wrap="word")
+        console_scrollbar_y = ttk.Scrollbar(console_frame, orient="vertical", command=self.console.yview)
+        console_scrollbar_x = ttk.Scrollbar(console_frame, orient="horizontal", command=self.console.xview)
+        self.console.configure(yscrollcommand=console_scrollbar_y.set, xscrollcommand=console_scrollbar_x.set)
         self.console.pack(side="left", fill="both", expand=True)
-        console_scrollbar.pack(side="right", fill="y")
+        console_scrollbar_y.pack(side="right", fill="y")
+        console_scrollbar_x.pack(side="bottom", fill="x")
+        outer_paned.add(console_container, weight=1)
+
+    def _build_backtest_placeholder(self, parent):
+        """【V0.9.5-tab-split】回測模擬 tab 的 placeholder UI
+
+        階段 1：簡單提示
+        階段 2：加股票清單載入、執行回測、結果 Treeview
+        """
+        frame = ttk.Frame(parent, padding=20)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(
+            frame,
+            text="🧪 回測模擬",
+            font=("Segoe UI", 16, "bold"),
+        ).pack(anchor="w", pady=(0, 10))
+
+        # 三行提示
+        info_text = (
+            "V0.9.5-tab-split 階段 1：placeholder\n\n"
+            "下一步規劃：\n"
+            "1. 加「讀取股票清單」UI（從「系統選股」匯出的 Excel）\n"
+            "2. 加「執行回測」按鈕（用「進場/出場」策略參數）\n"
+            "3. 加結果 Treeview 顯示交易記錄\n"
+        )
+        ttk.Label(
+            frame,
+            text=info_text,
+            font=("Segoe UI", 10),
+            justify="left",
+        ).pack(anchor="w", pady=(0, 20))
+
+        ttk.Label(
+            frame,
+            text="💡 目前所有參數都在「🔍 系統選股」tab、執行也從那邊跑。",
+            foreground="gray",
+        ).pack(anchor="w")
 
     def _add_entry(self, parent, label, key, var_cls, default):
         row = ttk.Frame(parent)
