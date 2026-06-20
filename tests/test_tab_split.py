@@ -204,15 +204,15 @@ def test_phase2_param_split():
             f"bt_left 的 section: {bt_left_lines[:5]}"
         )
 
-    # _build_left_frame helper 必須存在
-    assert "def _build_left_frame" in content, "❌ 缺少 _build_left_frame helper"
+    # _build_tab_layout helper 必須存在（Phase 3 改名為 _build_tab_layout）
+    assert "def _build_tab_layout" in content, "❌ 缺少 _build_tab_layout helper"
 
-    # 兩個 tab 都應該呼叫 _build_left_frame
-    left_calls = content.count("_build_left_frame(self.select_tab)") + content.count(
-        "_build_left_frame(self.backtest_tab)"
+    # 兩個 tab 都應該呼叫 _build_tab_layout
+    layout_calls = content.count("_build_tab_layout(self.select_tab)") + content.count(
+        "_build_tab_layout(self.backtest_tab)"
     )
-    assert left_calls == 2, (
-        f"❌ _build_left_frame 應該被呼叫 2 次（select_tab + backtest_tab）、實際 {left_calls}"
+    assert layout_calls == 2, (
+        f"❌ _build_tab_layout 應該被呼叫 2 次（select_tab + backtest_tab）、實際 {layout_calls}"
     )
 
     print("✅ Phase 2 參數分家正確")

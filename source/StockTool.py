@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-tab-split-phase2 (2026-06-20 22:10)      ║
+║               台灣股市量化選股系統 v0.9.5-tab-split-phase3 (2026-06-20 22:30)      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-tab-split-phase2
-最後更新: 2026-06-20 22:21 (Asia/Taipei)
+Version: v0.9.5-tab-split-phase3
+最後更新: 2026-06-20 22:39 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1433,7 +1433,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-tab-split-phase2"
+VERSION = "v0.9.5-tab-split-phase3"
 
 
 import io
@@ -3794,7 +3794,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase2",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3837,7 +3837,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase2",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -5423,6 +5423,14 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     logger.log(reason_stats.to_string(index=False) if not reason_stats.empty else "(無交易資料)")
     logger.log(f"\n✅ 完成 → {out_file}")
 
+    # V0.9.5-tab-split-phase3 B-1：回傳 df_sel 給 GUI 顯示
+    return {
+        "df_sel": df_sel,
+        "top10_codes": top10_codes,
+        "out_file": out_file,
+    }
+
+
 
 # ==========================================================
 # V0.9.4 phase2.3: 萬年曆挑選日期（純 Tkinter 原生，無額外 dependency）
@@ -5703,10 +5711,10 @@ class StrategyGUI(tk.Tk):
         # 綁定 Tab 切換 → 切到買賣記錄時自動 refresh
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-        # V0.9.5-tab-split Phase 2：兩個 tab 都用 _build_left_frame helper
-        left = self._build_left_frame(self.select_tab)
-        self._bt_left = self._build_left_frame(self.backtest_tab)
-        bt_left = self._bt_left
+        # V0.9.5-tab-split Phase 3：兩個 tab 用 _build_tab_layout（左 params + 右 results）
+        left, self.select_tree = self._build_tab_layout(self.select_tab)
+        bt_left, self.backtest_tree = self._build_tab_layout(self.backtest_tab)
+        self._bt_left = bt_left
 
         ttk.Label(left, text="📊 系統選股參數", font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 8))
 
@@ -5874,18 +5882,19 @@ class StrategyGUI(tk.Tk):
         console_scrollbar_y.pack(side="right", fill="y")
         console_scrollbar_x.pack(side="bottom", fill="x")
 
-    def _build_left_frame(self, parent):
-        """【V0.9.5-tab-split Phase 2】建一個「左側可滾動 params」frame
+    def _build_tab_layout(self, parent):
+        """【V0.9.5-tab-split Phase 3】建一個標準的「左 params + 右 results」tab layout
 
         Args:
             parent: parent widget（select_tab 或 backtest_tab）
 
         Returns:
-            left_scrollable_frame: 給 _add_entry 用的 inner frame
+            (left_scrollable_frame, results_tree): 兩個 frame 給後續使用
         """
         container = ttk.Frame(parent)
         container.pack(fill="both", expand=True, padx=4, pady=4)
 
+        # 左：params
         left_canvas = tk.Canvas(container, width=400)
         left_scrollbar = ttk.Scrollbar(container, orient="vertical", command=left_canvas.yview)
         left_scrollable_frame = ttk.Frame(left_canvas)
@@ -5899,7 +5908,28 @@ class StrategyGUI(tk.Tk):
 
         left_canvas.pack(side="left", fill="y")
         left_scrollbar.pack(side="left", fill="y")
-        return left_scrollable_frame
+
+        # 右：results Treeview（先空、之後 Phase 3B 填資料）
+        right_frame = ttk.Frame(container)
+        right_frame.pack(side="left", fill="both", expand=True, padx=(10, 0))
+
+        # 標題
+        title_label = ttk.Label(right_frame, text="📋 結果（執行後顯示）", font=("Segoe UI", 11, "bold"))
+        title_label.pack(anchor="w", pady=(0, 5))
+
+        # Treeview
+        tree_frame = ttk.Frame(right_frame)
+        tree_frame.pack(fill="both", expand=True)
+
+        results_tree = ttk.Treeview(tree_frame, show="headings", height=20)
+        tree_scrollbar_y = ttk.Scrollbar(tree_frame, orient="vertical", command=results_tree.yview)
+        tree_scrollbar_x = ttk.Scrollbar(tree_frame, orient="horizontal", command=results_tree.xview)
+        results_tree.configure(yscrollcommand=tree_scrollbar_y.set, xscrollcommand=tree_scrollbar_x.set)
+        results_tree.pack(side="left", fill="both", expand=True)
+        tree_scrollbar_y.pack(side="right", fill="y")
+        tree_scrollbar_x.pack(side="bottom", fill="x")
+
+        return left_scrollable_frame, results_tree
 
     def _build_backtest_tab(self, parent):
         """【V0.9.5-tab-split Phase 2】回測模擬 tab 內容
@@ -8820,7 +8850,12 @@ class StrategyGUI(tk.Tk):
 
         def worker():
             try:
-                run_pipeline(cfg, self.logger)
+                # V0.9.5-tab-split-phase3 B-1：接收 result
+                result = run_pipeline(cfg, self.logger)
+                if result and "df_sel" in result:
+                    # 用 after 把 GUI 更新推回主 thread
+                    df_sel = result["df_sel"]
+                    self.after(0, lambda df=df_sel: self._display_select_results(df))
             except Exception as e:
                 self.logger.log(f"❌ 執行失敗：{e}")
                 import traceback
@@ -8829,6 +8864,65 @@ class StrategyGUI(tk.Tk):
                 self.run_btn.config(state="normal")
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _display_select_results(self, df_sel):
+        """【V0.9.5-tab-split-phase3 B-1】把選股結果顯示在 select_tree
+
+        顯示欄位：代號、名稱、股價、Score、營收YoY、EPSYoY、PE、殖利率
+        """
+        if df_sel is None or df_sel.empty:
+            self.logger.log("⚠️ 選股結果為空、無法顯示")
+            return
+
+        # 清空舊資料
+        for item in self.select_tree.get_children():
+            self.select_tree.delete(item)
+
+        # 設定欄位（如果還沒設定）
+        if not self.select_tree["columns"]:
+            cols = ("代號", "名稱", "股價", "Score", "營收YoY(%)", "EPSYoY(%)", "PE", "殖利率(%)")
+            col_widths = (60, 100, 60, 60, 80, 80, 50, 70)
+            self.select_tree.configure(columns=cols)
+            for col, w in zip(cols, col_widths):
+                self.select_tree.heading(col, text=col)
+                self.select_tree.column(col, width=w, anchor="center")
+
+        # 填資料（取前 60 筆、避免太慢）
+        display_count = 0
+        for idx, row in df_sel.head(60).iterrows():
+            code = str(row.get("股票代號", "")).strip()
+            if not code:
+                continue
+            name = str(row.get("股票名稱", row.get("名稱", "")))
+            price = row.get("股價", row.get("收盤價", 0))
+            score = row.get("Score", 0)
+            rev_yoy = row.get("營收YoY(%)", 0)
+            eps_yoy = row.get("EPSYoY_顯示(%)", row.get("EPSYoY(%)", 0))
+            pe = row.get("PE", 0)
+            yld = row.get("殖利率(估)", row.get("殖利率(%)", 0))
+
+            # 顯示：股價用 .2f、PE 用 .2f（無千分位避免 locale bug）
+            def _fmt(v, fmt=".2f", na="--"):
+                try:
+                    if pd.isna(v) or v is None:
+                        return na
+                    return format(v, fmt)
+                except Exception:
+                    return na
+
+            self.select_tree.insert("", "end", values=(
+                code,
+                name[:8] if name else "--",
+                _fmt(price),
+                _fmt(score, fmt=".3f"),
+                _fmt(rev_yoy),
+                _fmt(eps_yoy),
+                _fmt(pe),
+                _fmt(yld),
+            ))
+            display_count += 1
+
+        self.logger.log(f"📋 已顯示 {display_count} 筆選股結果（總共 {len(df_sel)} 筆）")
 
 
 if __name__ == "__main__":
