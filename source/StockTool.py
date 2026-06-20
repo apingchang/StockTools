@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-locale-comma-fix (2026-06-20 12:12) ║
+║               台灣股市量化選股系統 v0.9.5-shares-int (2026-06-20 14:13)      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-locale-comma-fix
-最後更新: 2026-06-20 12:22 (Asia/Taipei)
+Version: v0.9.5-shares-int
+最後更新: 2026-06-20 14:17 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -275,6 +275,30 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 
 【pytest 新增 1 個】test_locale_comma_fix.py
 - test_no_treeview_cell_uses_comma_thousands:grep 4 個 Treeview insert 區塊、確保都沒有 :, 千分位
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-shares-int 修 Bug 內容】2026-06-20 14:13 (William 14:13 反映)
+════════════════════════════════════════════════════════════════════════════════
+【問題】William 開 App 看買賣紀錄頁面：
+- 股數欄位顯示「1000.0」有小數點、不要
+
+【根因】
+- Transaction.shares: float = 0.0（portfolio.py line 326）
+- str(t.shares) 對於 float 1000.0 會顯示「1000.0」
+- 對於 float 1000.5 會顯示「1000.5」
+
+【修法】3 個 Treeview cell 股數改成 str(int(t.shares))
+1. 買賣記錄 mini Treeview (line 7637)
+2. 持倉 Treeview (line 7686)
+3. 交易 Treeview (line 7703)
+
+【不改的地方】
+- Label widget（持倉總覽、預估視窗 stat()）：已是 f"{x:,.0f}" 整數顯示
+- 計算邏輯（avg_cost、market_value 等）：仍是 float 精確運算
+
+【pytest 新增 1 個】test_shares_int.py
+- test_shares_display_is_integer:Treeview cell 的股數欄位是 str(int(...))
+- test_shares_int_helper_works:int() 強制轉 float 顯示整數
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-scrollfix 更新內容】2026-06-19 22:15 (William 反映)
@@ -1359,7 +1383,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-locale-comma-fix"
+VERSION = "v0.9.5-shares-int"
 
 
 import io
@@ -3479,7 +3503,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-locale-comma-fix",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-shares-int",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3513,7 +3537,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-locale-comma-fix",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-shares-int",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -7634,7 +7658,8 @@ class StrategyGUI(tk.Tk):
                 t.trade_date,
                 "買" if t.action == "BUY" else "賣",
                 # 【V0.9.5-locale-comma-fix】Treeview cell 不用千分位、Tkinter 會把 , 轉成 .
-                str(t.shares),
+                # 【V0.9.5-shares-int】股數顯示整數、避免 float 的 .0
+                str(int(t.shares)),
                 f"{t.price:.2f}",
                 f"{t.fee:.2f}",
                 f"{t.tax:.2f}",
@@ -7683,7 +7708,8 @@ class StrategyGUI(tk.Tk):
                 self._positions_tree.insert("", "end", values=(
                     p.stock_id, p.stock_name,
                     # 【V0.9.5-locale-comma-fix】Treeview cell 不用千分位
-                    str(p.shares),
+                    # 【V0.9.5-shares-int】股數顯示整數、避免 float 的 .0
+                    str(int(p.shares)),
                     f"{p.avg_cost:.2f}",
                     f"{p.current_price:.2f}" if p.current_price > 0 else "—",
                     f"{p.market_value:.0f}" if p.current_price > 0 else "—",
@@ -7700,7 +7726,8 @@ class StrategyGUI(tk.Tk):
                     t.id, t.trade_date, t.stock_id, t.stock_name,
                     "買" if t.action == "BUY" else "賣",
                     # 【V0.9.5-locale-comma-fix】Treeview cell 不用千分位
-                    str(t.shares),
+                    # 【V0.9.5-shares-int】股數顯示整數、避免 float 的 .0
+                    str(int(t.shares)),
                     f"{t.price:.2f}",
                     f"{t.fee:.0f}",
                     f"{t.tax:.0f}",   # V0.9.4 phase2.3: 顯示證交稅（買入為 0）
