@@ -71,29 +71,55 @@ def test_console_is_global_at_bottom():
     print("✅ console 為全域、放在 side='bottom'")
 
 
-def test_use_frame_pack_not_paned():
-    """V0.9.5-tab-split-fix2：用 Frame + pack、不是 PanedWindow
+def test_use_grid_not_paned():
+    """V0.9.5-tab-split-fix3：用 grid 切上下兩列、不是 PanedWindow
 
-    PanedWindow.add() 在 Win10/Win11 上有 notebook 不顯示的 bug
-    改用 Frame + pack 上下切（更可靠）
+    PanedWindow 在 Win10/Win11 不可靠
+    pack(in_=top_frame) 不會 reparent notebook
+    改用 grid：root 分兩列、row 0 = top_frame（expand）、row 1 = console（固定 180px）
     """
     with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # 不應該有 outer_paned.pack( 或 outer_paned.add(
-    assert "outer_paned.pack(" not in content, (
-        "❌ 還在用 PanedWindow！\n"
-        "V0.9.5-tab-split-fix2：改用 Frame + pack（更穩）"
+    # 不應該有 outer_paned
+    assert "outer_paned" not in content, "❌ 不應再用 PanedWindow"
+
+    # 必須有 grid_rowconfigure
+    assert "grid_rowconfigure" in content, "❌ 缺少 grid_rowconfigure（控制上下比例）"
+    assert "_top_frame.grid(" in content or "self._top_frame.grid(" in content, (
+        "❌ top_frame 沒有用 grid 排版"
     )
-    assert "outer_paned.add(" not in content, (
-        "❌ 還在用 PanedWindow.add()！\n"
-        "改用 Frame + pack"
+    assert "console_container.grid(" in content, (
+        "❌ console_container 沒有用 grid 排版"
+    )
+    print("✅ 用 grid 切上下兩列（不用 PanedWindow）")
+
+
+def test_notebook_master_is_top_frame():
+    """notebook 必須以 _top_frame 為 master（pack(in_=...) 不可靠）
+
+    之前犯的錯：notebook 一開始建在 self (root)、後來 pack(in_=top_frame)
+    Tk 不會真的 reparent、所以 notebook 還是 root 的 child、跟 top_frame 疊在一起。
+    修法：notebook 建構時就直接以 _top_frame 為 master。
+    """
+    with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # notebook 建構必須以 _top_frame 為 parent
+    m = re.search(r"self\.notebook\s*=\s*ttk\.Notebook\(\s*([^)]+)\)", content)
+    assert m, "❌ 找不到 self.notebook = ttk.Notebook(...)"
+    parent = m.group(1).strip()
+    assert parent == "self._top_frame", (
+        f"❌ notebook 的 parent 是「{parent}」、應該是「self._top_frame」！\n"
+        f"用 root 或 self 會導致 notebook 跟 top_frame 疊在一起（William 21:54 反映）"
     )
 
-    # 必須有 side="top" + side="bottom" 的 split
-    assert 'side="top"' in content, "❌ 缺少 side='top'（notebook 在上）"
-    assert 'side="bottom"' in content, "❌ 缺少 side='bottom'（console 在下）"
-    print("✅ 用 Frame + pack 上下切（不用 PanedWindow）")
+    # 不應該有 pack(in_=...)
+    assert "notebook.pack(in_=" not in content, (
+        "❌ 不應再用 notebook.pack(in_=...)！\n"
+        "Tk 的 pack(in_=...) 不會真的 reparent widget"
+    )
+    print("✅ notebook 直接以 _top_frame 為 master（不用 pack reparent）")
 
 
 def test_console_has_vertical_and_horizontal_scrollbar():

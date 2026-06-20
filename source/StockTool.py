@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split
-最後更新: 2026-06-20 21:41 (Asia/Taipei)
+最後更新: 2026-06-20 22:00 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5661,8 +5661,15 @@ class StrategyGUI(tk.Tk):
         self.geometry("1280x720")
 
         # V0.9.4 Tab 化：notebook 包兩個分頁（不改 V0.9.3 既有 widget 結構）
-        # 2026-06-20 V0.9.5-tab-split：notebook 改成由 outer_paned 管、底部放 console
-        self.notebook = ttk.Notebook(self)
+        # 2026-06-20 V0.9.5-tab-split-fix3：先建 top_frame 並 pack、
+        # notebook 以 top_frame 為 master 直接建構（pack(in_=...) 不會 reparent）
+        # V0.9.5-tab-split-fix3：用 grid 切上下兩列、top_frame expand、console 固定 180
+        self.grid_rowconfigure(0, weight=1)  # 上（notebook）拿剩餘空間
+        self.grid_rowconfigure(1, weight=0)  # 下（console）固定 180px
+        self.grid_columnconfigure(0, weight=1)
+        self._top_frame = ttk.Frame(self)
+        self._top_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
+        self.notebook = ttk.Notebook(self._top_frame)
 
         # Tab 1：系統選股（V0.9.5 階段 1：所有參數先放這邊）
         self.select_tab = ttk.Frame(self.notebook)
@@ -5872,16 +5879,14 @@ class StrategyGUI(tk.Tk):
         # V0.9.5-tab-split：console 改為全域、稍後在 _build_ui 結尾建構
         # 原本是放在 right 內、階段 1 改成全域底部
 
-        # V0.9.5-tab-split-fix2：直接用 Frame + pack 上下切（不用 PanedWindow）
-        # PanedWindow.add() 在 Win10/Win11 上有 notebook 不顯示的 bug
-        # 改用兩個 frame 分別 pack(side="top") / pack(side="bottom")
-        top_frame = ttk.Frame(self)
-        top_frame.pack(side="top", fill="both", expand=True, padx=8, pady=(8, 4))
-        self.notebook.pack(in_=top_frame, fill="both", expand=True)
+        # V0.9.5-tab-split-fix3：notebook 已建好、只要確保 layout 完整
+        self.notebook.pack(fill="both", expand=True)
 
-        # 全域 console 放下（直接掛 self、用 LabelFrame 區隔）
+        # 全域 console 放下（grid row=1、固定 180px）
         console_container = ttk.LabelFrame(self, text="📝 執行記錄 (Program Console) — 全域", padding=2)
-        console_container.pack(side="bottom", fill="both", expand=False, padx=8, pady=(4, 8))
+        console_container.grid(row=1, column=0, sticky="ew", padx=8, pady=(4, 8))
+        console_container.grid_propagate(False)
+        console_container.configure(height=180)
         console_frame = ttk.Frame(console_container)
         console_frame.pack(fill="both", expand=True)
         self.console = tk.Text(console_frame, height=10, wrap="word")
