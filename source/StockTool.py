@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-etf-popup-width (2026-06-20 11:50)  ║
+║               台灣股市量化選股系統 v0.9.5-locale-comma-fix (2026-06-20 12:12) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-etf-popup-width
-最後更新: 2026-06-20 11:54 (Asia/Taipei)
+Version: v0.9.5-locale-comma-fix
+最後更新: 2026-06-20 12:22 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -248,6 +248,33 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 【pytest 新增 1 個】test_etf_popup_width.py
 - test_display_width_counts_cjk_as_double:中文字算 2、ASCII 算 1
 - test_popup_uses_display_width:StockTool 有 _display_width 函式、popup 引用它
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-locale-comma-fix 修 Bug 內容】2026-06-20 12:12 (William 12:12 反映)
+════════════════════════════════════════════════════════════════════════════════
+【問題】William 開 Windows「語言支援 → 區域格式」看到：
+- 地區：中文（臺灣）、千位=`,`、小數=`.`
+- 但 StockTool Treeview cell 顯示的價格、市值、手續費等千位分隔是 `.` 不是 `,`
+- 至少價格欄位（Treeview 內）有這問題
+
+【根因】延續 V0.9.5-goodinfo4+5 教訓：
+- Tkinter Treeview + locale=zh_TW.UTF-8 會把 cell 字串的 `,` 當成歐洲小數點
+- 成交量已解：用 str(int(vol)) 不千分位
+- 但其他 Treeview cell（價格、市值、手續費、股數、損益）仍用 f"{x:,.2f}"
+  → 一樣被轉成歐洲格式顯示
+
+【修法】4 個 Treeview cell 全改不加千分位：
+1. ETF Treeview price_str（line 7180）
+2. 買賣記錄 mini Treeview（line 7608-7611）
+3. 持倉 Treeview（line 7656-7666）
+4. 交易 Treeview（line 7672-7675）
+
+【不改的地方】
+- Label widget（持倉總覽、預估視窗 stat()）：純文字、不會被 Tkinter locale bug 影響
+  → 保留千分位顯示讓數字易讀
+
+【pytest 新增 1 個】test_locale_comma_fix.py
+- test_no_treeview_cell_uses_comma_thousands:grep 4 個 Treeview insert 區塊、確保都沒有 :, 千分位
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-scrollfix 更新內容】2026-06-19 22:15 (William 反映)
@@ -1332,7 +1359,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-etf-popup-width"
+VERSION = "v0.9.5-locale-comma-fix"
 
 
 import io
@@ -3452,7 +3479,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-popup-width",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-locale-comma-fix",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3486,7 +3513,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-popup-width",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-locale-comma-fix",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -7177,7 +7204,8 @@ class StrategyGUI(tk.Tk):
             if pd.isna(price):
                 price_str = "--"
             else:
-                price_str = f"{float(price):,.2f}"
+                # 【V0.9.5-locale-comma-fix】不用千分位、Tkinter Treeview 會把 , 轉成 .
+                price_str = f"{float(price):.2f}"
             self._etf_tree.insert(
                 "", "end", iid=iid,
                 values=("☐", iid, str(row.get("股票名稱", "")), price_str, int(row["etf_count"])),
@@ -7605,10 +7633,11 @@ class StrategyGUI(tk.Tk):
             mini.insert("", "end", values=(
                 t.trade_date,
                 "買" if t.action == "BUY" else "賣",
-                f"{t.shares:,.0f}",
-                f"{t.price:,.2f}",
-                f"{t.fee:,.2f}",
-                f"{t.tax:,.2f}",
+                # 【V0.9.5-locale-comma-fix】Treeview cell 不用千分位、Tkinter 會把 , 轉成 .
+                str(t.shares),
+                f"{t.price:.2f}",
+                f"{t.fee:.2f}",
+                f"{t.tax:.2f}",
                 t.note or "",
             ))
 
@@ -7653,13 +7682,14 @@ class StrategyGUI(tk.Tk):
             for p in positions:
                 self._positions_tree.insert("", "end", values=(
                     p.stock_id, p.stock_name,
-                    f"{p.shares:,.0f}",
-                    f"{p.avg_cost:,.2f}",
-                    f"{p.current_price:,.2f}" if p.current_price > 0 else "—",
-                    f"{p.market_value:,.0f}" if p.current_price > 0 else "—",
-                    f"{p.unrealized_pl:+,.0f}" if p.current_price > 0 else "—",
+                    # 【V0.9.5-locale-comma-fix】Treeview cell 不用千分位
+                    str(p.shares),
+                    f"{p.avg_cost:.2f}",
+                    f"{p.current_price:.2f}" if p.current_price > 0 else "—",
+                    f"{p.market_value:.0f}" if p.current_price > 0 else "—",
+                    f"{p.unrealized_pl:+.0f}" if p.current_price > 0 else "—",
                     f"{p.unrealized_pl_pct:+.2f}%" if p.current_price > 0 else "—",
-                    f"{p.realized_pl:+,.0f}",
+                    f"{p.realized_pl:+.0f}",
                 ))
 
             # 交易明細
@@ -7669,10 +7699,11 @@ class StrategyGUI(tk.Tk):
                 self._tx_tree.insert("", "end", values=(
                     t.id, t.trade_date, t.stock_id, t.stock_name,
                     "買" if t.action == "BUY" else "賣",
-                    f"{t.shares:,.0f}",
-                    f"{t.price:,.2f}",
-                    f"{t.fee:,.0f}",
-                    f"{t.tax:,.0f}",   # V0.9.4 phase2.3: 顯示證交稅（買入為 0）
+                    # 【V0.9.5-locale-comma-fix】Treeview cell 不用千分位
+                    str(t.shares),
+                    f"{t.price:.2f}",
+                    f"{t.fee:.0f}",
+                    f"{t.tax:.0f}",   # V0.9.4 phase2.3: 顯示證交稅（買入為 0）
                     t.note,
                 ))
 
