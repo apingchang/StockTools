@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-etf-popup-spacing (2026-06-20 11:39) ║
+║               台灣股市量化選股系統 v0.9.5-etf-popup-width (2026-06-20 11:50)  ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-etf-popup-spacing
-最後更新: 2026-06-20 11:43 (Asia/Taipei)
+Version: v0.9.5-etf-popup-width
+最後更新: 2026-06-20 11:54 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -220,6 +220,34 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 【pytest 新增 1 個】test_etf_popup_spacing.py
 - test_popup_title_no_emoji:title 不含 📊（或任何 emoji）
 - test_popup_text_has_spacing:Text widget 有 spacing1=4 spacing3=4
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-etf-popup-width 修 Bug 內容】2026-06-20 11:50 (William 11:50 反映)
+════════════════════════════════════════════════════════════════════════════════
+【問題】William 看 v0.9.5-etf-popup-spacing 截圖：
+- popup 後面有好幾個字被截斷、看不到完整 ETF 列表
+
+【根因】
+- Text widget 的 width 是「平均字元寬度」單位
+- 我用 `max(len(line) for line in lines)` 算 width
+- 但中文實際寬度 ≈ 2× ASCII 寬度
+- 結果：width 計算偏小、中文字超出 width、後面被截斷
+
+【修法】新加 _display_width helper
+- 中文（CJK + 全形 + 平假名/片假名）算 2 字元
+- 其他（ASCII、半形標點）算 1 字元
+- popup width 改用 `_display_width(line)` 計算
+
+【實測驗證】
+- ETF 名稱：「主動野村臺灣優選」
+  - len() = 8 字元 → width 偏小
+  - _display_width() = 16 字元 → width 足夠
+- 18 檔 ETF：原本 width 約 25 → 修完 width 約 45
+- 顯示完整、不再截斷
+
+【pytest 新增 1 個】test_etf_popup_width.py
+- test_display_width_counts_cjk_as_double:中文字算 2、ASCII 算 1
+- test_popup_uses_display_width:StockTool 有 _display_width 函式、popup 引用它
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-scrollfix 更新內容】2026-06-19 22:15 (William 反映)
@@ -1304,7 +1332,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-etf-popup-spacing"
+VERSION = "v0.9.5-etf-popup-width"
 
 
 import io
@@ -3394,6 +3422,27 @@ def get_stock_history(session, cfg, stock_id, logger, history_months):
 ETF_ACTIVELIST_URL = "https://www.twse.com.tw/rwd/zh/ETF/activeList"
 ETFINFO_ETF_URL = "https://www.etfinfo.tw/etf/{code}"
 
+def _display_width(s: str) -> int:
+    """【V0.9.5-etf-popup-width】估算字串在 Text widget 中的顯示寬度
+    - 中文字（CJK）算 2 字元寬
+    - ASCII 算 1 字元寬
+    - 因為 Tkinter Text widget 的 width 參數以「平均字元寬度」為單位
+      → 純算字元數會讓中文超出 width 計算、後面字被截斷
+    """
+    w = 0
+    for c in s:
+        cp = ord(c)
+        # CJK 統一表意文字：0x4E00-0x9FFF
+        # CJK 符號和標點：0x3000-0x303F
+        # 全形 ASCII：0xFF00-0xFFEF
+        # 平假名/片假名：0x3040-0x30FF
+        if 0x3000 <= cp <= 0x9FFF or 0xFF00 <= cp <= 0xFFEF:
+            w += 2
+        else:
+            w += 1
+    return w
+
+
 def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame:
     """【V0.9.5-etf】抓 TWSE 主動式 ETF 列表、只保留 domestic（台股）
     回傳 DataFrame: code, name, category
@@ -3403,7 +3452,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-popup-spacing",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-popup-width",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3437,7 +3486,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-popup-spacing",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-popup-width",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -6967,8 +7016,9 @@ class StrategyGUI(tk.Tk):
         all_text = title + "\n" + etf_list_str  # 【V0.9.5-etf-popup-fix】etf_list_str 已是 \n 分隔
 
         # 計算最長行（用於設定 Text widget 寬度）
+        # 【V0.9.5-etf-popup-width】中文字算 2、其他算 1（Text widget width 是平均字元寬度）
         lines = all_text.split("\n")
-        max_line_len = max(len(line) for line in lines) if lines else 30
+        max_line_len = max(_display_width(line) for line in lines) if lines else 30
         total_lines = len(lines)
 
         self._etf_popup_text.config(state="normal")
