@@ -14,19 +14,27 @@ STOCKTOOL_PY = os.path.join(
 
 
 def test_strong_filter_helper_exists():
-    """run_pipeline 內必須有 _apply_strong_filter helper"""
+    """_apply_strong_filter helper 必須存在、且為 module-level（不在 run_pipeline 內）
+
+    Phase 3 B-2-fix：原本是 nested function、導致 use_top10_backtest 路徑呼叫時 UnboundLocalError
+    改為 module-level function
+    """
     with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
         content = f.read()
 
+    # 必須有 module-level helper（頂層、不在函式內）
     assert "def _apply_strong_filter" in content, "❌ 缺少 _apply_strong_filter helper"
-    # helper 必須在 run_pipeline 內（nested function）
-    m = re.search(
-        r"def run_pipeline\(cfg: StrategyConfig.*?def _apply_strong_filter",
-        content,
-        re.DOTALL,
+
+    # helper 必須在 run_pipeline 之前（module-level）
+    idx_helper = content.find("def _apply_strong_filter")
+    idx_run = content.find("def run_pipeline")
+    assert idx_helper > 0 and idx_run > 0
+    assert idx_helper < idx_run, (
+        f"❌ _apply_strong_filter 不是 module-level！\n"
+        f"helper at {idx_helper}、run_pipeline at {idx_run}\n"
+        f"Phase 3 B-2-fix：helper 必須在 run_pipeline 之前（module-level）"
     )
-    assert m, "❌ _apply_strong_filter 不在 run_pipeline 內"
-    print("✅ _apply_strong_filter 在 run_pipeline 內")
+    print("✅ _apply_strong_filter 是 module-level function（在 run_pipeline 之前）")
 
 
 def test_helper_filters_all_four_conditions():

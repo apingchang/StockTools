@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B2
-最後更新: 2026-06-21 00:37 (Asia/Taipei)
+最後更新: 2026-06-21 02:12 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -4953,6 +4953,44 @@ def highlight_true(ws, header_row, col_name):
 # Pipeline (核心執行流程)
 # ==========================================================
 
+def _apply_strong_filter(df, cfg, logger):
+    """【V0.9.5-tab-split-phase3 B-2】套用強勢股過濾
+
+    條件（全部都要符合）：
+    - 營收YoY > strong_revenue_yoy
+    - EPS 本期 > 0（獲利）
+    - PE < strong_pe_max
+    - 股價 > strong_price_min
+
+    Args:
+        df: 已 sort by Score desc 的 DataFrame
+        cfg: StrategyConfig
+        logger: GuiLogger
+
+    Returns:
+        過濾後的 DataFrame（如果過濾後為空、log warning 並 return 原 df）
+    """
+    before = len(df)
+    mask = (
+        (df["營收YoY(%)"] > cfg.strong_revenue_yoy) &
+        (df["EPS本期"] > 0) &
+        (df["PE"] < cfg.strong_pe_max) &
+        (df["股價"] > cfg.strong_price_min)
+    )
+    filtered = df[mask].copy()
+    after = len(filtered)
+
+    if after == 0:
+        logger.log(f"⚠️ 強勢股過濾後無股票保留（從 {before} → 0）、使用全部股票")
+        return df
+
+    logger.log(
+        f"💪 強勢股過濾：{before} → {after} 檔 "
+        f"(營收YoY>{cfg.strong_revenue_yoy}% + EPS>0 + PE<{cfg.strong_pe_max} + 股價>{cfg.strong_price_min})"
+    )
+    return filtered
+
+
 def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     s = build_session()
 
@@ -5426,44 +5464,6 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     logger.log("\n✅ 出場原因統計:")
     logger.log(reason_stats.to_string(index=False) if not reason_stats.empty else "(無交易資料)")
     logger.log(f"\n✅ 完成 → {out_file}")
-
-    # V0.9.5-tab-split-phase3 B-2：套用強勢股過濾（helper 函式）
-    def _apply_strong_filter(df, cfg, logger):
-        """【V0.9.5-tab-split-phase3 B-2】套用強勢股過濾
-
-        條件（全部都要符合）：
-        - 營收YoY > strong_revenue_yoy
-        - EPS 本期 > 0（獲利）
-        - PE < strong_pe_max
-        - 股價 > strong_price_min
-
-        Args:
-            df: 已 sort by Score desc 的 DataFrame
-            cfg: StrategyConfig
-            logger: GuiLogger
-
-        Returns:
-            過濾後的 DataFrame（如果過濾後為空、log warning 並 return 原 df）
-        """
-        before = len(df)
-        mask = (
-            (df["營收YoY(%)"] > cfg.strong_revenue_yoy) &
-            (df["EPS本期"] > 0) &
-            (df["PE"] < cfg.strong_pe_max) &
-            (df["股價"] > cfg.strong_price_min)
-        )
-        filtered = df[mask].copy()
-        after = len(filtered)
-
-        if after == 0:
-            logger.log(f"⚠️ 強勢股過濾後無股票保留（從 {before} → 0）、使用全部股票")
-            return df
-
-        logger.log(
-            f"💪 強勢股過濾：{before} → {after} 檔 "
-            f"(營收YoY>{cfg.strong_revenue_yoy}% + EPS>0 + PE<{cfg.strong_pe_max} + 股價>{cfg.strong_price_min})"
-        )
-        return filtered
 
 
     # V0.9.5-tab-split-phase3 B-1 fix：top10_codes 只在 use_top10_backtest=True 時賦值
