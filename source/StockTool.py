@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-etf-popup-fix (2026-06-20 10:21) ║
+║               台灣股市量化選股系統 v0.9.5-etf-popup-spacing (2026-06-20 11:39) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-etf-popup-fix
-最後更新: 2026-06-20 10:39 (Asia/Taipei)
+Version: v0.9.5-etf-popup-spacing
+最後更新: 2026-06-20 11:43 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -201,6 +201,25 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 【附帶更新 test_etf_tab_gui.py】
 - test_etf_show_popup_正常顯示 從 mock Label 改成 mock Text widget
   （因為 widget 從 Label 換 Text）
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-etf-popup-spacing 修 Bug 內容】2026-06-20 11:39 (William 11:39 反映)
+════════════════════════════════════════════════════════════════════════════════
+【問題】William 10:21 popup 修正後看 v0.9.5-etf-popup-fix 截圖：
+- 第一行最前面有 📊 icon、不要
+- 行字的間隔太小、太擠不好讀
+
+【根因】
+- title 字串用了 f"📊 {stock_code} {stock_name} 被 {etf_count} 檔 ETF 持有："
+- Text widget 預設 spacing1=0 spacing3=0、行與行之間沒有 padding
+
+【修法】
+1. 拿掉 title 的 📊 icon：「📊 2330 台積電 ...」→「2330 台積電 ...」
+2. Text widget 加 spacing1=4 spacing3=4（每行上下各 4px、行間呼吸感更好）
+
+【pytest 新增 1 個】test_etf_popup_spacing.py
+- test_popup_title_no_emoji:title 不含 📊（或任何 emoji）
+- test_popup_text_has_spacing:Text widget 有 spacing1=4 spacing3=4
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-scrollfix 更新內容】2026-06-19 22:15 (William 反映)
@@ -1285,7 +1304,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-etf-popup-fix"
+VERSION = "v0.9.5-etf-popup-spacing"
 
 
 import io
@@ -3384,7 +3403,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-popup-fix",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-popup-spacing",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3418,7 +3437,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-popup-fix",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-popup-spacing",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -6935,13 +6954,16 @@ class StrategyGUI(tk.Tk):
                 highlightthickness=0,
                 wrap=tk.NONE,
                 height=10, width=30,  # 預設值、稍後依內容調整
+                # 【V0.9.5-etf-popup-spacing】加行距、行間呼吸感
+                spacing1=4,  # 每行之上 4px
+                spacing3=4,  # 每行之下 4px
             )
             self._etf_popup_text.pack()
 
         # 內容
         stock_name = match.iloc[0].get("股票名稱", "")
         etf_count = match.iloc[0].get("etf_count", 0)
-        title = f"📊 {stock_code} {stock_name} 被 {etf_count} 檔 ETF 持有："
+        title = f"{stock_code} {stock_name} 被 {etf_count} 檔 ETF 持有："  # 【V0.9.5-etf-popup-spacing】拿掉 📊 icon
         all_text = title + "\n" + etf_list_str  # 【V0.9.5-etf-popup-fix】etf_list_str 已是 \n 分隔
 
         # 計算最長行（用於設定 Text widget 寬度）
