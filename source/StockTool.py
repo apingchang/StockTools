@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-etf-fix (2026-06-19 23:40)         ║
+║               台灣股市量化選股系統 v0.9.5-etf-session-fix (2026-06-20 09:12) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-etf-fix
-最後更新: 2026-06-19 23:43 (Asia/Taipei)
+Version: v0.9.5-etf-session-fix
+最後更新: 2026-06-20 09:21 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -131,6 +131,43 @@ NameError: cannot access free variable 'e' where it is not associated with a val
 
 【驗證】
 - pytest：265 passed（+3 新）、3 pre-existing fail（跟本次無關）
+- 語法檢查通過
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-etf-session-fix 修 Bug 內容】2026-06-20 09:12 (William 09:11 反映)
+════════════════════════════════════════════════════════════════════════════════
+【問題】William 開 v0.9.5-etf-fix App 後 log 出現：
+```
+[09:11:52] ♻️ [price] 資料過期 → 重新下載
+[09:11:52] ✅ 啟動時自動股價完成：2377 筆、股價更新：2026-06-20 09:11:52｜資料日期：2026-06-18
+[09:11:53] 📊 [ETF] 開機自動抓取 ETF 持股...
+[09:11:53] ❌ [ETF] 開機抓取例外：'_tkinter.tkapp' object has no attribute 'session'
+```
+ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗」。
+
+【根因】
+- ETF 模組（860360b fetcher + 875f0d2 GUI + cd4527a closure fix）三個版本都誤用 `self.session`
+- 但 StockTool 主類別從未定義 `session` 屬性 → AttributeError
+- 其他 fetcher（fetch_prices / fetch_revenue_latest / fetch_eps_latest）的呼叫模式：
+  - 在呼叫端 `_s = build_session()` 拿 requests.Session
+  - 再傳 `_s` 進 fetcher（不是 self.xxx）
+- 是 ETF 模組自己 copy 時想成「其他地方都有 session」但其實沒有
+
+【修法】3 處都改用 build_session() 拿 session（跟既有 fetcher 一致）
+- `_etf_refresh` 的 worker（line 6951）
+- `_etf_auto_startup_fetch` 的 worker（line 7103）
+- `_load_price_df` 同步方法（line 7146）
+
+【pytest 新增 5 個】test_etf_session_attr.py
+- test_stocktool_no_self_session_attr：用 AST 解析、確保沒有真的 self.session attribute access（排除 docstring / 註解 / 字串干擾）
+- test_etf_workers_use_build_session：3 個觸發點都有 build_session()
+- test_etf_fetchers_accept_session_param：fetch_active_etf_list / fetch_etf_top10_holdings / build_etf_holdings_table 第一個參數都叫 session
+- test_etf_method_compiles：py_compile 編譯通過、確保沒漏逗號
+- test_ast_helper_actually_catches_offenders：反向驗證 helper 能抓到 offender + docstring / 字串不會被誤判
+
+【驗證】
+- pytest 5 個新 test 全綠、總計 270 passed
+- 3 個 pre-existing fail 在 test_dividend_yield_fix.py（test ordering 問題、單跑全綠、跟本次無關）
 - 語法檢查通過
 
 ════════════════════════════════════════════════════════════════════════════════
@@ -1216,7 +1253,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-cache-vol"
+VERSION = "v0.9.5-etf-session-fix"
 
 
 import io
@@ -3315,7 +3352,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-gui",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-session-fix",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3349,7 +3386,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-gui",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-etf-session-fix",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -6947,8 +6984,9 @@ class StrategyGUI(tk.Tk):
 
         def _worker():
             try:
-                # 1) 抓 ETF 列表 + 持股
-                long_df = build_etf_holdings_table(self.session, self.cfg, self.logger)
+                # 1) 抓 ETF 列表 + 持股（【V0.9.5-etf-session-fix】修正 self.session 不存在的 bug）
+                _s = build_session()
+                long_df = build_etf_holdings_table(_s, self.cfg, self.logger)
                 if long_df.empty:
                     self.after(0, lambda: self._etf_refresh_done(None, "ETF 持股抓取失敗"))
                     return
@@ -7100,7 +7138,10 @@ class StrategyGUI(tk.Tk):
 
         def _worker():
             try:
-                long_df = build_etf_holdings_table(self.session, self.cfg, self.logger)
+                # 【V0.9.5-etf-session-fix】StockTool 主類別沒有 self.session 屬性
+                # → 跟其他 fetcher 一樣在 worker 內 build_session() 拿 session
+                _s = build_session()
+                long_df = build_etf_holdings_table(_s, self.cfg, self.logger)
                 if long_df.empty:
                     self.after(0, lambda: self._etf_auto_startup_done(None, "ETF 持股抓取失敗"))
                     return
@@ -7141,9 +7182,10 @@ class StrategyGUI(tk.Tk):
                 return df
         except Exception as e:
             self.logger.log(f"⚠️ [ETF] 讀取 price cache 失敗：{e}")
-        # cache 沒資料 → try fetch_prices 抓一次
+        # cache 沒資料 → try fetch_prices 抓一次（【V0.9.5-etf-session-fix】改用 build_session()）
         try:
-            df = fetch_prices(self.session, self.cfg)
+            _s = build_session()
+            df = fetch_prices(_s, self.cfg)
             if df is not None and not df.empty:
                 save_cache(get_cache_file("price"), df)
             return df if df is not None else pd.DataFrame()
