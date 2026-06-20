@@ -132,15 +132,23 @@ def test_console_has_vertical_and_horizontal_scrollbar():
     print("✅ console 有 vertical + horizontal scrollbar")
 
 
-def test_backtest_placeholder_method_exists():
-    """必須有 _build_backtest_placeholder method"""
+def test_backtest_tab_method_exists():
+    """V0.9.5-tab-split Phase 2：必須有 _build_backtest_tab method
+
+    Phase 1 用 _build_backtest_placeholder（已廢棄）
+    Phase 2 改為 _build_backtest_tab（正式的 tab 內容建構）
+    """
     with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
         content = f.read()
 
-    assert "def _build_backtest_placeholder" in content, (
-        "❌ 缺少 _build_backtest_placeholder method"
+    assert "def _build_backtest_tab" in content, (
+        "❌ 缺少 _build_backtest_tab method"
     )
-    print("✅ 有 _build_backtest_placeholder method")
+    # 不應再有舊的 _build_backtest_placeholder（已廢棄）
+    assert "def _build_backtest_placeholder" not in content, (
+        "❌ 還有 _build_backtest_placeholder（已廢棄、Phase 1 用）"
+    )
+    print("✅ 有 _build_backtest_tab method、無 placeholder")
 
 
 def test_existing_tabs_unchanged():
@@ -164,3 +172,47 @@ def test_tabs_count_is_5():
         f"應為：系統選股、回測模擬、買賣記錄、手動選股、ETF"
     )
     print(f"✅ 5 個 tab 全到位")
+
+
+def test_phase2_param_split():
+    """V0.9.5-tab-split Phase 2：參數分家
+
+    系統選股 tab：基本參數 + 評分系統 + 強勢股過濾
+    回測模擬 tab：技術指標 + 出場 + WF + 選股來源
+    """
+    with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # 系統選股 tab 應包含的 section（用 bt_left 表示「不在這」）
+    for section_title in ["基本參數", "評分系統", "強勢股過濾"]:
+        assert section_title in content, f"❌ 缺少 {section_title} section"
+
+    # 回測模擬 tab 應包含的 section
+    for section_title in ["技術指標", "出場參數", "Walk-forward", "選股來源"]:
+        assert section_title in content, f"❌ 缺少 {section_title} section"
+
+    # 關鍵：技術指標、出場、WF、選股來源應該用 bt_left 為 parent
+    for section in ["技術指標 (強化版)", "出場參數", "Walk-forward 分析", "選股來源"]:
+        # 簡單字串搜尋「LabelFrame(bt_left, ... <section>」
+        pattern = f'LabelFrame(bt_left,'
+        # 找包含 LabelFrame(bt_left, 的行
+        bt_left_lines = [l for l in content.split('\n') if pattern in l]
+        section_lines = [l for l in bt_left_lines if section in l]
+        assert section_lines, (
+            f"❌ {section} section 沒有以 bt_left 為 parent！\n"
+            f"V0.9.5-tab-split Phase 2：應在回測模擬 tab\n"
+            f"bt_left 的 section: {bt_left_lines[:5]}"
+        )
+
+    # _build_left_frame helper 必須存在
+    assert "def _build_left_frame" in content, "❌ 缺少 _build_left_frame helper"
+
+    # 兩個 tab 都應該呼叫 _build_left_frame
+    left_calls = content.count("_build_left_frame(self.select_tab)") + content.count(
+        "_build_left_frame(self.backtest_tab)"
+    )
+    assert left_calls == 2, (
+        f"❌ _build_left_frame 應該被呼叫 2 次（select_tab + backtest_tab）、實際 {left_calls}"
+    )
+
+    print("✅ Phase 2 參數分家正確")

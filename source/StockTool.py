@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-tab-split (2026-06-20 21:20)      ║
+║               台灣股市量化選股系統 v0.9.5-tab-split-phase2 (2026-06-20 22:10)      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-tab-split
-最後更新: 2026-06-20 22:00 (Asia/Taipei)
+Version: v0.9.5-tab-split-phase2
+最後更新: 2026-06-20 22:21 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1433,7 +1433,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-tab-split"
+VERSION = "v0.9.5-tab-split-phase2"
 
 
 import io
@@ -3794,7 +3794,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase2",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3837,7 +3837,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase2",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -5697,38 +5697,18 @@ class StrategyGUI(tk.Tk):
         self.notebook.add(self.etf_tab, text="📊 主動式 ETF")
         self._build_etf_tab(self.etf_tab)
 
-        # V0.9.5-tab-split：回測模擬 tab 內建 placeholder UI
-        self._build_backtest_placeholder(self.backtest_tab)
-
-        # V0.9.5-tab-split：回測模擬 tab 內建 placeholder UI
-        self._build_backtest_placeholder(self.backtest_tab)
+        # V0.9.5-tab-split Phase 2：建構「回測模擬」tab 內容
+        self._build_backtest_tab(self.backtest_tab)
 
         # 綁定 Tab 切換 → 切到買賣記錄時自動 refresh
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-        # V0.9.5-tab-split：原本 container 改掛到 select_tab 下
-        # 結構：左=params (scrollable)、右=結果 Treeview
-        # Console 改為全域、放在視窗最底部
-        container = ttk.Frame(self.select_tab)
-        container.pack(fill="both", expand=True, padx=4, pady=4)
+        # V0.9.5-tab-split Phase 2：兩個 tab 都用 _build_left_frame helper
+        left = self._build_left_frame(self.select_tab)
+        self._bt_left = self._build_left_frame(self.backtest_tab)
+        bt_left = self._bt_left
 
-        left_canvas = tk.Canvas(container, width=400)
-        left_scrollbar = ttk.Scrollbar(container, orient="vertical", command=left_canvas.yview)
-        left_scrollable_frame = ttk.Frame(left_canvas)
-
-        left_scrollable_frame.bind("<Configure>", lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
-        left_canvas.create_window((0, 0), window=left_scrollable_frame, anchor="nw", width=380)
-        left_canvas.configure(yscrollcommand=left_scrollbar.set)
-
-        left_canvas.pack(side="left", fill="both", expand=True)
-        left_scrollbar.pack(side="left", fill="y")
-
-        right = ttk.Frame(container)
-        right.pack(side="right", fill="both", expand=True, padx=(10, 0))
-
-        left = left_scrollable_frame
-
-        ttk.Label(left, text="⚙️ 策略參數設定", font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 8))
+        ttk.Label(left, text="📊 系統選股參數", font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 8))
 
         self.vars: Dict[str, tk.Variable] = {}
 
@@ -5760,8 +5740,8 @@ class StrategyGUI(tk.Tk):
         self.adv_btn = ttk.Button(score_frame, text="⚙ 簡易評分進階設定", command=self._open_simple_score_settings)
         self.adv_btn.pack(fill="x", pady=(6, 0))
 
-        # 3. 技術指標
-        tech_frame = ttk.LabelFrame(left, text="📈 技術指標 (強化版)", padding=5)
+        # 3. 技術指標（V0.9.5-tab-split Phase 2：移到回測模擬 tab）
+        tech_frame = ttk.LabelFrame(bt_left, text="📈 技術指標 (強化版)", padding=5)
         tech_frame.pack(fill="x", pady=5)
 
         self.mtf_var = tk.BooleanVar(value=self.cfg.use_mtf_confirmation)
@@ -5794,8 +5774,8 @@ class StrategyGUI(tk.Tk):
         self._add_entry(tech_frame, "超跌檢查天數", "oversold_lookback", tk.IntVar, self.cfg.oversold_lookback)
         self._add_entry(tech_frame, "MA20 斜率計算天數", "ma_slope_days", tk.IntVar, self.cfg.ma_slope_days)
 
-        # 4. 出場參數
-        exit_frame = ttk.LabelFrame(left, text="🚪 出場參數", padding=5)
+        # 4. 出場參數（V0.9.5-tab-split Phase 2：移到回測模擬 tab）
+        exit_frame = ttk.LabelFrame(bt_left, text="🚪 出場參數", padding=5)
         exit_frame.pack(fill="x", pady=5)
         self._add_entry(exit_frame, "停損 (%)", "stop_loss", tk.DoubleVar, self.cfg.stop_loss * 100)
         self._add_entry(exit_frame, "停利 (%)", "take_profit", tk.DoubleVar, self.cfg.take_profit * 100)
@@ -5803,8 +5783,8 @@ class StrategyGUI(tk.Tk):
         self._add_entry(exit_frame, "最大持有天數", "hold_days", tk.IntVar, self.cfg.hold_days)
         self._add_entry(exit_frame, "交易成本 (%)", "roundtrip_cost_pct", tk.DoubleVar, self.cfg.roundtrip_cost_pct * 100)
 
-        # 5. Walk-forward 分析
-        wf_frame = ttk.LabelFrame(left, text="🔄 Walk-forward 分析", padding=5)
+        # 5. Walk-forward 分析（V0.9.5-tab-split Phase 2：移到回測模擬 tab）
+        wf_frame = ttk.LabelFrame(bt_left, text="🔄 Walk-forward 分析", padding=5)
         wf_frame.pack(fill="x", pady=5)
 
         self.wf_enabled_var = tk.BooleanVar(value=self.cfg.wf_enabled)
@@ -5816,8 +5796,8 @@ class StrategyGUI(tk.Tk):
         self._add_entry(wf_params_frame, "測試期 (年)", "wf_test_years", tk.IntVar, self.cfg.wf_test_years)
         self._add_entry(wf_params_frame, "步進 (年)", "wf_step_years", tk.IntVar, self.cfg.wf_step_years)
 
-        # 6. 選股來源
-        source_frame = ttk.LabelFrame(left, text="📁 選股來源", padding=5)
+        # 6. 選股來源（V0.9.5-tab-split Phase 2：移到回測模擬 tab）
+        source_frame = ttk.LabelFrame(bt_left, text="📁 選股來源", padding=5)
         source_frame.pack(fill="x", pady=5)
 
         self.use_excel_var = tk.BooleanVar(value=self.cfg.use_excel_stock_list)
@@ -5848,11 +5828,12 @@ class StrategyGUI(tk.Tk):
         self._add_entry(strong_frame, "最高本益比", "strong_pe_max", tk.DoubleVar, self.cfg.strong_pe_max)
         self._add_entry(strong_frame, "最低股價", "strong_price_min", tk.DoubleVar, self.cfg.strong_price_min)
 
-        # 8. 按鈕區
+        # 8. 按鈕區（V0.9.5-tab-split Phase 2：拆兩份、各自放自己 tab 底部）
+        # 系統選股 tab 的按鈕
         btn_frame = ttk.Frame(left)
         btn_frame.pack(fill="x", pady=10)
 
-        self.run_btn = ttk.Button(btn_frame, text="▶ 執行策略", command=self._on_run)
+        self.run_btn = ttk.Button(btn_frame, text="▶ 執行系統選股", command=self._on_run)
         self.run_btn.pack(fill="x", pady=2)
 
         self.save_btn = ttk.Button(btn_frame, text="💾 儲存設定", command=self._on_save_config)
@@ -5864,20 +5845,16 @@ class StrategyGUI(tk.Tk):
         self.clear_btn = ttk.Button(btn_frame, text="🗑 清除控制台", command=self._on_clear_console)
         self.clear_btn.pack(fill="x", pady=2)
 
-        # 右側 Console
-        # 【V0.9.5-cache-info 調位置】標題 + 提示放在同一行（提示原本在 console 下面、被擋住）
-        title_row = ttk.Frame(right)
-        title_row.pack(fill="x")
-        ttk.Label(title_row, text="📝 執行記錄 (Program Console)", font=("Segoe UI", 12, "bold")).pack(side="left")
-        tip = ttk.Label(
-            title_row,
-            text="💡 v0.9.2 Top10 回測 ｜儲存設定自動載入｜左側可滾動",
-            foreground="#555", justify="right", font=("Helvetica", 8),
-        )
-        tip.pack(side="right")
+        # 回測模擬 tab 的按鈕（階段 C 實作執行回測、目前先 disabled）
+        bt_btn_frame = ttk.Frame(bt_left)
+        bt_btn_frame.pack(fill="x", pady=10)
 
-        # V0.9.5-tab-split：console 改為全域、稍後在 _build_ui 結尾建構
-        # 原本是放在 right 內、階段 1 改成全域底部
+        ttk.Label(bt_btn_frame, text="回測模擬功能、即將上線", foreground="gray").pack(fill="x", pady=2)
+        self.bt_run_btn = ttk.Button(bt_btn_frame, text="▶ 執行回測模擬（階段 C 上線）", command=self._on_run, state="disabled")
+        self.bt_run_btn.pack(fill="x", pady=2)
+
+        # V0.9.5-tab-split：console 已改為全域（在 _build_ui 結尾建構）
+        # 原本這裡有 title_row + tip label 在 right 內、已廢除
 
         # V0.9.5-tab-split-fix3：notebook 已建好、只要確保 layout 完整
         self.notebook.pack(fill="both", expand=True)
@@ -5897,77 +5874,44 @@ class StrategyGUI(tk.Tk):
         console_scrollbar_y.pack(side="right", fill="y")
         console_scrollbar_x.pack(side="bottom", fill="x")
 
-    def _build_backtest_placeholder(self, parent):
-        """【V0.9.5-tab-split】回測模擬 tab 的 placeholder UI
+    def _build_left_frame(self, parent):
+        """【V0.9.5-tab-split Phase 2】建一個「左側可滾動 params」frame
 
-        階段 1：簡單提示
-        階段 2：加股票清單載入、執行回測、結果 Treeview
+        Args:
+            parent: parent widget（select_tab 或 backtest_tab）
+
+        Returns:
+            left_scrollable_frame: 給 _add_entry 用的 inner frame
         """
-        frame = ttk.Frame(parent, padding=20)
-        frame.pack(fill="both", expand=True)
+        container = ttk.Frame(parent)
+        container.pack(fill="both", expand=True, padx=4, pady=4)
 
-        ttk.Label(
-            frame,
-            text="🧪 回測模擬",
-            font=("Segoe UI", 16, "bold"),
-        ).pack(anchor="w", pady=(0, 10))
+        left_canvas = tk.Canvas(container, width=400)
+        left_scrollbar = ttk.Scrollbar(container, orient="vertical", command=left_canvas.yview)
+        left_scrollable_frame = ttk.Frame(left_canvas)
 
-        # 三行提示
-        info_text = (
-            "V0.9.5-tab-split 階段 1：placeholder\n\n"
-            "下一步規劃：\n"
-            "1. 加「讀取股票清單」UI（從「系統選股」匯出的 Excel）\n"
-            "2. 加「執行回測」按鈕（用「進場/出場」策略參數）\n"
-            "3. 加結果 Treeview 顯示交易記錄\n"
+        left_scrollable_frame.bind(
+            "<Configure>",
+            lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all"))
         )
-        ttk.Label(
-            frame,
-            text=info_text,
-            font=("Segoe UI", 10),
-            justify="left",
-        ).pack(anchor="w", pady=(0, 20))
+        left_canvas.create_window((0, 0), window=left_scrollable_frame, anchor="nw", width=380)
+        left_canvas.configure(yscrollcommand=left_scrollbar.set)
 
-        ttk.Label(
-            frame,
-            text="💡 目前所有參數都在「🔍 系統選股」tab、執行也從那邊跑。",
-            foreground="gray",
-        ).pack(anchor="w")
+        left_canvas.pack(side="left", fill="y")
+        left_scrollbar.pack(side="left", fill="y")
+        return left_scrollable_frame
 
-    def _build_backtest_placeholder(self, parent):
-        """【V0.9.5-tab-split】回測模擬 tab 的 placeholder UI
+    def _build_backtest_tab(self, parent):
+        """【V0.9.5-tab-split Phase 2】回測模擬 tab 內容
 
-        階段 1：簡單提示
-        階段 2：加股票清單載入、執行回測、結果 Treeview
+        Phase 2：已加技術指標、出場、WF、選股來源、執行回測按鈕
+        Phase 3（下次）：加右側 Treeview 顯示回測結果
         """
-        frame = ttk.Frame(parent, padding=20)
-        frame.pack(fill="both", expand=True)
-
-        ttk.Label(
-            frame,
-            text="🧪 回測模擬",
-            font=("Segoe UI", 16, "bold"),
-        ).pack(anchor="w", pady=(0, 10))
-
-        # 三行提示
-        info_text = (
-            "V0.9.5-tab-split 階段 1：placeholder\n\n"
-            "下一步規劃：\n"
-            "1. 加「讀取股票清單」UI（從「系統選股」匯出的 Excel）\n"
-            "2. 加「執行回測」按鈕（用「進場/出場」策略參數）\n"
-            "3. 加結果 Treeview 顯示交易記錄\n"
-        )
-        ttk.Label(
-            frame,
-            text=info_text,
-            font=("Segoe UI", 10),
-            justify="left",
-        ).pack(anchor="w", pady=(0, 20))
-
-        ttk.Label(
-            frame,
-            text="💡 目前所有參數都在「🔍 系統選股」tab、執行也從那邊跑。",
-            foreground="gray",
-        ).pack(anchor="w")
+        # 這個 method 在 _build_ui 內已被呼叫、
+        # 實際的「左側 params」由 _build_ui 的 bt_left 處理
+        # 此 method 留作未來擴充（ex: 全域提示訊息、tab 切換處理）
+        # 暫時不做事
+        pass
 
     def _add_entry(self, parent, label, key, var_cls, default):
         row = ttk.Frame(parent)
