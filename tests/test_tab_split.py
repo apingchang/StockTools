@@ -68,7 +68,18 @@ def test_console_is_global_at_bottom():
     assert "outer_paned.add(console_container" in content, (
         "❌ console 沒有被加到 outer_paned"
     )
-    print("✅ console 為全域、放在 outer_paned 底部")
+
+    # 關鍵守護：console_container 必須是 outer_paned 的 child、不是 self 的 child
+    # 抓錯 parent 會讓 console 顯示在 root 視窗、notebook 區域變空白
+    m = re.search(r"console_container = ttk\.LabelFrame\(\s*([^,]+),", content)
+    assert m, "❌ 找不到 console_container 宣告"
+    parent = m.group(1).strip()
+    assert parent == "outer_paned", (
+        f"❌ console_container 的 parent 是「{parent}」、應該是「outer_paned」！\n"
+        f"若是「self」會導致 console 直接放 root 視窗、\n"
+        f"outer_paned 的 notebook 區域就會被擠壓變空白（William 21:27 反映）"
+    )
+    print("✅ console 為全域、放在 outer_paned 底部、parent 正確")
 
 
 def test_console_has_vertical_and_horizontal_scrollbar():

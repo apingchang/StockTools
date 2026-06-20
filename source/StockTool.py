@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split
-最後更新: 2026-06-20 21:23 (Asia/Taipei)
+最後更新: 2026-06-20 21:30 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5693,6 +5693,9 @@ class StrategyGUI(tk.Tk):
         # V0.9.5-tab-split：回測模擬 tab 內建 placeholder UI
         self._build_backtest_placeholder(self.backtest_tab)
 
+        # V0.9.5-tab-split：回測模擬 tab 內建 placeholder UI
+        self._build_backtest_placeholder(self.backtest_tab)
+
         # 綁定 Tab 切換 → 切到買賣記錄時自動 refresh
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
@@ -5870,14 +5873,12 @@ class StrategyGUI(tk.Tk):
         # 原本是放在 right 內、階段 1 改成全域底部
 
         # V0.9.5-tab-split：notebook + 全域 console（用 paned 切上下）
-        # 先把 notebook 移走、改用 paned 切分
-        self.notebook.pack_forget()
         outer_paned = ttk.PanedWindow(self, orient="vertical")
         outer_paned.pack(fill="both", expand=True, padx=8, pady=8)
         # notebook 放上
         outer_paned.add(self.notebook, weight=4)
-        # 全域 console 放下
-        console_container = ttk.LabelFrame(self, text="📝 執行記錄 (Program Console) — 全域", padding=2)
+        # 全域 console 放下（console_container 是 outer_paned 的 child）
+        console_container = ttk.LabelFrame(outer_paned, text="📝 執行記錄 (Program Console) — 全域", padding=2)
         console_frame = ttk.Frame(console_container)
         console_frame.pack(fill="both", expand=True)
         self.console = tk.Text(console_frame, height=10, wrap="word")
@@ -5888,6 +5889,42 @@ class StrategyGUI(tk.Tk):
         console_scrollbar_y.pack(side="right", fill="y")
         console_scrollbar_x.pack(side="bottom", fill="x")
         outer_paned.add(console_container, weight=1)
+
+    def _build_backtest_placeholder(self, parent):
+        """【V0.9.5-tab-split】回測模擬 tab 的 placeholder UI
+
+        階段 1：簡單提示
+        階段 2：加股票清單載入、執行回測、結果 Treeview
+        """
+        frame = ttk.Frame(parent, padding=20)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(
+            frame,
+            text="🧪 回測模擬",
+            font=("Segoe UI", 16, "bold"),
+        ).pack(anchor="w", pady=(0, 10))
+
+        # 三行提示
+        info_text = (
+            "V0.9.5-tab-split 階段 1：placeholder\n\n"
+            "下一步規劃：\n"
+            "1. 加「讀取股票清單」UI（從「系統選股」匯出的 Excel）\n"
+            "2. 加「執行回測」按鈕（用「進場/出場」策略參數）\n"
+            "3. 加結果 Treeview 顯示交易記錄\n"
+        )
+        ttk.Label(
+            frame,
+            text=info_text,
+            font=("Segoe UI", 10),
+            justify="left",
+        ).pack(anchor="w", pady=(0, 20))
+
+        ttk.Label(
+            frame,
+            text="💡 目前所有參數都在「🔍 系統選股」tab、執行也從那邊跑。",
+            foreground="gray",
+        ).pack(anchor="w")
 
     def _build_backtest_placeholder(self, parent):
         """【V0.9.5-tab-split】回測模擬 tab 的 placeholder UI
