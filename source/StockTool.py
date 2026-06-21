@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 20:40 (Asia/Taipei)
+最後更新: 2026-06-21 21:03 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -9299,7 +9299,7 @@ class StrategyGUI(tk.Tk):
 
     def _display_bt_results(self, result):
         """【V0.9.5-tab-split-phase3-C Fix7】把回測 KPI 結果顯示在 bt_tree + DEBUG"""
-        bt_tree = getattr(self, 'bt_tree', None)
+        bt_tree = getattr(self, 'backtest_tree', None)
         # Fix7 DEBUG: 確認收到哪些資料
         self.logger.log(f"DEBUG _display_bt_results: result keys={list(result.keys())}")
         self.logger.log(f"  pf_kpi={str(result.get('pf_kpi'))[:80]}")
