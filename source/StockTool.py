@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 21:39 (Asia/Taipei)
+最後更新: 2026-06-21 22:09 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -6923,7 +6923,21 @@ class StrategyGUI(tk.Tk):
 
         def _on_mousewheel(event):
             left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        left_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        # Fix16 (2026-06-21): 用 Enter/Leave 動態 bind_all，避免跟其他 tab 衝突
+        def _on_canvas_enter(_e):
+            left_canvas.bind_all("<MouseWheel>", lambda ev: left_canvas.yview_scroll(int(-1 * (ev.delta / 120)), "units"))
+            left_canvas.bind_all("<Button-4>", lambda _ev: left_canvas.yview_scroll(-1, "units"))
+            left_canvas.bind_all("<Button-5>", lambda _ev: left_canvas.yview_scroll(1, "units"))
+
+        def _on_canvas_leave(_e):
+            left_canvas.unbind_all("<MouseWheel>")
+            left_canvas.unbind_all("<Button-4>")
+            left_canvas.unbind_all("<Button-5>")
+
+        left_canvas.bind("<Enter>", _on_canvas_enter)
+        left_canvas.bind("<Leave>", _on_canvas_leave)
+        left_frame.bind("<Enter>", _on_canvas_enter)
+        left_frame.bind("<Leave>", _on_canvas_leave)
 
         left_frame = ttk.LabelFrame(left_canvas, text="🔎 ETF 持股篩選", padding=8)
         left_canvas.create_window((0, 0), window=left_frame, anchor="nw")
@@ -7046,10 +7060,22 @@ class StrategyGUI(tk.Tk):
         left_scrollbar.pack(side="right", fill="y")
         left_canvas.pack(side="left", fill="both", expand=True)
 
-        # 滑鼠滾輪支援
-        def _on_mousewheel(event):
-            left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        left_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        # 滑鼠滾輪支援（Fix16 2026-06-21: 用 Enter/Leave 動態 bind_all，避免跟其他 tab 的滾輪事件衝突）
+        def _on_canvas_enter(_e):
+            left_canvas.bind_all("<MouseWheel>", lambda ev: left_canvas.yview_scroll(int(-1 * (ev.delta / 120)), "units"))
+            left_canvas.bind_all("<Button-4>", lambda _ev: left_canvas.yview_scroll(-1, "units"))
+            left_canvas.bind_all("<Button-5>", lambda _ev: left_canvas.yview_scroll(1, "units"))
+
+        def _on_canvas_leave(_e):
+            left_canvas.unbind_all("<MouseWheel>")
+            left_canvas.unbind_all("<Button-4>")
+            left_canvas.unbind_all("<Button-5>")
+
+        left_canvas.bind("<Enter>", _on_canvas_enter)
+        left_canvas.bind("<Leave>", _on_canvas_leave)
+        # 保留對內部 frame 的 Enter/Leave 也覆蓋、避免子 widget 進來就 lose bind
+        left_frame.bind("<Enter>", _on_canvas_enter)
+        left_frame.bind("<Leave>", _on_canvas_leave)
 
         # 真正的內容在 left_frame 裡、embed 到 canvas
         left_frame = ttk.LabelFrame(left_canvas, text="🔎 篩選條件", padding=8)
