@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 12:46 (Asia/Taipei)
+最後更新: 2026-06-21 13:14 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5954,14 +5954,6 @@ class StrategyGUI(tk.Tk):
         ).pack(anchor="w", pady=(5, 0))
         ttk.Label(source_frame, text="  ※ 使用 Excel 股票清單 + 不經過買點過濾（強制滿倉）", foreground="gray").pack(anchor="w")
 
-        # v0.9.2 Top10 基本面回測開關
-        self.top10_backtest_var = tk.BooleanVar(value=self.cfg.use_top10_backtest)
-        ttk.Checkbutton(
-            source_frame,
-            text="📊 使用 Top10_基本面 進行回測\n   （跳過技術買點）",
-            variable=self.top10_backtest_var
-        ).pack(anchor="w", pady=(5, 0))
-        ttk.Label(source_frame, text="  ※ 直接使用評分最高的10檔股票建倉，不經過買點過濾", foreground="gray").pack(anchor="w")
         # 7. 強勢股過濾
         strong_frame = ttk.LabelFrame(left, text="💪 強勢股過濾", padding=5)
         strong_frame.pack(fill="x", pady=5)
@@ -6119,7 +6111,6 @@ class StrategyGUI(tk.Tk):
         self.mtf_var.set(self.cfg.use_mtf_confirmation)
         self.divergence_var.set(self.cfg.use_divergence_detection)
         self.wf_enabled_var.set(self.cfg.wf_enabled)
-        self.top10_backtest_var.set(self.cfg.use_top10_backtest)
         self.excel_force_buy_var.set(self.cfg.excel_force_buy)
         self.excel_file_var.set(self.cfg.excel_stock_file)
 
@@ -6141,7 +6132,6 @@ class StrategyGUI(tk.Tk):
         self.cfg.use_mtf_confirmation = self.mtf_var.get()
         self.cfg.use_divergence_detection = self.divergence_var.get()
         self.cfg.wf_enabled = self.wf_enabled_var.get()
-        self.cfg.use_top10_backtest = self.top10_backtest_var.get()
         self.cfg.excel_force_buy = self.excel_force_buy_var.get()
         self.cfg.excel_stock_file = self.excel_file_var.get()
 
@@ -9156,6 +9146,7 @@ class StrategyGUI(tk.Tk):
         cfg.use_excel_stock_list = True
         cfg.excel_stock_file = tmp_path
         cfg.excel_force_buy = False  # 用正常技術買點過濾
+        cfg.use_top10_backtest = False  # Fix3：永遠不用 Top10 模式
 
         self.bt_run_btn.config(state="disabled")
         self.console.insert("end", "\n" + "=" * 60 + "\n")
