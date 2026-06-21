@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 17:07 (Asia/Taipei)
+最後更新: 2026-06-21 17:18 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -2352,6 +2352,53 @@ def _eps_history_stats(db_path: str) -> dict:
     }
 
 
+def _load_goodinfo_12q_epsrate(goodinfo_dir=None):
+    """【V0.9.5-tab-split-phase3-C Fix10】
+    載入 GoodInfo 12QEPSRate 3 個檔案，回傳 {stock_id: {quarter_str: yoy_pct}}
+
+    quarter_str 格式: "26Q1"
+    yoy_pct 是 GoodInfo 直接算好的同季 YoY 成長率 (百分比)
+    """
+    import os as _os
+    import re as _re
+    if goodinfo_dir is None:
+        goodinfo_dir = _os.path.expanduser(
+            "~/.openclaw/workspace/股神/.tmp/goodinfo_export/eps"
+        )
+    if not _os.path.isdir(goodinfo_dir):
+        return {}
+
+    out = {}
+    files = ["55U_12QEPSRate.xls", "20-55_12QEPSRate.xls", "20L_12QEPSRate.xls"]
+    for fname in files:
+        fpath = _os.path.join(goodinfo_dir, fname)
+        if not _os.path.exists(fpath):
+            print(f"⚠️ GoodInfo 12QEPSRate 缺檔: {fpath}")
+            continue
+        try:
+            # 這幾個檔案其實是 HTML 格式 (內容偽裝 .xls)
+            tables = pd.read_html(fpath)
+            if not tables:
+                continue
+            df = tables[0]
+            df["代號"] = df["代號"].astype(str).str.strip()
+            # 找出所有季度欄位 (e.g. "26Q1成長(%)")
+            qcols = [c for c in df.columns if _re.match(r"^[0-9]{2}Q[1-4]成長\(%\)$", str(c))]
+            if not qcols:
+                continue
+            for _, r in df.iterrows():
+                sid = str(r["代號"]).strip()
+                for qc in qcols:
+                    val = r[qc]
+                    if pd.notna(val):
+                        qkey = str(qc).replace("成長(%)", "")  # "26Q1"
+                        out.setdefault(sid, {})[qkey] = float(val)
+        except Exception as e:
+            print(f"⚠️ 讀取 {fname} 失敗: {e}")
+    print(f"📂 GoodInfo 12QEPSRate: {len(out)} 檔")
+    return out
+
+
 # ==========================================================
 # V0.9.5: 手動選股功能 - FinMind 資料拉取輔助
 # ==========================================================
@@ -4365,6 +4412,26 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     out["EPSYoY_顯示(%)"] = out["EPSYoY_raw"].apply(
         lambda x: round(x * 100, 2) if pd.notna(x) else pd.NA
     )
+
+    # Fix10: GoodInfo 12QEPSRate 直接覆蓋 (更精準的同季 YoY)
+    # "26Q1成長(%)" 是 GoodInfo 算好的 %，比 EPS相減÷base 還準
+    gi_12q = _load_goodinfo_12q_epsrate()
+    quarter_key = f"{str(latest_year)[-2:]}Q{latest_q}"  # 2026Q1 -> "26Q1"
+    if gi_12q:
+        covered = 0
+        for sid, qdict in gi_12q.items():
+            if quarter_key not in qdict:
+                continue
+            val = qdict[quarter_key]
+            sid_clean = str(sid).strip()
+            mask = out["股票代號"].astype(str).str.strip() == sid_clean
+            if mask.any():
+                out.loc[mask, "EPSYoY_raw"] = val / 100.0
+                out.loc[mask, "EPSYoY_顯示(%)"] = val
+                covered += int(mask.sum())
+        total = out["EPSYoY_顯示(%)"].notna().sum()
+        print(f"📈 GoodInfo 12QEPSRate 覆蓋 {quarter_key}: {covered}/{len(out)} (總有 YoY: {total}/{len(out)})")
+
     out["EPS季別"] = f"{latest_year}Q{latest_q}"
 
     print(f"📊 EPS 計算結果: 本期 {len(out)} 筆，有 YoY 資料 {out['EPSYoY_raw'].notna().sum()} 筆")
