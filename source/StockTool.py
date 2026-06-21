@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 09:14 (Asia/Taipei)
+最後更新: 2026-06-21 11:19 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1433,7 +1433,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-tab-split-phase3-B3"
+VERSION = "v0.9.5-tab-split-phase3-C"
 
 
 import io
@@ -5728,7 +5728,7 @@ class StrategyGUI(tk.Tk):
         self._top_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
         self.notebook = ttk.Notebook(self._top_frame)
 
-        # 【V0.9.5-tab-split-phase3-B3】tab 順序重排（William 09:02 要求）
+        # 【V0.9.5-tab-split-phase3-C】tab 順序重排（William 09:02 要求）
         # 新順序：系統選股 → 主動式 ETF → 手動選股 → 買賣記錄 → 回測模擬
 
         # Tab 1：系統選股
@@ -5760,12 +5760,12 @@ class StrategyGUI(tk.Tk):
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         # V0.9.5-tab-split Phase 3：兩個 tab 用 _build_tab_layout（左 params + 右 results）
-        # 【V0.9.5-tab-split-phase3-B3】改回傳 (left, right_frame, tree)、select_tab 加 export 按鈕
+        # 【V0.9.5-tab-split-phase3-C】改回傳 (left, right_frame, tree)、select_tab 加 export 按鈕
         left, self.select_right, self.select_tree = self._build_tab_layout(self.select_tab)
         bt_left, self.backtest_right, self.backtest_tree = self._build_tab_layout(self.backtest_tab)
         self._bt_left = bt_left
 
-        # 【V0.9.5-tab-split-phase3-B3】「💾 匯出股票清單」按鈕（select_tab）
+        # 【V0.9.5-tab-split-phase3-C】「💾 匯出股票清單」按鈕（select_tab）
         # 放在 right_top 內、跟 title 同一行
         self.export_select_btn = ttk.Button(
             self.select_right.winfo_children()[0],  # right_top
@@ -5917,8 +5917,8 @@ class StrategyGUI(tk.Tk):
         bt_btn_frame = ttk.Frame(bt_left)
         bt_btn_frame.pack(fill="x", pady=10)
 
-        ttk.Label(bt_btn_frame, text="回測模擬功能、即將上線", foreground="gray").pack(fill="x", pady=2)
-        self.bt_run_btn = ttk.Button(bt_btn_frame, text="▶ 執行回測模擬（階段 C 上線）", command=self._on_run, state="disabled")
+        ttk.Label(bt_btn_frame, text="系統選股完成後，勾選並匯出即可執行回測", foreground="gray").pack(fill="x", pady=2)
+        self.bt_run_btn = ttk.Button(bt_btn_frame, text="▶ 執行回測模擬", command=self._on_bt_run, state="normal")
         self.bt_run_btn.pack(fill="x", pady=2)
 
         # V0.9.5-tab-split：console 已改為全域（在 _build_ui 結尾建構）
@@ -5945,7 +5945,7 @@ class StrategyGUI(tk.Tk):
     def _build_tab_layout(self, parent):
         """【V0.9.5-tab-split Phase 3】建一個標準的「左 params + 右 results」tab layout
 
-        【V0.9.5-tab-split-phase3-B3】改回傳值多一個 right_frame
+        【V0.9.5-tab-split-phase3-C】改回傳值多一個 right_frame
         - 原本 (left, tree) → 改 (left, right_frame, tree)
         - right_frame 給 caller 加按鈕用（select_tab 加「💾 匯出股票清單」）
         - backtest_tab 暫不加、但簽名統一
@@ -5978,7 +5978,7 @@ class StrategyGUI(tk.Tk):
         right_frame = ttk.Frame(container)
         right_frame.pack(side="left", fill="both", expand=True, padx=(10, 0))
 
-        # 【V0.9.5-tab-split-phase3-B3】title 與 export 按鈕放同一行
+        # 【V0.9.5-tab-split-phase3-C】title 與 export 按鈕放同一行
         # (回傳 right_frame 給 caller、用 caller 決定要不要加按鈕)
         right_top = ttk.Frame(right_frame)
         right_top.pack(fill="x", pady=(0, 5))
@@ -5998,7 +5998,16 @@ class StrategyGUI(tk.Tk):
         tree_scrollbar_y.pack(side="right", fill="y")
         tree_scrollbar_x.pack(side="bottom", fill="x")
 
-        # 【V0.9.5-tab-split-phase3-B3】多回傳 right_frame
+        # 【V0.9.5-tab-split-phase3-C】勾選 + hover tag
+        results_tree.tag_configure("checked", background="#d0e8ff")
+        results_tree.tag_configure("unchecked", background="#ffffff")
+        results_tree.tag_configure("hover", background="#fff3a0")
+        results_tree.bind("<Motion>", self._on_select_tree_hover)
+        results_tree.bind("<Leave>", self._on_select_tree_leave)
+        results_tree.bind("<Button-1>", self._on_select_tree_click)
+        results_tree.bind("<Button-3>", self._on_select_tree_rclick)
+
+        # 【V0.9.5-tab-split-phase3-C】多回傳 right_frame
         return left_scrollable_frame, right_frame, results_tree
 
     def _build_backtest_tab(self, parent):
@@ -8120,7 +8129,8 @@ class StrategyGUI(tk.Tk):
                 "匯出成功",
                 f"已匯出 {len(result)} 檔\n→ {filepath}\n\n"
                 f"💡 這個檔案可以直接給「策略參數 → 使用 Excel 股票清單」讀取使用\n"
-                f"   （只取「股票代號」欄、其他欄位會被忽略）",
+                f"   （只取「股票代號」欄、其他欄位會被忽略）\n\n"
+                f"📊 已勾選 {len(result)} 檔，自動套用「▶ 執行回測模擬」",
             )
         except Exception as e:
             messagebox.showerror("匯出失敗", str(e))
@@ -8921,13 +8931,19 @@ class StrategyGUI(tk.Tk):
         def worker():
             try:
                 # V0.9.5-tab-split-phase3 B-1：接收 result
+                # 【V0.9.5-tab-split-phase3-C】只跑選股（不回測）
                 result = run_pipeline(cfg, self.logger)
                 if result and "df_sel" in result:
-                    # 用 after 把 GUI 更新推回主 thread
                     df_sel = result["df_sel"]
-                    # 【V0.9.5-tab-split-phase3-B3】存 df_sel 給匯出按鈕用、enable 按鈕
                     self._last_select_df = df_sel
+                    # 清除舊勾選狀態
+                    self._select_checked = {}
                     self.after(0, lambda df=df_sel: self._display_select_results(df))
+                    self.after(0, lambda: self.logger.log(
+                        f"✅ 選股完成，共 {len(df_sel)} 檔｜"
+                        f"勾選後按「💾 匯出股票清單」可匯出至 Excel\n"
+                        f"→ 餵入「策略參數 → 使用 Excel 股票清單」執行回測"
+                    ))
             except Exception as e:
                 self.logger.log(f"❌ 執行失敗：{e}")
                 import traceback
@@ -8936,6 +8952,115 @@ class StrategyGUI(tk.Tk):
                 self.run_btn.config(state="normal")
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _on_bt_run(self):
+        """【V0.9.5-tab-split-phase3-C】回測 Tab 的「▶ 執行回測模擬」按鈕"""
+        checked_codes = [k for k, v in self._select_checked.items() if v]
+        if not checked_codes:
+            messagebox.showwarning("無勾選", "請先在「系統選股」結果中勾選要回測的股票，再按「💾 匯出」後來這裡執行回測")
+            return
+
+        # 把勾選轉成 Excel temp 檔
+        import tempfile, os
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False, mode="wb")
+        tmp_path = tmp.name
+        tmp.close()
+
+        try:
+            from openpyxl import Workbook
+            wb = Workbook()
+            ws = wb.active
+            ws.append(["股票代號"])
+            for c in checked_codes:
+                ws.append([c])
+            wb.save(tmp_path)
+        except Exception as e:
+            messagebox.showerror("錯誤", f"無法建立暫存 Excel：{e}")
+            return
+
+        # 複製一份 cfg，強制使用 Excel 清單模式
+        import copy
+        cfg = copy.copy(self.cfg)
+        cfg.use_excel_stock_list = True
+        cfg.excel_stock_file = tmp_path
+        cfg.excel_force_buy = False  # 用正常技術買點過濾
+
+        self.bt_run_btn.config(state="disabled")
+        self.console.insert("end", "\n" + "=" * 60 + "\n")
+        self.console.insert("end", "📊 執行回測模擬（" + ", ".join(checked_codes[:5]) +
+                           ("..." if len(checked_codes) > 5 else "") + f" 共 {len(checked_codes)} 檔）\n")
+        self.console.insert("end", "=" * 60 + "\n")
+        self.console.see("end")
+
+        def worker():
+            try:
+                result = run_pipeline(cfg, self.logger)
+                if result and "df_sel" in result:
+                    df_sel = result["df_sel"]
+                    self.after(0, lambda: self._display_bt_results(result))
+            except Exception as e:
+                self.logger.log(f"❌ 回測失敗：{e}")
+                import traceback
+                self.logger.log(traceback.format_exc())
+            finally:
+                self.after(0, lambda: self.bt_run_btn.config(state="normal"))
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _display_bt_results(self, result):
+        """【V0.9.5-tab-split-phase3-C】把回測結果顯示在 bt_tree"""
+        bt_tree = getattr(self, "bt_tree", None)
+        if bt_tree is None:
+            self.logger.log("⚠️ 回測結果 Treeview 未找到")
+            return
+
+        df_sel = result.get("df_sel", None)
+        if df_sel is None or df_sel.empty:
+            self.logger.log("⚠️ 回測結果為空")
+            return
+
+        # 清空 + 重置勾選狀態
+        for item in bt_tree.get_children():
+            bt_tree.delete(item)
+        self._bt_checked = {}
+
+        # 設定欄位
+        if not bt_tree["columns"]:
+            cols = ("代號", "名稱", "Score", "營收YoY(%)", "EPSYoY(%)", "PE", "殖利率(%)")
+            col_widths = (65, 100, 55, 80, 75, 50, 70)
+            bt_tree.configure(columns=cols)
+            for col, w in zip(cols, col_widths):
+                bt_tree.heading(col, text=col)
+                bt_tree.column(col, width=w, anchor="center")
+
+        for _, row in df_sel.head(60).iterrows():
+            code = str(row.get("股票代號", "")).strip()
+            if not code:
+                continue
+            name = str(row.get("公司名稱_來源", row.get("股票名稱", "")))
+            score = row.get("Score", 0)
+            rev = row.get("營收YoY(%)", 0)
+            ey = row.get("EPSYoY_顯示(%)", 0)
+            pe = row.get("PE", 0)
+            yld = row.get("殖利率(估)", 0)
+
+            def _fmt(v, fmt=".2f", na="--"):
+                try:
+                    if pd.isna(v) or v is None:
+                        return na
+                    return format(float(v), fmt)
+                except Exception:
+                    return na
+
+            bt_tree.insert("", "end", iid=code, values=(
+                code, name,
+                _fmt(score), _fmt(rev), _fmt(ey), _fmt(pe), _fmt(yld)
+            ))
+
 
     def _display_select_results(self, df_sel):
         """【V0.9.5-tab-split-phase3 B-1】把選股結果顯示在 select_tree
@@ -8952,8 +9077,8 @@ class StrategyGUI(tk.Tk):
 
         # 設定欄位（如果還沒設定）
         if not self.select_tree["columns"]:
-            cols = ("代號", "名稱", "股價", "Score", "營收YoY(%)", "EPSYoY(%)", "PE", "殖利率(%)")
-            col_widths = (60, 100, 60, 60, 80, 80, 50, 70)
+            cols = ("☑", "代號", "名稱", "股價", "Score", "營收YoY(%)", "EPSYoY(%)", "PE", "殖利率(%)")
+            col_widths = (35, 60, 100, 60, 60, 80, 80, 50, 70)
             self.select_tree.configure(columns=cols)
             for col, w in zip(cols, col_widths):
                 self.select_tree.heading(col, text=col)
@@ -8965,11 +9090,12 @@ class StrategyGUI(tk.Tk):
             code = str(row.get("股票代號", "")).strip()
             if not code:
                 continue
-            name = str(row.get("股票名稱", row.get("名稱", "")))
+            name = str(row.get("公司名稱_來源", row.get("股票名稱", "")))
             price = row.get("股價", row.get("收盤價", 0))
             score = row.get("Score", 0)
             rev_yoy = row.get("營收YoY(%)", 0)
-            eps_yoy = row.get("EPSYoY_顯示(%)", row.get("EPSYoY(%)", 0))
+            _raw_ey = row.get("EPSYoY_顯示(%)", row.get("EPSYoY(%)", 0))
+            eps_yoy = 0 if (isinstance(_raw_ey, float) and __import__("pandas").isna(_raw_ey)) else _raw_ey
             pe = row.get("PE", 0)
             yld = row.get("殖利率(估)", row.get("殖利率(%)", 0))
 
@@ -8982,7 +9108,9 @@ class StrategyGUI(tk.Tk):
                 except Exception:
                     return na
 
-            self.select_tree.insert("", "end", values=(
+            tag = "checked" if self._select_checked.get(code, False) else "unchecked"
+            self.select_tree.insert("", "end", iid=code, values=(
+                "☑" if self._select_checked.get(code, False) else "☐",
                 code,
                 name[:8] if name else "--",
                 _fmt(price),
@@ -8991,17 +9119,17 @@ class StrategyGUI(tk.Tk):
                 _fmt(eps_yoy),
                 _fmt(pe),
                 _fmt(yld),
-            ))
+            ), tags=(tag,))
             display_count += 1
 
         self.logger.log(f"📋 已顯示 {display_count} 筆選股結果（總共 {len(df_sel)} 筆）")
-        # 【V0.9.5-tab-split-phase3-B3】enable 匯出按鈕
+        # 【V0.9.5-tab-split-phase3-C】enable 匯出按鈕
         if hasattr(self, "export_select_btn"):
             self.export_select_btn.config(state="normal")
             self.logger.log("💾 [B-3] 匯出股票清單按鈕已啟用")
 
     def _export_select_results_excel(self):
-        """【V0.9.5-tab-split-phase3-B3】匯出系統選股結果到 Excel
+        """【V0.9.5-tab-split-phase3-C】匯出系統選股結果到 Excel
 
         跟手動選股 / ETF 的匯出邏輯類似：
         - 沒資料 → 跳 warning
@@ -9014,6 +9142,16 @@ class StrategyGUI(tk.Tk):
             return
 
         result = self._last_select_df.copy()
+
+        # 【V0.9.5-tab-split-phase3-C】只匯出勾選檔
+        checked_codes = [k for k, v in self._select_checked.items() if v]
+        if not checked_codes:
+            messagebox.showwarning("無勾選", "請先在系統選股結果中勾選要匯出的股票\n（點擊左側☑/☐欄位切換勾選狀態）")
+            return
+        result = result[result["股票代號"].astype(str).str.strip().isin(checked_codes)]
+        if result.empty:
+            messagebox.showwarning("無勾選", "選股結果中找不到已勾選的股票代號，請重新勾選")
+            return
 
         filepath = filedialog.asksaveasfilename(
             title="匯出系統選股結果",
@@ -9064,6 +9202,98 @@ class StrategyGUI(tk.Tk):
         except Exception as e:
             messagebox.showerror("匯出失敗", str(e))
             self.logger.log(f"❌ [B-3] 匯出失敗：{e}")
+
+
+    # ══════════════════════════════════════════════════════════════
+    # 【V0.9.5-tab-split-phase3-C】勾選機制 handler
+    # ══════════════════════════════════════════════════════════════
+
+    def _on_select_tree_hover(self, event):
+        """系統選股 / 回測結果 Treeview hover：黃色 highlight"""
+        tree = event.widget
+        region = tree.identify("region", event.x, event.y)
+        if region != "cell":
+            self._clear_select_hover(tree)
+            return
+        iid = tree.identify_row(event.y)
+        if not iid:
+            self._clear_select_hover(tree)
+            return
+        # 記錄 hover_iid（每個 tree 各自記）
+        if not hasattr(self, "_select_hover_iids"):
+            self._select_hover_iids = {}
+        self._select_hover_iids[id(tree)] = iid
+        tree.item(iid, tags=("hover",))
+
+    def _on_select_tree_leave(self, event):
+        self._clear_select_hover(event.widget)
+
+    def _clear_select_hover(self, tree):
+        """清除 hover highlight、恢復該列原本的 checked/unchecked tag"""
+        if not hasattr(self, "_select_hover_iids"):
+            self._select_hover_iids = {}
+        iid = self._select_hover_iids.get(id(tree))
+        if not iid:
+            return
+        self._select_hover_iids.pop(id(tree), None)
+        try:
+            if iid in tree.get_children():
+                # select_tree 用 _select_checked，bt_tree 用 _bt_checked
+                checked = self._select_checked.get(iid, False) if tree == self.select_tree else getattr(self, "_bt_checked", {}).get(iid, False)
+                tree.item(iid, tags=("checked" if checked else "unchecked",))
+        except Exception:
+            pass
+
+    def _on_select_tree_click(self, event):
+        """點任一列 → toggle 該列勾選狀態（支援 select_tree 和 bt_tree）"""
+        tree = event.widget
+        region = tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        column = tree.identify_column(event.x)
+        if column != "#1":
+            return
+        iid = tree.identify_row(event.y)
+        if not iid:
+            return
+        # 決定用哪個 checked dict
+        if tree == self.select_tree:
+            checked_dict = self._select_checked
+        else:
+            if not hasattr(self, "_bt_checked"):
+                self._bt_checked = {}
+            checked_dict = self._bt_checked
+        current = checked_dict.get(iid, False)
+        checked_dict[iid] = not current
+        vals = list(tree.item(iid, "values"))
+        vals[0] = "☑" if not current else "☐"
+        tree.item(iid, values=vals, tags=("checked" if not current else "unchecked",))
+
+    def _on_select_tree_rclick(self, event):
+        """右鍵：全選 / 全不選（支援兩個 tree）"""
+        tree = event.widget
+        menu = tk.Menu(tree, tearoff=0)
+        menu.add_command(label="☑ 全選", command=lambda: self._select_all(tree))
+        menu.add_command(label="☐ 全不選", command=lambda: self._select_none(tree))
+        menu.post(event.x_root, event.y_root)
+
+    def _select_all(self, tree=None):
+        tree = tree or self.select_tree
+        checked_dict = self._select_checked if tree == self.select_tree else getattr(self, "_bt_checked", {})
+        for item in tree.get_children():
+            checked_dict[item] = True
+            vals = list(tree.item(item, "values"))
+            vals[0] = "☑"
+            tree.item(item, values=vals, tags=("checked",))
+
+    def _select_none(self, tree=None):
+        tree = tree or self.select_tree
+        checked_dict = self._select_checked if tree == self.select_tree else getattr(self, "_bt_checked", {})
+        for item in tree.get_children():
+            checked_dict[item] = False
+            vals = list(tree.item(item, "values"))
+            vals[0] = "☐"
+            tree.item(item, values=vals, tags=("unchecked",))
 
 
 if __name__ == "__main__":

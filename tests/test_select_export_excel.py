@@ -38,6 +38,7 @@ def _make_app_mock(last_select_df=None):
     """
     return SimpleNamespace(
         _last_select_df=last_select_df,
+        _select_checked={},  # 【V0.9.5-tab-split-phase3-C】新屬性
         logger=MagicMock(),  # logger.log 是 mock、不會做事
     )
 
@@ -89,7 +90,7 @@ def test_export_no_data_warning():
 # Test 3: 有 df → 真的寫出 .xlsx
 # ============================================================
 def test_export_writes_xlsx(tmp_path):
-    """有 _last_select_df → 真的寫出 .xlsx"""
+    """有 _last_select_df + 已勾選 → 真的寫出 .xlsx"""
     from source.StockTool import StrategyGUI  # type: ignore
     from openpyxl import load_workbook
 
@@ -100,6 +101,7 @@ def test_export_writes_xlsx(tmp_path):
         "Score": [0.95, 0.88, 0.85],
     })
     app = _make_app_mock(last_select_df=df)
+    app._select_checked = {"2330": True, "2317": True, "2454": True}  # 模擬已勾選
 
     out_path = tmp_path / "test_export.xlsx"
     out_path_str = str(out_path)
@@ -156,6 +158,7 @@ def test_export_xlsx_contains_stock_codes(tmp_path):
         "股價": [1080.0, 5130.0],
     })
     app = _make_app_mock(last_select_df=df)
+    app._select_checked = {"2330": True, "6669": True}  # 模擬已勾選
 
     out_path = tmp_path / "test_codes.xlsx"
 
@@ -232,6 +235,7 @@ def test_format_compat_with_load_stock_list(tmp_path):
         "Score": [0.95, 0.88, 0.85, 0.80],
     })
     app = _make_app_mock(last_select_df=df)
+    app._select_checked = {"2330": True, "2317": True, "2454": True, "6669": True}  # 模擬全勾選
 
     out_path = tmp_path / "compat_test.xlsx"
 
