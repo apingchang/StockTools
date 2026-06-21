@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 21:03 (Asia/Taipei)
+最後更新: 2026-06-21 21:17 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1539,6 +1539,9 @@ DEFAULT_CONFIG = {
     # V0.9.5: 手動選股 Preset
     "manual_select_presets": {},
     "manual_select_last_preset": None,
+    # V0.9.5-tab-split-phase3-D: 通用 Tab Preset (每個 tab 各自的命名儲存)
+    "tab_presets": {},
+    "tab_last_preset": {},
 }
 
 
@@ -1643,6 +1646,9 @@ class StrategyConfig:
     # V0.9.5: 手動選股 Preset
     manual_select_presets: dict = field(default_factory=dict)
     manual_select_last_preset: str = None
+    # V0.9.5-tab-split-phase3-D
+    tab_presets: dict = field(default_factory=dict)
+    tab_last_preset: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -5916,6 +5922,9 @@ class StrategyGUI(tk.Tk):
         self.notebook.add(self.portfolio_tab, text="📒 買賣記錄")
         self._build_portfolio_tab(self.portfolio_tab)
 
+        # Fix14: 啟動時自動載入每個 tab 上次的 Preset
+        self._init_tab_presets_on_startup()
+
         # Tab 5：回測模擬（從 Tab 2 拉到 Tab 5）
         self.backtest_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.backtest_tab, text="🧪 回測模擬")
@@ -5944,6 +5953,9 @@ class StrategyGUI(tk.Tk):
         ttk.Label(left, text="📊 系統選股參數", font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 8))
 
         self.vars: Dict[str, tk.Variable] = {}
+
+        # Fix14: 系統選股 Preset bar
+        self._add_preset_bar(left, "system_select")
 
         # 1. 基本參數
         basic_frame = ttk.LabelFrame(left, text="📊 基本參數", padding=5)
@@ -6063,6 +6075,9 @@ class StrategyGUI(tk.Tk):
         ).pack(anchor="w", pady=(5, 0))
         ttk.Label(source_frame, text="  ※ 使用 Excel 股票清單 + 不經過買點過濾（強制滿倉）", foreground="gray").pack(anchor="w")
 
+        # Fix14: 回測模擬 Preset bar
+        self._add_preset_bar(bt_left, "backtest")
+
         # 7. 回測參數（Fix5：持股檔數+總投入資金移至此）
         bt_params_frame = ttk.LabelFrame(bt_left, text="📊 回測參數", padding=5)
         bt_params_frame.pack(fill="x", pady=5)
@@ -6154,6 +6169,21 @@ class StrategyGUI(tk.Tk):
         left_canvas.pack(side="left", fill="y")
         left_scrollbar.pack(side="left", fill="y")
 
+        # Fix14 (2026-06-21): mousewheel 滾輪 scroll
+        # 綁 <Enter>/<Leave> 動態切換 active，避免和其他 scrollable widget 搶
+        def _on_canvas_enter(_e):
+            left_canvas.bind_all("<MouseWheel>", lambda ev: left_canvas.yview_scroll(int(-1 * (ev.delta / 120)), "units"))
+            left_canvas.bind_all("<Button-4>", lambda _ev: left_canvas.yview_scroll(-1, "units"))
+            left_canvas.bind_all("<Button-5>", lambda _ev: left_canvas.yview_scroll(1, "units"))
+
+        def _on_canvas_leave(_e):
+            left_canvas.unbind_all("<MouseWheel>")
+            left_canvas.unbind_all("<Button-4>")
+            left_canvas.unbind_all("<Button-5>")
+
+        left_canvas.bind("<Enter>", _on_canvas_enter)
+        left_canvas.bind("<Leave>", _on_canvas_leave)
+
         # 右：results Treeview（先空、之後 Phase 3B 填資料）
         right_frame = ttk.Frame(container)
         right_frame.pack(side="left", fill="both", expand=True, padx=(10, 0))
@@ -6201,6 +6231,223 @@ class StrategyGUI(tk.Tk):
         # 此 method 留作未來擴充（ex: 全域提示訊息、tab 切換處理）
         # 暫時不做事
         pass
+
+    # 【V0.9.5-tab-split-phase3-D Fix14】Tab Preset 機制
+    # 白名單：每個 tab 包含哪些 self.vars key
+    TAB_VAR_KEYS = {
+        "system_select": [
+            "top_n_for_tech", "history_months", "tech_months",
+            "factor_weight_mom1", "factor_weight_mom3", "factor_weight_mom6",
+            "factor_weight_rev", "factor_weight_eps",
+            "simple_score_weight_rev", "simple_score_weight_eps",
+            "simple_score_weight_div", "simple_score_weight_pe",
+            "simple_min_rev_yoy", "simple_min_eps_yoy", "simple_min_eps", "simple_max_pe",
+            "volume_surge_multiplier", "rsi_oversold", "ma20_tolerance",
+            "rsi_aggressive", "rsi_recover", "oversold_lookback", "ma_slope_days",
+            "strong_revenue_yoy", "strong_pe_max", "strong_price_min",
+            "rsi_oversold", "ma20_tolerance",
+        ],
+        "backtest": [
+            "stop_loss", "take_profit", "exit_rsi", "hold_days",
+            "roundtrip_cost_pct", "topk", "capital",
+            "wf_train_years", "wf_test_years", "wf_step_years",
+            "min_rev_yoy", "min_eps_yoy",
+        ],
+    }
+    TAB_DISPLAY_NAME = {
+        "system_select": "系統選股",
+        "backtest": "回測模擬",
+    }
+
+    def _add_preset_bar(self, parent, tab_key):
+        """【Fix14】在某個 tab 頂端加 Preset 列 (ComboBox + 儲存/刪除按鈕)"""
+        if not hasattr(self, "_preset_vars"):
+            self._preset_vars = {}
+        if not hasattr(self, "_preset_combos"):
+            self._preset_combos = {}
+
+        bar = ttk.Frame(parent)
+        bar.pack(fill="x", pady=(0, 6), padx=2)
+
+        ttk.Label(bar, text=f"📋 {self.TAB_DISPLAY_NAME.get(tab_key, tab_key)} Preset:",
+                  font=("Segoe UI", 9, "bold")).pack(side="left")
+
+        var = tk.StringVar(value="")
+        self._preset_vars[tab_key] = var
+
+        combo = ttk.Combobox(bar, textvariable=var, width=18, state="normal")
+        combo.pack(side="left", padx=4)
+        combo.bind("<<ComboboxSelected>>", lambda e, k=tab_key: self._load_tab_preset(k))
+        self._preset_combos[tab_key] = combo
+
+        ttk.Button(bar, text="💾 儲存", width=7,
+                   command=lambda k=tab_key: self._save_tab_preset(k)).pack(side="left", padx=1)
+        ttk.Button(bar, text="🗑️ 刪除", width=7,
+                   command=lambda k=tab_key: self._delete_tab_preset(k)).pack(side="left", padx=1)
+
+        # 初始化：填入現有 preset 列表
+        self._refresh_preset_list(tab_key)
+        return bar
+
+    def _refresh_preset_list(self, tab_key):
+        """更新某 tab 的 preset 下拉選單"""
+        if not hasattr(self, "_preset_combos") or tab_key not in self._preset_combos:
+            return
+        presets = self._get_tab_presets(tab_key)
+        names = list(presets.keys())
+        self._preset_combos[tab_key]["values"] = names
+
+    def _get_tab_presets(self, tab_key) -> dict:
+        """讀 cfg.tab_presets[tab_key]"""
+        if not hasattr(self, "cfg") or not hasattr(self.cfg, "tab_presets"):
+            return {}
+        return self.cfg.tab_presets.get(tab_key, {}) or {}
+
+    def _set_tab_presets(self, tab_key, presets: dict):
+        """寫 cfg.tab_presets[tab_key] = presets"""
+        if not hasattr(self.cfg, "tab_presets") or self.cfg.tab_presets is None:
+            self.cfg.tab_presets = {}
+        self.cfg.tab_presets[tab_key] = presets
+
+    def _collect_tab_values(self, tab_key) -> dict:
+        """從 UI (self.vars) 抓某 tab 的所有參數"""
+        keys = self.TAB_VAR_KEYS.get(tab_key, [])
+        out = {}
+        for k in keys:
+            var = self.vars.get(k)
+            if var is None:
+                continue
+            try:
+                v = var.get()
+                # 百分比類型 key 從 % 還原成小數（與 _save_ui_to_config 一致）
+                if k in ["stop_loss", "take_profit", "roundtrip_cost_pct", "ma20_tolerance"]:
+                    v = float(v) / 100.0
+                out[k] = v
+            except Exception:
+                pass
+        # 加 boolean / checkbox vars（不在 self.vars 但也屬於這個 tab）
+        if tab_key == "system_select":
+            for attr in ["use_enhanced_score_var", "volume_filter_var",
+                         "mtf_var", "divergence_var", "trend_filter_var",
+                         "use_aggressive_signal_var"]:
+                vobj = getattr(self, attr, None)
+                if vobj is not None:
+                    out[attr] = bool(vobj.get())
+        return out
+
+    def _apply_tab_values(self, tab_key, data: dict):
+        """把 preset 套回 UI (self.vars)"""
+        for k, v in (data or {}).items():
+            # boolean / checkbox 變數（_xxx_var 結尾）
+            if k.endswith("_var"):
+                vobj = getattr(self, k, None)
+                if vobj is not None:
+                    try:
+                        vobj.set(bool(v))
+                    except Exception:
+                        pass
+                continue
+            var = self.vars.get(k)
+            if var is None:
+                continue
+            # 還原百分比 → 顯示 %
+            if k in ["stop_loss", "take_profit", "roundtrip_cost_pct", "ma20_tolerance"]:
+                try:
+                    var.set(float(v) * 100.0)
+                except Exception:
+                    pass
+            else:
+                try:
+                    var.set(v)
+                except Exception:
+                    pass
+
+    def _save_tab_preset(self, tab_key):
+        """儲存目前 tab 參數為命名 preset"""
+        from tkinter import simpledialog, messagebox
+        name = simpledialog.askstring(
+            "儲存 Preset",
+            f"請輸入 [{self.TAB_DISPLAY_NAME.get(tab_key, tab_key)}] Preset 名稱：",
+            initialvalue=f"{self.TAB_DISPLAY_NAME.get(tab_key, 'preset')}_1",
+        )
+        if not name:
+            return
+        name = name.strip()
+        if not name:
+            return
+
+        values = self._collect_tab_values(tab_key)
+        presets = self._get_tab_presets(tab_key)
+        presets[name] = values
+        self._set_tab_presets(tab_key, presets)
+
+        # 記住 last_preset
+        last = self.cfg.tab_last_preset or {}
+        last[tab_key] = name
+        self.cfg.tab_last_preset = last
+
+        save_config(self.cfg.to_dict())
+        self._refresh_preset_list(tab_key)
+        if tab_key in self._preset_vars:
+            self._preset_vars[tab_key].set(name)
+        messagebox.showinfo("已儲存", f"Preset「{name}」已儲存")
+
+    def _load_tab_preset(self, tab_key):
+        """從 UI 選的 preset 載入到 self.vars"""
+        name = self._preset_vars.get(tab_key, tk.StringVar()).get().strip()
+        if not name:
+            return
+        presets = self._get_tab_presets(tab_key)
+        data = presets.get(name)
+        if not data:
+            return
+        self._apply_tab_values(tab_key, data)
+        # 同步到 StrategyConfig
+        for k, v in (data or {}).items():
+            if hasattr(self.cfg, k) and not k.endswith("_var"):
+                try:
+                    setattr(self.cfg, k, v)
+                except Exception:
+                    pass
+        # 記住 last_preset
+        last = self.cfg.tab_last_preset or {}
+        last[tab_key] = name
+        self.cfg.tab_last_preset = last
+        save_config(self.cfg.to_dict())
+        self.logger.log(f"✅ Preset「{name}」已套用至 [{self.TAB_DISPLAY_NAME.get(tab_key, tab_key)}]")
+
+    def _delete_tab_preset(self, tab_key):
+        from tkinter import messagebox
+        name = self._preset_vars.get(tab_key, tk.StringVar()).get().strip()
+        if not name:
+            messagebox.showwarning("未選", "請先從下拉選單選一個 preset")
+            return
+        if not messagebox.askyesno("確認刪除", f"刪除 Preset「{name}」？"):
+            return
+        presets = self._get_tab_presets(tab_key)
+        if name in presets:
+            del presets[name]
+            self._set_tab_presets(tab_key, presets)
+            save_config(self.cfg.to_dict())
+            self._refresh_preset_list(tab_key)
+            self._preset_vars[tab_key].set("")
+            self.logger.log(f"🗑️ Preset「{name}」已刪除")
+
+    def _init_tab_presets_on_startup(self):
+        """App 啟動時自動載入每個 tab 上次的 preset"""
+        last = (self.cfg.tab_last_preset or {}) if hasattr(self.cfg, "tab_last_preset") else {}
+        for tab_key in self.TAB_VAR_KEYS.keys():
+            name = last.get(tab_key)
+            if not name:
+                continue
+            presets = self._get_tab_presets(tab_key)
+            if name not in presets:
+                continue
+            self._refresh_preset_list(tab_key)
+            if tab_key in self._preset_vars:
+                self._preset_vars[tab_key].set(name)
+            self._apply_tab_values(tab_key, presets[name])
+            self.logger.log(f"📋 [{self.TAB_DISPLAY_NAME.get(tab_key, tab_key)}] 自動載入 Preset「{name}」")
 
     def _add_entry(self, parent, label, key, var_cls, default):
         row = ttk.Frame(parent)
