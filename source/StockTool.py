@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 16:54 (Asia/Taipei)
+最後更新: 2026-06-21 17:07 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -2325,7 +2325,7 @@ def _query_eps_history(db_path: str, year: int, quarter: int) -> pd.DataFrame:
     import sqlite3
     with sqlite3.connect(db_path) as conn:
         df = pd.read_sql_query(
-            "SELECT stock_id, year, quarter, eps FROM eps_history WHERE year = ? AND quarter = ?",
+            "SELECT stock_id, year, quarter, eps, source FROM eps_history WHERE year = ? AND quarter = ?",
             conn, params=(year, quarter),
         )
     if not df.empty:
@@ -4296,7 +4296,8 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     else:
         latest_row = candidates.sort_values(['年度', '季別'], ascending=False).iloc[0]
 
-    latest_year = int(latest_row['年度'])
+    # Fix9: 民國年轉西元年（跟 DB 對齊，GoodInfo 歷史庫用西元年）
+    latest_year = int(latest_row['年度']) + 1911
     latest_q = int(latest_row['季別'])
     latest_count = int(latest_row['count'])
     coverage_pct = latest_count / max_count * 100
@@ -4307,8 +4308,10 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     # 每天都存最新一季，累積一年後 fetch_eps_latest 就能算 YoY
     try:
         _init_eps_history_db(cfg.eps_history_db)
+        # Fix9: MOPS CSV 的「年度」是民國年（例如 115=2026），
+        # 但 GoodInfo 匯入歷史庫用的是西元年（2024、2025），要轉成西元年才對得到
         rows_to_save = [
-            (str(r["股票代號"]).strip(), int(r["年度"]), int(r["季別"]),
+            (str(r["股票代號"]).strip(), int(r["年度"]) + 1911, int(r["季別"]),
              float(r["EPS"]) if pd.notna(r["EPS"]) else None, "twse_csv")
             for _, r in eps.iterrows()
         ]
@@ -4318,13 +4321,14 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     except Exception as e:
         print(f"⚠️ 寫入歷史庫失敗（不影響本函式結果）：{e}")
 
-    cur = eps[(eps["年度"] == latest_year) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].rename(
+    # Fix9: eps["年度"] 還是民國年（原始 CSV）、latest_year 已經是西元年
+    cur = eps[(eps["年度"] == latest_year - 1911) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].rename(
         columns={"EPS": "EPS本期"})
 
     # ========== V0.9.4 phase4: 從歷史庫查去年同期 ==========
     # TWSE CSV 只保留最新一季，必須靠歷史庫才能跨年比對
     prev_year = latest_year - 1
-    prev_from_csv = eps[(eps["年度"] == prev_year) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].rename(
+    prev_from_csv = eps[(eps["年度"] == prev_year - 1911) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].rename(
         columns={"EPS": "EPS去年"})
     prev_from_db = _query_eps_history(cfg.eps_history_db, prev_year, latest_q)
     if not prev_from_db.empty:
@@ -4338,48 +4342,16 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     else:
         prev = prev_from_csv
         if prev.empty:
-            print(f"⚠️ 去年同期 {prev_year}Q{latest_q} 沒有資料 → 嘗試從 FinMind 補抓...")
-            # Fix8: FinMind TaiwanStockFinancialReport 補抓去年同期 EPS
-            try:
-                import requests as _req
-                _finmind_url = "https://api.finmindtrade.com/api/v4/data"
-                _finmind_params = {
-                    "dataset": "TaiwanStockFinancialReport",
-                    "data_date": f"{prev_year}-{latest_q}",
-                    "api_token": getattr(cfg, 'finmind_token', ''),
-                }
-                _r = _req.get(_finmind_url, params=_finmind_params, timeout=15)
-                if _r.status_code == 200:
-                    _fj = _r.json()
-                    if _fj.get("success") and _fj.get("data"):
-                        _fdf = pd.DataFrame(_fj["data"])
-                        _eps_col = next((c for c in ["基本每股盈餘", "每股盈餘", "EPS"] if c in _fdf.columns), None)
-                        _code_col = next((c for c in ["stock_id", "股票代號"] if c in _fdf.columns), None)
-                        if _eps_col and _code_col:
-                            _fprev = _fdf[[_code_col, _eps_col]].rename(
-                                columns={_code_col: "股票代號", _eps_col: "EPS去年"}
-                            )
-                            _fprev["股票代號"] = _fprev["股票代號"].astype(str).str.strip()
-                            _fprev["EPS去年"] = pd.to_numeric(_fprev["EPS去年"], errors="coerce")
-                            _fprev = _fprev.dropna(subset=["EPS去年"])
-                            # 寫入歷史庫
-                            _rows = [
-                                (str(r["股票代號"]).strip(), prev_year, latest_q,
-                                 float(r["EPS去年"]), "finmind")
-                                for _, r in _fprev.iterrows()
-                            ]
-                            _upsert_eps_history(cfg.eps_history_db, _rows)
-                            prev = _fprev.copy()
-                            print(f"   FinMind 補抓: {len(prev)} 檔有 {prev_year}Q{latest_q} EPS")
-                        else:
-                            print(f"   FinMind 無 EPS 欄位")
-                    else:
-                        print(f"   FinMind 回應失敗: {_fj}")
-                else:
-                    print(f"   FinMind HTTP {_r.status_code}")
-            except Exception as _e:
-                print(f"   FinMind 補抓失敗: {_e}")
-            if prev.empty:
+            # Fix9: 從 GoodInfo 歷史庫找「去年 Q4 全年 EPS」當 fallback
+            # （GoodInfo P20U/P20-50/P20L EPSRate12Y.xls 都有 12 年完整資料）
+            prev_q4 = _query_eps_history(cfg.eps_history_db, prev_year, 4)
+            if not prev_q4.empty and (prev_q4["source"] == "goodinfo").any():
+                prev = prev_q4.rename(columns={"eps": "EPS去年", "stock_id": "股票代號"})[
+                    ["股票代號", "EPS去年"]
+                ]
+                prev["股票代號"] = prev["股票代號"].astype(str).str.strip()
+                print(f"   GoodInfo Q4 全年 EPS fallback: {len(prev)} 檔有 {prev_year}Q4 EPS")
+            else:
                 print(f"⚠️ 去年同期 {prev_year}Q{latest_q} 沒有資料（CSV 無、歷史庫也無）→ YoY 將全 NA")
 
     out = cur.merge(prev, on="股票代號", how="left")
