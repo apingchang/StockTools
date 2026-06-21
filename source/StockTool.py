@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 11:19 (Asia/Taipei)
+最後更新: 2026-06-21 11:26 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -9209,40 +9209,52 @@ class StrategyGUI(tk.Tk):
     # ══════════════════════════════════════════════════════════════
 
     def _on_select_tree_hover(self, event):
-        """系統選股 / 回測結果 Treeview hover：黃色 highlight"""
+        """系統選股 / 回測結果 Treeview hover：黃色 highlight
+
+        邏輯：
+        - 進新列 → 離開舊列（restore 原本 tag）、進新列（hover）
+        - 離開 cell/列 → restore 舊列原本 tag
+        - 移到同一列 → 不動作
+        """
         tree = event.widget
-        region = tree.identify("region", event.x, event.y)
-        if region != "cell":
-            self._clear_select_hover(tree)
-            return
-        iid = tree.identify_row(event.y)
-        if not iid:
-            self._clear_select_hover(tree)
-            return
-        # 記錄 hover_iid（每個 tree 各自記）
         if not hasattr(self, "_select_hover_iids"):
             self._select_hover_iids = {}
-        self._select_hover_iids[id(tree)] = iid
-        tree.item(iid, tags=("hover",))
+
+        region = tree.identify("region", event.x, event.y)
+        iid = tree.identify_row(event.y) if region == "cell" else None
+
+        old_iid = self._select_hover_iids.get(id(tree))
+
+        # 移到同一列 → 不動作
+        if iid and iid == old_iid:
+            return
+
+        # 離開舊列：restore 原本 tag（hover → checked/unchecked）
+        if old_iid and old_iid in tree.get_children():
+            checked = self._select_checked.get(old_iid, False) if tree == self.select_tree else getattr(self, "_bt_checked", {}).get(old_iid, False)
+            tree.item(old_iid, tags=("checked" if checked else "unchecked",))
+
+        # 進新列 or 無效區域
+        if iid and iid in tree.get_children():
+            self._select_hover_iids[id(tree)] = iid
+            tree.item(iid, tags=("hover",))
+        else:
+            # 離開範圍：刪除 hover 記錄
+            self._select_hover_iids.pop(id(tree), None)
 
     def _on_select_tree_leave(self, event):
         self._clear_select_hover(event.widget)
 
     def _clear_select_hover(self, tree):
-        """清除 hover highlight、恢復該列原本的 checked/unchecked tag"""
+        """清除 hover highlight、restore 該列原本 tag（供外部呼叫）"""
         if not hasattr(self, "_select_hover_iids"):
-            self._select_hover_iids = {}
-        iid = self._select_hover_iids.get(id(tree))
-        if not iid:
             return
+        iid = self._select_hover_iids.get(id(tree))
+        if not iid or iid not in tree.get_children():
+            return
+        checked = self._select_checked.get(iid, False) if tree == self.select_tree else getattr(self, "_bt_checked", {}).get(iid, False)
+        tree.item(iid, tags=("checked" if checked else "unchecked",))
         self._select_hover_iids.pop(id(tree), None)
-        try:
-            if iid in tree.get_children():
-                # select_tree 用 _select_checked，bt_tree 用 _bt_checked
-                checked = self._select_checked.get(iid, False) if tree == self.select_tree else getattr(self, "_bt_checked", {}).get(iid, False)
-                tree.item(iid, tags=("checked" if checked else "unchecked",))
-        except Exception:
-            pass
 
     def _on_select_tree_click(self, event):
         """點任一列 → toggle 該列勾選狀態（支援 select_tree 和 bt_tree）"""
