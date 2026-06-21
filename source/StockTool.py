@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 11:59 (Asia/Taipei)
+最後更新: 2026-06-21 12:46 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5921,18 +5921,35 @@ class StrategyGUI(tk.Tk):
         self._add_entry(wf_params_frame, "步進 (年)", "wf_step_years", tk.IntVar, self.cfg.wf_step_years)
 
         # 6. 選股來源（V0.9.5-tab-split Phase 2：移到回測模擬 tab）
-        source_frame = ttk.LabelFrame(bt_left, text="📁 選股來源", padding=5)
+        # V0.9.5-tab-split-phase3-C Fix3：回測永遠從 Excel 讀，移除 toggle
+        source_frame = ttk.LabelFrame(bt_left, text="📁 選股來源（永遠從 Excel 讀取）", padding=5)
         source_frame.pack(fill="x", pady=5)
 
-        self.use_excel_var = tk.BooleanVar(value=self.cfg.use_excel_stock_list)
-        ttk.Checkbutton(source_frame, text="使用 Excel 股票清單", variable=self.use_excel_var).pack(anchor="w")
-        self._add_entry(source_frame, "Excel 檔案", "excel_stock_file", tk.StringVar, self.cfg.excel_stock_file)
+        # Excel 檔案：entry + 瀏覽按鈕（Fix3 新增）
+        file_row = ttk.Frame(source_frame)
+        file_row.pack(fill="x", pady=2)
+        ttk.Label(file_row, text="Excel 檔案：").pack(side="left")
+        self.excel_file_var = tk.StringVar(value=self.cfg.excel_stock_file)
+        file_entry = ttk.Entry(file_row, textvariable=self.excel_file_var, width=28)
+        file_entry.pack(side="left", fill="x", expand=True)
+
+        def _browse_excel():
+            f = filedialog.askopenfilename(
+                title="選擇 Excel 股票清單",
+                filetypes=[("Excel", "*.xlsx"), ("所有檔案", "*.*")],
+                initialdir=SOURCE_DIR,
+            )
+            if f:
+                self.excel_file_var.set(f)
+                self.cfg.excel_stock_file = f
+
+        ttk.Button(file_row, text="瀏覽...", command=_browse_excel, width=6).pack(side="left", padx=(4, 0))
 
         # ✅ v0.9.4 Excel 清單強制買點模式
         self.excel_force_buy_var = tk.BooleanVar(value=self.cfg.excel_force_buy)
         ttk.Checkbutton(
             source_frame,
-            text="📊 Excel 清單強制買點模式（跳過技術買點過濾）",
+            text="📊 Excel 清單強制買點模式\n   （跳過技術買點過濾）",
             variable=self.excel_force_buy_var
         ).pack(anchor="w", pady=(5, 0))
         ttk.Label(source_frame, text="  ※ 使用 Excel 股票清單 + 不經過買點過濾（強制滿倉）", foreground="gray").pack(anchor="w")
@@ -5941,7 +5958,7 @@ class StrategyGUI(tk.Tk):
         self.top10_backtest_var = tk.BooleanVar(value=self.cfg.use_top10_backtest)
         ttk.Checkbutton(
             source_frame,
-            text="📊 使用 Top10_基本面 進行回測（跳過技術買點）",
+            text="📊 使用 Top10_基本面 進行回測\n   （跳過技術買點）",
             variable=self.top10_backtest_var
         ).pack(anchor="w", pady=(5, 0))
         ttk.Label(source_frame, text="  ※ 直接使用評分最高的10檔股票建倉，不經過買點過濾", foreground="gray").pack(anchor="w")
@@ -6098,13 +6115,13 @@ class StrategyGUI(tk.Tk):
                     value = value * 100.0
                 var.set(value)
         self.use_enhanced_score_var.set(self.cfg.use_enhanced_score)
-        self.use_excel_var.set(self.cfg.use_excel_stock_list)
         self.volume_filter_var.set(self.cfg.require_volume_filter)
         self.mtf_var.set(self.cfg.use_mtf_confirmation)
         self.divergence_var.set(self.cfg.use_divergence_detection)
         self.wf_enabled_var.set(self.cfg.wf_enabled)
         self.top10_backtest_var.set(self.cfg.use_top10_backtest)
         self.excel_force_buy_var.set(self.cfg.excel_force_buy)
+        self.excel_file_var.set(self.cfg.excel_stock_file)
 
         # ✅ 新增以下程式碼
         self.trend_filter_var.set(self.cfg.require_trend_filter)
@@ -6118,13 +6135,15 @@ class StrategyGUI(tk.Tk):
                     value = value / 100.0
                 setattr(self.cfg, key, value)
         self.cfg.use_enhanced_score = self.use_enhanced_score_var.get()
-        self.cfg.use_excel_stock_list = self.use_excel_var.get()
+        # Fix3：回測永遠從 Excel 讀（移除 use_excel_var toggle）
+        self.cfg.use_excel_stock_list = True
         self.cfg.require_volume_filter = self.volume_filter_var.get()
         self.cfg.use_mtf_confirmation = self.mtf_var.get()
         self.cfg.use_divergence_detection = self.divergence_var.get()
         self.cfg.wf_enabled = self.wf_enabled_var.get()
         self.cfg.use_top10_backtest = self.top10_backtest_var.get()
         self.cfg.excel_force_buy = self.excel_force_buy_var.get()
+        self.cfg.excel_stock_file = self.excel_file_var.get()
 
         # ✅ 新增以下程式碼
         self.cfg.require_trend_filter = self.trend_filter_var.get()
