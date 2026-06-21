@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 17:18 (Asia/Taipei)
+最後更新: 2026-06-21 17:38 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1797,6 +1797,18 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
             if missing:
                 logger.log(
                     f"♻️ [{name}] cache 缺欄位 {sorted(missing)}、強制重抓一次 → 寫入新結構"
+                )
+                df = fetch_func()
+                save_cache(file_path, df)
+                return df
+        # 【V0.9.5-tab-split-phase3-C Fix11】2026-06-21 William 反映
+        # 即使 cache 是今天的、也可能是 Fix10 以前的舊版（缺 EPSYoY_顯示(%) 或全 NaN）
+        # 缺欄位或 YoY 全 NaN → 強制重抓一次、讓 Fix10 GoodInfo 12QEPSRate 覆蓋邏輯跑
+        if name == "eps":
+            yoy_col = "EPSYoY_顯示(%)"
+            if yoy_col not in df.columns or df[yoy_col].isna().all() or (df[yoy_col] == 0).all():
+                logger.log(
+                    f"♻️ [{name}] cache 缺 EPSYoY 資料或全為 0、強制重抓一次 → Fix10 GoodInfo 12QEPSRate 覆蓋"
                 )
                 df = fetch_func()
                 save_cache(file_path, df)

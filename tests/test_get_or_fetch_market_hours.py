@@ -183,7 +183,10 @@ def test_eps_盤中_不強制refresh_走原本邏輯(tmp_path):
     """eps 盤中不應被「盤中邏輯」影響"""
     cache_path = str(tmp_path / "eps_market_hours.xlsx")
     today = datetime.now().strftime("%Y-%m-%d")
-    eps_df = pd.DataFrame({"股票代號": ["2330"], "EPS本期": [10.0]})
+    eps_df = pd.DataFrame({
+        "股票代號": ["2330"], "EPS本期": [10.0],
+        "EPSYoY_顯示(%)": [50.0],  # Fix11 結構檢查需要此欄
+    })
     _make_fake_cache(cache_path, today, eps_df)
 
     with patch.object(st, "get_cache_file", return_value=cache_path), \
