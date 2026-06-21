@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 22:09 (Asia/Taipei)
+最後更新: 2026-06-21 22:12 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -6936,8 +6936,6 @@ class StrategyGUI(tk.Tk):
 
         left_canvas.bind("<Enter>", _on_canvas_enter)
         left_canvas.bind("<Leave>", _on_canvas_leave)
-        left_frame.bind("<Enter>", _on_canvas_enter)
-        left_frame.bind("<Leave>", _on_canvas_leave)
 
         left_frame = ttk.LabelFrame(left_canvas, text="🔎 ETF 持股篩選", padding=8)
         left_canvas.create_window((0, 0), window=left_frame, anchor="nw")
@@ -6945,6 +6943,9 @@ class StrategyGUI(tk.Tk):
             "<Configure>",
             lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")),
         )
+        # left_frame 建好之後才 bind Enter/Leave
+        left_frame.bind("<Enter>", _on_canvas_enter)
+        left_frame.bind("<Leave>", _on_canvas_leave)
 
         # 最小 ETF 數
         row1 = ttk.Frame(left_frame)
@@ -7073,9 +7074,6 @@ class StrategyGUI(tk.Tk):
 
         left_canvas.bind("<Enter>", _on_canvas_enter)
         left_canvas.bind("<Leave>", _on_canvas_leave)
-        # 保留對內部 frame 的 Enter/Leave 也覆蓋、避免子 widget 進來就 lose bind
-        left_frame.bind("<Enter>", _on_canvas_enter)
-        left_frame.bind("<Leave>", _on_canvas_leave)
 
         # 真正的內容在 left_frame 裡、embed 到 canvas
         left_frame = ttk.LabelFrame(left_canvas, text="🔎 篩選條件", padding=8)
@@ -7084,6 +7082,9 @@ class StrategyGUI(tk.Tk):
             "<Configure>",
             lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")),
         )
+        # left_frame 建好之後才 bind Enter/Leave（避免 UnboundLocalError）
+        left_frame.bind("<Enter>", _on_canvas_enter)
+        left_frame.bind("<Leave>", _on_canvas_leave)
 
         # Preset 管理
         preset_top = ttk.Frame(left_frame)
