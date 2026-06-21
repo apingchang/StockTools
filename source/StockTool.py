@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 13:14 (Asia/Taipei)
+最後更新: 2026-06-21 13:21 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5930,8 +5930,8 @@ class StrategyGUI(tk.Tk):
         file_row.pack(fill="x", pady=2)
         ttk.Label(file_row, text="Excel 檔案：").pack(side="left")
         self.excel_file_var = tk.StringVar(value=self.cfg.excel_stock_file)
-        file_entry = ttk.Entry(file_row, textvariable=self.excel_file_var, width=28)
-        file_entry.pack(side="left", fill="x", expand=True)
+        file_entry = ttk.Entry(file_row, textvariable=self.excel_file_var)
+        file_entry.pack(side="left", fill="x", padx=(2, 0))
 
         def _browse_excel():
             f = filedialog.askopenfilename(
@@ -5943,7 +5943,7 @@ class StrategyGUI(tk.Tk):
                 self.excel_file_var.set(f)
                 self.cfg.excel_stock_file = f
 
-        ttk.Button(file_row, text="瀏覽...", command=_browse_excel, width=6).pack(side="left", padx=(4, 0))
+        ttk.Button(file_row, text=" 瀏覽 ", command=_browse_excel).pack(side="left", padx=(4, 0))
 
         # ✅ v0.9.4 Excel 清單強制買點模式
         self.excel_force_buy_var = tk.BooleanVar(value=self.cfg.excel_force_buy)
