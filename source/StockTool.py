@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 13:21 (Asia/Taipei)
+最後更新: 2026-06-21 13:28 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5982,7 +5982,7 @@ class StrategyGUI(tk.Tk):
         bt_btn_frame = ttk.Frame(bt_left)
         bt_btn_frame.pack(fill="x", pady=10)
 
-        ttk.Label(bt_btn_frame, text="系統選股完成後，勾選並匯出即可執行回測", foreground="gray").pack(fill="x", pady=2)
+        ttk.Label(bt_btn_frame, text="選擇 Excel 檔案後，直接按「執行回測模擬」", foreground="gray").pack(fill="x", pady=2)
         self.bt_run_btn = ttk.Button(bt_btn_frame, text="▶ 執行回測模擬", command=self._on_bt_run, state="normal")
         self.bt_run_btn.pack(fill="x", pady=2)
 
@@ -9117,41 +9117,23 @@ class StrategyGUI(tk.Tk):
 
     def _on_bt_run(self):
         """【V0.9.5-tab-split-phase3-C】回測 Tab 的「▶ 執行回測模擬」按鈕"""
-        checked_codes = [k for k, v in self._select_checked.items() if v]
-        if not checked_codes:
-            messagebox.showwarning("無勾選", "請先在「系統選股」結果中勾選要回測的股票，再按「💾 匯出」後來這裡執行回測")
-            return
-
-        # 把勾選轉成 Excel temp 檔
-        import tempfile, os
-        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False, mode="wb")
-        tmp_path = tmp.name
-        tmp.close()
-
-        try:
-            from openpyxl import Workbook
-            wb = Workbook()
-            ws = wb.active
-            ws.append(["股票代號"])
-            for c in checked_codes:
-                ws.append([c])
-            wb.save(tmp_path)
-        except Exception as e:
-            messagebox.showerror("錯誤", f"無法建立暫存 Excel：{e}")
+        # Fix4：回測是獨立功能，直接從 excel_file_var 讀取，不依賴系統選股勾選
+        excel_file = self.excel_file_var.get().strip()
+        if not excel_file:
+            messagebox.showwarning("無檔案", "請先選擇 Excel 股票清單檔案，再執行回測")
             return
 
         # 複製一份 cfg，強制使用 Excel 清單模式
         import copy
         cfg = copy.copy(self.cfg)
         cfg.use_excel_stock_list = True
-        cfg.excel_stock_file = tmp_path
-        cfg.excel_force_buy = False  # 用正常技術買點過濾
+        cfg.excel_stock_file = excel_file
+        cfg.excel_force_buy = self.excel_force_buy_var.get()
         cfg.use_top10_backtest = False  # Fix3：永遠不用 Top10 模式
 
         self.bt_run_btn.config(state="disabled")
         self.console.insert("end", "\n" + "=" * 60 + "\n")
-        self.console.insert("end", "📊 執行回測模擬（" + ", ".join(checked_codes[:5]) +
-                           ("..." if len(checked_codes) > 5 else "") + f" 共 {len(checked_codes)} 檔）\n")
+        self.console.insert("end", "📊 執行回測模擬（" + excel_file + ")\n")
         self.console.insert("end", "=" * 60 + "\n")
         self.console.see("end")
 
@@ -9159,7 +9141,6 @@ class StrategyGUI(tk.Tk):
             try:
                 result = run_pipeline(cfg, self.logger)
                 if result and "df_sel" in result:
-                    df_sel = result["df_sel"]
                     self.after(0, lambda: self._display_bt_results(result))
             except Exception as e:
                 self.logger.log(f"❌ 回測失敗：{e}")
@@ -9167,10 +9148,6 @@ class StrategyGUI(tk.Tk):
                 self.logger.log(traceback.format_exc())
             finally:
                 self.after(0, lambda: self.bt_run_btn.config(state="normal"))
-                try:
-                    os.unlink(tmp_path)
-                except Exception:
-                    pass
 
         threading.Thread(target=worker, daemon=True).start()
 
