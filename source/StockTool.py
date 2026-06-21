@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 13:28 (Asia/Taipei)
+最後更新: 2026-06-21 13:59 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1508,6 +1508,7 @@ DEFAULT_CONFIG = {
     "twse_backoff": 0.8,
     "twse_sleep": 0.12,
     "topk": 7,
+    "capital": 1000000.0,  # 總投入資金（元）
     "hold_days": 10,
     "roundtrip_cost_pct": 0.004,
     "stop_loss": -0.03,
@@ -1613,6 +1614,7 @@ class StrategyConfig:
     twse_backoff: float = 0.8
     twse_sleep: float = 0.12
     topk: int = 7
+    capital: float = 1000000.0  # 總投入資金（元）
     hold_days: int = 10
     roundtrip_cost_pct: float = 0.004
     stop_loss: float = -0.03
@@ -4588,7 +4590,7 @@ def portfolio_backtest_topk_event(cfg: StrategyConfig, tech_all: pd.DataFrame, s
     by_code = {c: g.sort_values("Date").reset_index(drop=True) for c, g in df.groupby("股票代號")}
     all_dates = sorted(df["Date"].unique())
 
-    cash = 1.0
+    cash = cfg.capital
     positions = {}
     equity_rows = []
     trade_rows = []
@@ -5842,7 +5844,7 @@ class StrategyGUI(tk.Tk):
         self._add_entry(basic_frame, "選股檔數 (TopN)", "top_n_for_tech", tk.IntVar, self.cfg.top_n_for_tech)
         self._add_entry(basic_frame, "歷史月數", "history_months", tk.IntVar, self.cfg.history_months)
         self._add_entry(basic_frame, "回測月數", "tech_months", tk.IntVar, self.cfg.tech_months)
-        self._add_entry(basic_frame, "持股檔數 (TopK)", "topk", tk.IntVar, self.cfg.topk)
+        # 持股檔數已移至回測模擬 tab
 
         # 2. 評分系統
         score_frame = ttk.LabelFrame(left, text="⭐ 評分系統", padding=5)
@@ -5954,7 +5956,13 @@ class StrategyGUI(tk.Tk):
         ).pack(anchor="w", pady=(5, 0))
         ttk.Label(source_frame, text="  ※ 使用 Excel 股票清單 + 不經過買點過濾（強制滿倉）", foreground="gray").pack(anchor="w")
 
-        # 7. 強勢股過濾
+        # 7. 回測參數（Fix5：持股檔數+總投入資金移至此）
+        bt_params_frame = ttk.LabelFrame(bt_left, text="📊 回測參數", padding=5)
+        bt_params_frame.pack(fill="x", pady=5)
+        self._add_entry(bt_params_frame, "同時持股檔數", "topk", tk.IntVar, self.cfg.topk)
+        self._add_entry(bt_params_frame, "總投入資金 (元)", "capital", tk.DoubleVar, self.cfg.capital)
+
+        # 7. 強勢股過濾（系統選股 tab）
         strong_frame = ttk.LabelFrame(left, text="💪 強勢股過濾", padding=5)
         strong_frame.pack(fill="x", pady=5)
         self._add_entry(strong_frame, "最低營收YoY (%)", "strong_revenue_yoy", tk.DoubleVar, self.cfg.strong_revenue_yoy)
