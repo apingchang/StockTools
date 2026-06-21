@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 13:59 (Asia/Taipei)
+最後更新: 2026-06-21 14:05 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -4698,6 +4698,9 @@ def portfolio_backtest_topk_event(cfg: StrategyConfig, tech_all: pd.DataFrame, s
     eq = pd.DataFrame(equity_rows).drop_duplicates("Date").sort_values("Date").reset_index(drop=True)
     trades = pd.DataFrame(trade_rows)
 
+    # Fix5：同時顯示標準化權益（初始=1.0）
+    eq["Equity_Norm"] = eq["Equity"] / cfg.capital
+
     eq["Ret"] = eq["Equity"].pct_change()
     eq["Peak"] = eq["Equity"].cummax()
     eq["Drawdown"] = eq["Equity"] / eq["Peak"] - 1
@@ -5519,6 +5522,11 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     logger.log(sig_summary.to_string(index=False) if not sig_summary.empty else "(無訊號)")
     logger.log(f"\n✅ Portfolio-level KPI (Top{cfg.topk} 等權):")
     logger.log(pf_kpi.to_string(index=False) if not pf_kpi.empty else "(無投組資料)")
+    if not eq.empty:
+        final_equity = eq["Equity"].iloc[-1]
+        total_ret = (final_equity / cfg.capital - 1) * 100
+        logger.log(f"   💰 初始本金：{cfg.capital:,.0f} 元 → 最終權益：{final_equity:,.0f} 元（總報酬：{total_ret:+.1f}%）")
+        logger.log(f"   📊 標準化起始：1.0000 → 最終：{final_equity / cfg.capital:.4f}")
     logger.log("\n✅ 出場原因統計:")
     logger.log(reason_stats.to_string(index=False) if not reason_stats.empty else "(無交易資料)")
     logger.log(f"\n✅ 完成 → {out_file}")
