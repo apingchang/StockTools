@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 16:28 (Asia/Taipei)
+最後更新: 2026-06-21 16:52 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -9174,8 +9174,12 @@ class StrategyGUI(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _display_bt_results(self, result):
-        """【V0.9.5-tab-split-phase3-C Fix6】把回測 KPI 結果顯示在 bt_tree"""
+        """【V0.9.5-tab-split-phase3-C Fix7】把回測 KPI 結果顯示在 bt_tree + DEBUG"""
         bt_tree = getattr(self, 'bt_tree', None)
+        # Fix7 DEBUG: 確認收到哪些資料
+        self.logger.log(f"DEBUG _display_bt_results: result keys={list(result.keys())}")
+        self.logger.log(f"  pf_kpi={str(result.get('pf_kpi'))[:80]}")
+        self.logger.log(f"  sig={str(result.get('sig_summary'))[:80]}")
         if bt_tree is None:
             self.logger.log("⚠️ 回測結果 Treeview 未找到")
             return
