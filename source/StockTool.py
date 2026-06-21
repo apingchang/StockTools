@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 11:26 (Asia/Taipei)
+最後更新: 2026-06-21 11:59 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1454,6 +1454,8 @@ import requests
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
+
+SOURCE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, PatternFill
@@ -4991,6 +4993,60 @@ def _apply_strong_filter(df, cfg, logger):
     return filtered
 
 
+
+def _run_selection_only(cfg: StrategyConfig, logger: GuiLogger):
+    """【V0.9.5-tab-split-phase3-C Fix2】只做基本面選股、不跑回測
+
+    等同 run_pipeline 的前半段（fetch + merge + 評分 + 強勢股過濾），
+    讓「▶ 執行系統選股」快速回應，不回測。
+    """
+    s = build_session()
+
+    logger.log("=" * 60)
+    logger.log(f"🚀 StockTool {VERSION} 篩選模式（不回測）")
+    logger.log(f"   評分系統: {'多因子評分' if cfg.use_enhanced_score else '簡易評分'}")
+    logger.log("=" * 60)
+
+    logger.log("1) 取得股價資料...")
+    price = get_or_fetch("price", lambda: fetch_prices(s, cfg), logger)
+    price = ensure_str_column(price, "股票代號")
+
+    logger.log("2) 取得月營收...")
+    revenue = get_or_fetch("revenue", lambda: fetch_revenue_latest(s, cfg), logger)
+    revenue = ensure_str_column(revenue, "股票代號")
+
+    logger.log("3) 取得 EPS...")
+    eps_data = get_or_fetch("eps", lambda: fetch_eps_latest(s, cfg), logger)
+    eps_data = ensure_str_column(eps_data, "股票代號")
+
+    logger.log("4) 合併基本面資料...")
+    df_sel = price.merge(revenue, on="股票代號", how="left")
+    df_sel = df_sel.merge(eps_data, on="股票代號", how="left")
+    df_sel = ensure_str_column(df_sel, "股票代號")
+
+    if "EPSYoY_顯示(%)" in eps_data.columns:
+        df_sel["EPSYoY_顯示(%)"] = df_sel["EPSYoY_顯示(%)"]
+    else:
+        if "EPSYoY_raw" in df_sel.columns:
+            df_sel["EPSYoY_顯示(%)"] = (df_sel["EPSYoY_raw"] * 100).fillna(0).round(2)
+        else:
+            df_sel["EPSYoY_顯示(%)"] = 0
+
+    df_sel["PE"] = df_sel["股價"] / df_sel["EPS本期"]
+    df_sel["殖利率(估)"] = (df_sel["EPS本期"] * 0.7) / df_sel["股價"]
+
+    logger.log(f"5) 評分（{'多因子' if cfg.use_enhanced_score else '簡易'}）...")
+    if cfg.use_enhanced_score:
+        df_sel = calculate_multi_factor_score(df_sel, cfg)
+    else:
+        df_sel = calculate_simple_score(df_sel, cfg)
+
+    df_sel = df_sel.sort_values("Score", ascending=False).reset_index(drop=True)
+    df_sel = _apply_strong_filter(df_sel, cfg, logger)
+    logger.log(f"✅ 篩選完成，共 {len(df_sel)} 檔候選")
+    return df_sel
+
+
 def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     s = build_session()
 
@@ -6580,6 +6636,9 @@ class StrategyGUI(tk.Tk):
         self._etf_tree.bind("<Motion>", self._on_etf_tree_hover)
         self._etf_tree.bind("<Leave>", self._on_etf_tree_leave)
         self._etf_tree.bind("<Button-1>", self._etf_toggle_check)
+        self._etf_tree.bind("<Motion>", self._etf_tree_hover_new)
+        self._etf_tree.bind("<Leave>", self._etf_tree_leave_new)
+        self._etf_tree.bind("<Button-3>", self._etf_tree_rclick_new)
 
         # 資料儲存（長期持有的 DataFrame）
         self._etf_long_df = None  # long-format raw（來自 build_etf_holdings_table）
@@ -6776,6 +6835,9 @@ class StrategyGUI(tk.Tk):
 
         # Click to toggle checkbox
         self._ms_tree.bind("<Button-1>", self._ms_toggle_check)
+        self._ms_tree.bind("<Motion>", self._ms_tree_hover)
+        self._ms_tree.bind("<Leave>", self._ms_tree_leave)
+        self._ms_tree.bind("<Button-3>", self._ms_tree_rclick)
 
         # 右鍵選單
         self._ms_tree.bind("<Button-3>", self._ms_show_context_menu)
@@ -7486,23 +7548,68 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _ms_toggle_check(self, event):
-        """點 Treeview 任一列 → toggle 勾選狀態"""
+        """點勾選欄 header → 全選/全不選；點任一列 → toggle"""
         region = self._ms_tree.identify("region", event.x, event.y)
-        if region != "cell":
-            return
         column = self._ms_tree.identify_column(event.x)
-        if column != "#1":  # 只有第一欄（勾選欄）可以 toggle
+
+        if region == "heading" and column == "#1":
+            all_checked = all(self._ms_checked.get(i, False) for i in self._ms_tree.get_children())
+            if all_checked:
+                self._ms_select_none()
+            else:
+                self._ms_select_all()
+            return
+
+        if region != "cell" or column != "#1":
             return
         item_id = self._ms_tree.identify_row(event.y)
         if not item_id:
             return
-
         current = self._ms_checked.get(item_id, False)
         self._ms_checked[item_id] = not current
         vals = list(self._ms_tree.item(item_id, "values"))
         vals[0] = "☑" if not current else "☐"
         self._ms_tree.item(item_id, values=vals,
                            tags=("checked" if not current else "unchecked",))
+
+
+    def _ms_tree_hover(self, event):
+        """手動選股 Treeview hover：黃色 highlight"""
+        region = self._ms_tree.identify("region", event.x, event.y)
+        if region != "cell":
+            self._ms_clear_hover()
+            return
+        iid = self._ms_tree.identify_row(event.y)
+        if not iid:
+            self._ms_clear_hover()
+            return
+        if iid == self._ms_hover_iid:
+            return
+        self._ms_clear_hover()
+        self._ms_hover_iid = iid
+        self._ms_tree.item(iid, tags=("hover",))
+
+    def _ms_tree_leave(self, event):
+        self._ms_clear_hover()
+
+    def _ms_clear_hover(self):
+        if not self._ms_hover_iid:
+            return
+        old_iid = self._ms_hover_iid
+        self._ms_hover_iid = None
+        try:
+            if old_iid in self._ms_tree.get_children():
+                checked = self._ms_checked.get(old_iid, False)
+                self._ms_tree.item(old_iid, tags=("checked" if checked else "unchecked",))
+        except Exception:
+            pass
+
+    def _ms_tree_rclick(self, event):
+        """右鍵：全選 / 全不選"""
+        menu = tk.Menu(self.manual_select_tab, tearoff=0)
+        menu.add_command(label="☑ 全選", command=self._ms_select_all)
+        menu.add_command(label="☐ 全不選", command=self._ms_select_none)
+        menu.post(event.x_root, event.y_root)
 
     def _ms_select_all(self):
         for item in self._ms_tree.get_children():
@@ -7528,6 +7635,45 @@ class StrategyGUI(tk.Tk):
     # ==========================================================
     # 【V0.9.5-etf】主動式 ETF Tab — Hover / Toggle / Filter / Refresh / Export
     # ==========================================================
+
+
+    def _etf_tree_hover_new(self, event):
+        """ETF Treeview hover（新版）：黃色 highlight"""
+        region = self._etf_tree.identify("region", event.x, event.y)
+        if region != "cell":
+            self._etf_clear_hover_new()
+            return
+        iid = self._etf_tree.identify_row(event.y)
+        if not iid:
+            self._etf_clear_hover_new()
+            return
+        if iid == getattr(self, "_etf_hover_iid_new", None):
+            return
+        self._etf_clear_hover_new()
+        self._etf_hover_iid_new = iid
+        self._etf_tree.item(iid, tags=("hover",))
+
+    def _etf_tree_leave_new(self, event):
+        self._etf_clear_hover_new()
+
+    def _etf_clear_hover_new(self):
+        iid = getattr(self, "_etf_hover_iid_new", None)
+        if not iid:
+            return
+        self._etf_hover_iid_new = None
+        try:
+            if iid in self._etf_tree.get_children():
+                checked = self._etf_checked.get(iid, False)
+                self._etf_tree.item(iid, tags=("checked" if checked else "unchecked",))
+        except Exception:
+            pass
+
+    def _etf_tree_rclick_new(self, event):
+        """右鍵：全選 / 全不選"""
+        menu = tk.Menu(self.etf_tab, tearoff=0)
+        menu.add_command(label="☑ 全選", command=self._etf_select_all)
+        menu.add_command(label="☐ 全不選", command=self._etf_select_none)
+        menu.post(event.x_root, event.y_root)
 
     def _on_etf_tree_hover(self, event):
         """【V0.9.5-etf】ETF Treeview hover：
@@ -7935,14 +8081,19 @@ class StrategyGUI(tk.Tk):
             self._etf_agg_df["股票代號"].astype(str).str.strip().isin(checked)
         ].copy()
 
-        filepath = filedialog.asksaveasfilename(
-            title="匯出 ETF 成份股持股",
-            defaultextension=".xlsx",
-            filetypes=["Excel 活頁簿 (*.xlsx)"],
-            initialfile=f"ETF成份股_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        filename = simpledialog.askstring(
+            "儲存名稱設定",
+            "請輸入檔案名稱（不含副檔名）:",
+            initialvalue=f"ETF成份股_{datetime.now().strftime('%Y%m%d_%H%M')}"
         )
-        if not filepath:
+        if not filename:
             return
+        filename = filename.strip()
+        if not filename:
+            return
+        if not filename.endswith(".xlsx"):
+            filename += ".xlsx"
+        filepath = os.path.join(SOURCE_DIR, filename)
 
         try:
             from openpyxl import Workbook
@@ -8085,14 +8236,19 @@ class StrategyGUI(tk.Tk):
             val = entry_var.get() if cb_var.get() else "不限"
             result[col_name] = val
 
-        filepath = filedialog.asksaveasfilename(
-            title="匯出手動選股結果",
-            defaultextension=".xlsx",
-            filetypes=["Excel 活頁簿 (*.xlsx)"],
-            initialfile=f"手動選股_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        filename = simpledialog.askstring(
+            "儲存名稱設定",
+            "請輸入檔案名稱（不含副檔名）:",
+            initialvalue=f"手動選股_{datetime.now().strftime('%Y%m%d_%H%M')}"
         )
-        if not filepath:
+        if not filename:
             return
+        filename = filename.strip()
+        if not filename:
+            return
+        if not filename.endswith(".xlsx"):
+            filename += ".xlsx"
+        filepath = os.path.join(SOURCE_DIR, filename)
 
         try:
             from openpyxl import Workbook
@@ -8931,19 +9087,16 @@ class StrategyGUI(tk.Tk):
         def worker():
             try:
                 # V0.9.5-tab-split-phase3 B-1：接收 result
-                # 【V0.9.5-tab-split-phase3-C】只跑選股（不回測）
-                result = run_pipeline(cfg, self.logger)
-                if result and "df_sel" in result:
-                    df_sel = result["df_sel"]
-                    self._last_select_df = df_sel
-                    # 清除舊勾選狀態
-                    self._select_checked = {}
-                    self.after(0, lambda df=df_sel: self._display_select_results(df))
-                    self.after(0, lambda: self.logger.log(
-                        f"✅ 選股完成，共 {len(df_sel)} 檔｜"
-                        f"勾選後按「💾 匯出股票清單」可匯出至 Excel\n"
-                        f"→ 餵入「策略參數 → 使用 Excel 股票清單」執行回測"
-                    ))
+                # 【V0.9.5-tab-split-phase3-C Fix2】只跑篩選（不回測）
+                df_sel = _run_selection_only(cfg, self.logger)
+                self._last_select_df = df_sel
+                self._select_checked = {}
+                self.after(0, lambda df=df_sel: self._display_select_results(df))
+                self.after(0, lambda: self.logger.log(
+                    f"✅ 篩選完成，共 {len(df_sel)} 檔｜"
+                    f"勾選後按「💾 匯出股票清單」可匯出至 Excel\n"
+                    f"→ 餵入「策略參數 → 使用 Excel 股票清單」執行回測"
+                ))
             except Exception as e:
                 self.logger.log(f"❌ 執行失敗：{e}")
                 import traceback
@@ -9153,14 +9306,19 @@ class StrategyGUI(tk.Tk):
             messagebox.showwarning("無勾選", "選股結果中找不到已勾選的股票代號，請重新勾選")
             return
 
-        filepath = filedialog.asksaveasfilename(
-            title="匯出系統選股結果",
-            defaultextension=".xlsx",
-            filetypes=["Excel 活頁簿 (*.xlsx)"],
-            initialfile=f"系統選股_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        filename = simpledialog.askstring(
+            "儲存名稱設定",
+            "請輸入檔案名稱（不含副檔名）:",
+            initialvalue=f"系統選股_{datetime.now().strftime('%Y%m%d_%H%M')}"
         )
-        if not filepath:
+        if not filename:
             return
+        filename = filename.strip()
+        if not filename:
+            return
+        if not filename.endswith(".xlsx"):
+            filename += ".xlsx"
+        filepath = os.path.join(SOURCE_DIR, filename)
 
         try:
             from openpyxl import Workbook
@@ -9181,7 +9339,6 @@ class StrategyGUI(tk.Tk):
                 cell.alignment = Alignment(horizontal="center")
 
             for row_data in result.values.tolist():
-                # NaN/None → 空字串（避免 Excel 顯示 nan）
                 ws.append([
                     "" if (v is None or (isinstance(v, float) and pd.isna(v))) else v
                     for v in row_data
@@ -9192,16 +9349,14 @@ class StrategyGUI(tk.Tk):
                 ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 30)
 
             wb.save(filepath)
-            self.logger.log(f"📤 [B-3] 已匯出 {len(result)} 檔到 {filepath}")
+            self.logger.log(f"📤 已匯出 {len(result)} 檔到 {filepath}")
             messagebox.showinfo(
                 "匯出成功",
-                f"已匯出 {len(result)} 檔\n→ {filepath}\n\n"
-                f"💡 這個檔案可以直接給「策略參數 → 使用 Excel 股票清單」讀取使用\n"
-                f"   （只取「股票代號」欄、其他欄位會被忽略）",
+                f"已匯出 {len(result)} 檔\n\n📂 已儲存至 source/ 資料夾\n💡 這個檔案可以直接給「策略參數 → 使用 Excel 股票清單」讀取使用",
             )
         except Exception as e:
             messagebox.showerror("匯出失敗", str(e))
-            self.logger.log(f"❌ [B-3] 匯出失敗：{e}")
+            self.logger.log(f"❌ 匯出失敗：{e}")
 
 
     # ══════════════════════════════════════════════════════════════
@@ -9257,18 +9412,32 @@ class StrategyGUI(tk.Tk):
         self._select_hover_iids.pop(id(tree), None)
 
     def _on_select_tree_click(self, event):
-        """點任一列 → toggle 該列勾選狀態（支援 select_tree 和 bt_tree）"""
+        """點勾選欄 header → 全選/全不選；點任一列 → toggle"""
         tree = event.widget
         region = tree.identify("region", event.x, event.y)
-        if region != "cell":
-            return
         column = tree.identify_column(event.x)
-        if column != "#1":
+
+        # header click → 全選/全不選
+        if region == "heading" and column == "#1":
+            if tree == self.select_tree:
+                checked_dict = self._select_checked
+            else:
+                if not hasattr(self, "_bt_checked"):
+                    self._bt_checked = {}
+                checked_dict = self._bt_checked
+            all_checked = all(checked_dict.get(item, False) for item in tree.get_children())
+            if all_checked:
+                self._select_none(tree)
+            else:
+                self._select_all(tree)
+            return
+
+        # cell click → toggle
+        if region != "cell" or column != "#1":
             return
         iid = tree.identify_row(event.y)
         if not iid:
             return
-        # 決定用哪個 checked dict
         if tree == self.select_tree:
             checked_dict = self._select_checked
         else:
@@ -9282,11 +9451,11 @@ class StrategyGUI(tk.Tk):
         tree.item(iid, values=vals, tags=("checked" if not current else "unchecked",))
 
     def _on_select_tree_rclick(self, event):
-        """右鍵：全選 / 全不選（支援兩個 tree）"""
+        """右鍵：全選 / 全不選"""
         tree = event.widget
         menu = tk.Menu(tree, tearoff=0)
-        menu.add_command(label="☑ 全選", command=lambda: self._select_all(tree))
-        menu.add_command(label="☐ 全不選", command=lambda: self._select_none(tree))
+        menu.add_command(label="☑ 全選", command=lambda t=tree: self._select_all(t))
+        menu.add_command(label="☐ 全不選", command=lambda t=tree: self._select_none(t))
         menu.post(event.x_root, event.y_root)
 
     def _select_all(self, tree=None):
