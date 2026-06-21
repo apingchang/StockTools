@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 14:05 (Asia/Taipei)
+最後更新: 2026-06-21 16:28 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5543,6 +5543,12 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         "df_sel": df_sel,
         "top10_codes": _top10_codes,
         "out_file": out_file,
+        "pf_kpi": pf_kpi,
+        "sig_summary": sig_summary,
+        "reason_stats": reason_stats,
+        "yearly_perf": yearly_perf,
+        "capital": cfg.capital,
+        "final_equity": eq["Equity"].iloc[-1] if not eq.empty else 0,
     }
 
 
@@ -9168,55 +9174,123 @@ class StrategyGUI(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _display_bt_results(self, result):
-        """【V0.9.5-tab-split-phase3-C】把回測結果顯示在 bt_tree"""
-        bt_tree = getattr(self, "bt_tree", None)
+        """【V0.9.5-tab-split-phase3-C Fix6】把回測 KPI 結果顯示在 bt_tree"""
+        bt_tree = getattr(self, 'bt_tree', None)
         if bt_tree is None:
             self.logger.log("⚠️ 回測結果 Treeview 未找到")
             return
 
-        df_sel = result.get("df_sel", None)
-        if df_sel is None or df_sel.empty:
-            self.logger.log("⚠️ 回測結果為空")
-            return
-
-        # 清空 + 重置勾選狀態
         for item in bt_tree.get_children():
             bt_tree.delete(item)
-        self._bt_checked = {}
 
-        # 設定欄位
+        def _fmt(v, na="--"):
+            try:
+                if pd.isna(v) or v is None:
+                    return na
+                return format(float(v), ".2f")
+            except Exception:
+                return na
+
+        def _icol(v, na="--"):
+            try:
+                if pd.isna(v) or v is None:
+                    return na
+                return format(int(float(v)), ".0f")
+            except Exception:
+                return na
+
         if not bt_tree["columns"]:
-            cols = ("代號", "名稱", "Score", "營收YoY(%)", "EPSYoY(%)", "PE", "殖利率(%)")
-            col_widths = (65, 100, 55, 80, 75, 50, 70)
+            cols = ("指標", "數值1", "數值2", "數值3", "數值4", "數值5", "數值6", "數值7")
+            col_widths = (140, 100, 90, 80, 70, 70, 70, 70)
             bt_tree.configure(columns=cols)
             for col, w in zip(cols, col_widths):
                 bt_tree.heading(col, text=col)
                 bt_tree.column(col, width=w, anchor="center")
+            bt_tree.column("#0", width=0)
 
-        for _, row in df_sel.head(60).iterrows():
-            code = str(row.get("股票代號", "")).strip()
-            if not code:
-                continue
-            name = str(row.get("公司名稱_來源", row.get("股票名稱", "")))
-            score = row.get("Score", 0)
-            rev = row.get("營收YoY(%)", 0)
-            ey = row.get("EPSYoY_顯示(%)", 0)
-            pe = row.get("PE", 0)
-            yld = row.get("殖利率(估)", 0)
+        BLANK = ("", "", "", "", "", "", "", "")
 
-            def _fmt(v, fmt=".2f", na="--"):
-                try:
-                    if pd.isna(v) or v is None:
-                        return na
-                    return format(float(v), fmt)
-                except Exception:
-                    return na
+        # ── Portfolio-level KPI ──────────────────────────────────────────
+        bt_tree.insert("", "end", iid="hdr_pf", values=("📊 投組層級 KPI", "", "", "", "", "", "", ""))
+        pf_kpi = result.get("pf_kpi")
+        if pf_kpi is not None and not pf_kpi.empty:
+            row = pf_kpi.iloc[0]
+            items = [
+                ("CAGR (%)", _fmt(row.get("CAGR(%)"))),
+                ("MDD (%)", _fmt(row.get("MDD(%)"))),
+                ("Sharpe", _fmt(row.get("Sharpe"))),
+                ("Sortino", _fmt(row.get("Sortino"))),
+                ("總交易次數", _icol(row.get("Trades"))),
+                ("最大連虧次數", _icol(row.get("MaxLosingStreak"))),
+                ("Profit Factor", _fmt(row.get("ProfitFactor"))),
+            ]
+            for i, (label, val) in enumerate(items):
+                row_data = [label, val] + [""] * 6
+                bt_tree.insert("", "end", iid=f"pf_{i}", values=tuple(row_data))
 
-            bt_tree.insert("", "end", iid=code, values=(
-                code, name,
-                _fmt(score), _fmt(rev), _fmt(ey), _fmt(pe), _fmt(yld)
-            ))
+        # ── 實收金額 ──────────────────────────────────────────────────
+        capital = result.get("capital", 0)
+        final_equity = result.get("final_equity", 0)
+        if capital and final_equity:
+            total_ret = (final_equity / capital - 1) * 100
+            bt_tree.insert("", "end", iid="hdr_money", values=("💰 資金摘要", "", "", "", "", "", "", ""))
+            money_items = [
+                ("初始本金 (元)", f"{capital:,.0f}"),
+                ("最終權益 (元)", f"{final_equity:,.0f}"),
+                ("總報酬 (%)", f"{total_ret:+.1f}%"),
+                ("標準化起始→最終", f"1.0000  →  {final_equity/capital:.4f}"),
+            ]
+            for i, (label, val) in enumerate(money_items):
+                row_data = [label, val] + [""] * 6
+                bt_tree.insert("", "end", iid=f"money_{i}", values=tuple(row_data))
 
+        # ── Signal-level KPI ────────────────────────────────────────────
+        bt_tree.insert("", "end", iid="hdr_sig", values=("📈 訊號層級 KPI", "", "", "", "", "", "", ""))
+        sig = result.get("sig_summary")
+        if sig is not None and not sig.empty:
+            row = sig.iloc[0]
+            items = [
+                ("訊號數", _icol(row.get("訊號數"))),
+                ("平均報酬 (%)", _fmt(row.get("事件型平均報酬_扣成本(%)"))),
+                ("勝率 (%)", _fmt(row.get("事件型勝率_扣成本(%)"))),
+                ("中位數報酬 (%)", _fmt(row.get("事件型中位數_扣成本(%)"))),
+                ("Profit Factor", _fmt(row.get("ProfitFactor"))),
+            ]
+            for i, (label, val) in enumerate(items):
+                row_data = [label, val] + [""] * 6
+                bt_tree.insert("", "end", iid=f"sig_{i}", values=tuple(row_data))
+
+        # ── 年度績效 ──────────────────────────────────────────────────
+        yearly = result.get("yearly_perf")
+        if yearly is not None and not yearly.empty:
+            bt_tree.insert("", "end", iid="hdr_yr", values=("📅 年度績效", "年份", "交易次數", "勝率(%)", "平均報酬(%)", "Profit Factor", "", ""))
+            for i, (_, yr) in enumerate(yearly.iterrows()):
+                row_data = [
+                    "",
+                    _icol(yr.get("year")),
+                    _icol(yr.get("trades")),
+                    _fmt(yr.get("win_rate(%)")),
+                    _fmt(yr.get("avg_return(%)")),
+                    _fmt(yr.get("profit_factor")),
+                    "", ""
+                ]
+                bt_tree.insert("", "end", iid=f"yr_{i}", values=tuple(row_data))
+
+        # ── 出場原因統計 ──────────────────────────────────────────────
+        reason = result.get("reason_stats")
+        if reason is not None and not reason.empty:
+            bt_tree.insert("", "end", iid="hdr_exit", values=("🚪 出場原因統計", "", "", "", "", "", "", ""))
+            for i, (_, rw) in enumerate(reason.iterrows()):
+                row_data = [
+                    "",
+                    str(rw.get("index", "")),
+                    _icol(rw.get("次數")),
+                    _fmt(rw.get("比例(%)")),
+                    "", "", "", ""
+                ]
+                bt_tree.insert("", "end", iid=f"exit_{i}", values=tuple(row_data))
+
+        self.logger.log("✅ 回測結果已顯示於上方表格")
 
     def _display_select_results(self, df_sel):
         """【V0.9.5-tab-split-phase3 B-1】把選股結果顯示在 select_tree
