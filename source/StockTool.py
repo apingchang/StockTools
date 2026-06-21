@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 17:38 (Asia/Taipei)
+最後更新: 2026-06-21 20:40 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -6757,11 +6757,13 @@ class StrategyGUI(tk.Tk):
         self._etf_popup = None  # Toplevel 視窗（若有）
 
         # Bind events
-        self._etf_tree.bind("<Motion>", self._on_etf_tree_hover)
-        self._etf_tree.bind("<Leave>", self._on_etf_tree_leave)
+        # Fix12 (2026-06-21): 原本重複綁 <Motion>、<Leave>，
+        # 後綁定的 _etf_tree_hover_new / _leave_new 覆蓋了 _on_etf_tree_hover / _leave
+        # → popup 邏輯 (顯示 ETF 持股) 永遠不會被觸發
+        # 修法：合併成一個 handler、保留新版的 highlight + 舊版的 popup 邏輯
+        self._etf_tree.bind("<Motion>", self._etf_tree_hover_combined)
+        self._etf_tree.bind("<Leave>", self._etf_tree_leave_combined)
         self._etf_tree.bind("<Button-1>", self._etf_toggle_check)
-        self._etf_tree.bind("<Motion>", self._etf_tree_hover_new)
-        self._etf_tree.bind("<Leave>", self._etf_tree_leave_new)
         self._etf_tree.bind("<Button-3>", self._etf_tree_rclick_new)
 
         # 資料儲存（長期持有的 DataFrame）
@@ -7762,23 +7764,52 @@ class StrategyGUI(tk.Tk):
 
 
     def _etf_tree_hover_new(self, event):
-        """ETF Treeview hover（新版）：黃色 highlight"""
+        """【Fix12 廢棄】改成 _etf_tree_hover_combined"""
+
+    def _etf_tree_hover_combined(self, event):
+        """【V0.9.5-tab-split-phase3-C Fix12】ETF Treeview hover：
+        - 移到 cell（任意欄） → 該列 highlight 黃色
+        - 移到「ETF數」欄（column #5） → popup 顯示包含此股的 ETF 列表
+        - 移到「今日異動」欄（column #6） → popup 顯示異動明細
+        - 移到非 cell 區（捲軸/header） → 清除 hover + 關 popup
+        """
         region = self._etf_tree.identify("region", event.x, event.y)
         if region != "cell":
-            self._etf_clear_hover_new()
+            self._clear_etf_hover()
+            self._close_etf_popup()
             return
         iid = self._etf_tree.identify_row(event.y)
         if not iid:
+            self._clear_etf_hover()
+            self._close_etf_popup()
+            return
+
+        column = self._etf_tree.identify_column(event.x)
+
+        # Highlight（新版的 _etf_hover_iid_new 邏輯）
+        if iid != getattr(self, "_etf_hover_iid_new", None):
             self._etf_clear_hover_new()
-            return
-        if iid == getattr(self, "_etf_hover_iid_new", None):
-            return
-        self._etf_clear_hover_new()
-        self._etf_hover_iid_new = iid
-        self._etf_tree.item(iid, tags=("hover",))
+            self._etf_hover_iid_new = iid
+            self._etf_tree.item(iid, tags=("hover",))
+        # 同步舊版的 _etf_hover_iid（讓 _clear_etf_hover 也能運作）
+        self._etf_hover_iid = iid
+
+        # Popup（舊版的 _show_etf_popup 邏輯）
+        if column == "#5":
+            self._show_etf_popup(iid, event.x_root, event.y_root, mode="etf_list")
+        elif column == "#6":
+            self._show_etf_popup(iid, event.x_root, event.y_root, mode="changes")
+        else:
+            self._close_etf_popup()
 
     def _etf_tree_leave_new(self, event):
+        """【Fix12 廢棄】"""
+
+    def _etf_tree_leave_combined(self, event):
+        """【V0.9.5-tab-split-phase3-C Fix12】離開 Treeview → 清除 hover + 關 popup"""
         self._etf_clear_hover_new()
+        self._clear_etf_hover()
+        self._close_etf_popup()
 
     def _etf_clear_hover_new(self):
         iid = getattr(self, "_etf_hover_iid_new", None)
