@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 16:52 (Asia/Taipei)
+最後更新: 2026-06-21 16:54 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -4338,7 +4338,49 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     else:
         prev = prev_from_csv
         if prev.empty:
-            print(f"⚠️ 去年同期 {prev_year}Q{latest_q} 沒有資料（CSV 無、歷史庫也無）→ YoY 將全 NA")
+            print(f"⚠️ 去年同期 {prev_year}Q{latest_q} 沒有資料 → 嘗試從 FinMind 補抓...")
+            # Fix8: FinMind TaiwanStockFinancialReport 補抓去年同期 EPS
+            try:
+                import requests as _req
+                _finmind_url = "https://api.finmindtrade.com/api/v4/data"
+                _finmind_params = {
+                    "dataset": "TaiwanStockFinancialReport",
+                    "data_date": f"{prev_year}-{latest_q}",
+                    "api_token": getattr(cfg, 'finmind_token', ''),
+                }
+                _r = _req.get(_finmind_url, params=_finmind_params, timeout=15)
+                if _r.status_code == 200:
+                    _fj = _r.json()
+                    if _fj.get("success") and _fj.get("data"):
+                        _fdf = pd.DataFrame(_fj["data"])
+                        _eps_col = next((c for c in ["基本每股盈餘", "每股盈餘", "EPS"] if c in _fdf.columns), None)
+                        _code_col = next((c for c in ["stock_id", "股票代號"] if c in _fdf.columns), None)
+                        if _eps_col and _code_col:
+                            _fprev = _fdf[[_code_col, _eps_col]].rename(
+                                columns={_code_col: "股票代號", _eps_col: "EPS去年"}
+                            )
+                            _fprev["股票代號"] = _fprev["股票代號"].astype(str).str.strip()
+                            _fprev["EPS去年"] = pd.to_numeric(_fprev["EPS去年"], errors="coerce")
+                            _fprev = _fprev.dropna(subset=["EPS去年"])
+                            # 寫入歷史庫
+                            _rows = [
+                                (str(r["股票代號"]).strip(), prev_year, latest_q,
+                                 float(r["EPS去年"]), "finmind")
+                                for _, r in _fprev.iterrows()
+                            ]
+                            _upsert_eps_history(cfg.eps_history_db, _rows)
+                            prev = _fprev.copy()
+                            print(f"   FinMind 補抓: {len(prev)} 檔有 {prev_year}Q{latest_q} EPS")
+                        else:
+                            print(f"   FinMind 無 EPS 欄位")
+                    else:
+                        print(f"   FinMind 回應失敗: {_fj}")
+                else:
+                    print(f"   FinMind HTTP {_r.status_code}")
+            except Exception as _e:
+                print(f"   FinMind 補抓失敗: {_e}")
+            if prev.empty:
+                print(f"⚠️ 去年同期 {prev_year}Q{latest_q} 沒有資料（CSV 無、歷史庫也無）→ YoY 將全 NA")
 
     out = cur.merge(prev, on="股票代號", how="left")
 
