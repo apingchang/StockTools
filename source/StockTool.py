@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-B2 (2026-06-21 00:30)      ║
+║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-B3 (2026-06-21 09:10)      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-tab-split-phase3-B2
-最後更新: 2026-06-21 02:12 (Asia/Taipei)
+Version: v0.9.5-tab-split-phase3-B3
+最後更新: 2026-06-21 09:14 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1433,7 +1433,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-tab-split-phase3-B2"
+VERSION = "v0.9.5-tab-split-phase3-B3"
 
 
 import io
@@ -3794,7 +3794,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-B2",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-B3",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3837,7 +3837,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-B2",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-B3",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -5728,42 +5728,53 @@ class StrategyGUI(tk.Tk):
         self._top_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
         self.notebook = ttk.Notebook(self._top_frame)
 
-        # Tab 1：系統選股（V0.9.5 階段 1：所有參數先放這邊）
+        # 【V0.9.5-tab-split-phase3-B3】tab 順序重排（William 09:02 要求）
+        # 新順序：系統選股 → 主動式 ETF → 手動選股 → 買賣記錄 → 回測模擬
+
+        # Tab 1：系統選股
         self.select_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.select_tab, text="📊 系統選股")
 
-        # Tab 2：回測模擬（V0.9.5 階段 1：placeholder）
-        self.backtest_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.backtest_tab, text="🧪 回測模擬")
-
-        # Tab 2：買賣記錄（V0.9.4 新增）
-        self.portfolio_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.portfolio_tab, text="📒 買賣記錄")
-        self._build_portfolio_tab(self.portfolio_tab)
-
-        # Tab 3：手動選股（V0.9.5 新增）
-        self.manual_select_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.manual_select_tab, text="🔍 手動選股")
-        self._build_manual_select_tab(self.manual_select_tab)
-
-        # 【V0.9.5-etf】主動式 ETF 持股 Tab
+        # Tab 2：主動式 ETF（從 Tab 5 拉到 Tab 2）
         self.etf_tab = ttk.Frame(self.notebook)
-
-        # 【V0.9.5-etf-history】ETF 持股歷史庫初始化
         self._init_etf_history()
         self.notebook.add(self.etf_tab, text="📊 主動式 ETF")
         self._build_etf_tab(self.etf_tab)
 
-        # V0.9.5-tab-split Phase 2：建構「回測模擬」tab 內容
+        # Tab 3：手動選股（從 Tab 4 拉到 Tab 3）
+        self.manual_select_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.manual_select_tab, text="🔍 手動選股")
+        self._build_manual_select_tab(self.manual_select_tab)
+
+        # Tab 4：買賣記錄（從 Tab 3 拉到 Tab 4）
+        self.portfolio_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.portfolio_tab, text="📒 買賣記錄")
+        self._build_portfolio_tab(self.portfolio_tab)
+
+        # Tab 5：回測模擬（從 Tab 2 拉到 Tab 5）
+        self.backtest_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.backtest_tab, text="🧪 回測模擬")
         self._build_backtest_tab(self.backtest_tab)
 
         # 綁定 Tab 切換 → 切到買賣記錄時自動 refresh
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         # V0.9.5-tab-split Phase 3：兩個 tab 用 _build_tab_layout（左 params + 右 results）
-        left, self.select_tree = self._build_tab_layout(self.select_tab)
-        bt_left, self.backtest_tree = self._build_tab_layout(self.backtest_tab)
+        # 【V0.9.5-tab-split-phase3-B3】改回傳 (left, right_frame, tree)、select_tab 加 export 按鈕
+        left, self.select_right, self.select_tree = self._build_tab_layout(self.select_tab)
+        bt_left, self.backtest_right, self.backtest_tree = self._build_tab_layout(self.backtest_tab)
         self._bt_left = bt_left
+
+        # 【V0.9.5-tab-split-phase3-B3】「💾 匯出股票清單」按鈕（select_tab）
+        # 放在 right_top 內、跟 title 同一行
+        self.export_select_btn = ttk.Button(
+            self.select_right.winfo_children()[0],  # right_top
+            text="💾 匯出股票清單",
+            command=self._export_select_results_excel,
+            state="disabled",
+        )
+        self.export_select_btn.pack(side="right")
+        self._last_select_df = None  # 記住最近一次選股結果
 
         ttk.Label(left, text="📊 系統選股參數", font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 8))
 
@@ -5934,11 +5945,16 @@ class StrategyGUI(tk.Tk):
     def _build_tab_layout(self, parent):
         """【V0.9.5-tab-split Phase 3】建一個標準的「左 params + 右 results」tab layout
 
+        【V0.9.5-tab-split-phase3-B3】改回傳值多一個 right_frame
+        - 原本 (left, tree) → 改 (left, right_frame, tree)
+        - right_frame 給 caller 加按鈕用（select_tab 加「💾 匯出股票清單」）
+        - backtest_tab 暫不加、但簽名統一
+
         Args:
             parent: parent widget（select_tab 或 backtest_tab）
 
         Returns:
-            (left_scrollable_frame, results_tree): 兩個 frame 給後續使用
+            (left_scrollable_frame, right_frame, results_tree)
         """
         container = ttk.Frame(parent)
         container.pack(fill="both", expand=True, padx=4, pady=4)
@@ -5962,9 +5978,13 @@ class StrategyGUI(tk.Tk):
         right_frame = ttk.Frame(container)
         right_frame.pack(side="left", fill="both", expand=True, padx=(10, 0))
 
-        # 標題
-        title_label = ttk.Label(right_frame, text="📋 結果（執行後顯示）", font=("Segoe UI", 11, "bold"))
-        title_label.pack(anchor="w", pady=(0, 5))
+        # 【V0.9.5-tab-split-phase3-B3】title 與 export 按鈕放同一行
+        # (回傳 right_frame 給 caller、用 caller 決定要不要加按鈕)
+        right_top = ttk.Frame(right_frame)
+        right_top.pack(fill="x", pady=(0, 5))
+        title_label = ttk.Label(right_top, text="📋 結果（執行後顯示）", font=("Segoe UI", 11, "bold"))
+        title_label.pack(side="left", anchor="w")
+        # export 按鈕由 caller 決定要不要加（select_tab 加、backtest_tab 暫不加）
 
         # Treeview
         tree_frame = ttk.Frame(right_frame)
@@ -5978,7 +5998,8 @@ class StrategyGUI(tk.Tk):
         tree_scrollbar_y.pack(side="right", fill="y")
         tree_scrollbar_x.pack(side="bottom", fill="x")
 
-        return left_scrollable_frame, results_tree
+        # 【V0.9.5-tab-split-phase3-B3】多回傳 right_frame
+        return left_scrollable_frame, right_frame, results_tree
 
     def _build_backtest_tab(self, parent):
         """【V0.9.5-tab-split Phase 2】回測模擬 tab 內容
@@ -8904,6 +8925,8 @@ class StrategyGUI(tk.Tk):
                 if result and "df_sel" in result:
                     # 用 after 把 GUI 更新推回主 thread
                     df_sel = result["df_sel"]
+                    # 【V0.9.5-tab-split-phase3-B3】存 df_sel 給匯出按鈕用、enable 按鈕
+                    self._last_select_df = df_sel
                     self.after(0, lambda df=df_sel: self._display_select_results(df))
             except Exception as e:
                 self.logger.log(f"❌ 執行失敗：{e}")
@@ -8972,6 +8995,75 @@ class StrategyGUI(tk.Tk):
             display_count += 1
 
         self.logger.log(f"📋 已顯示 {display_count} 筆選股結果（總共 {len(df_sel)} 筆）")
+        # 【V0.9.5-tab-split-phase3-B3】enable 匯出按鈕
+        if hasattr(self, "export_select_btn"):
+            self.export_select_btn.config(state="normal")
+            self.logger.log("💾 [B-3] 匯出股票清單按鈕已啟用")
+
+    def _export_select_results_excel(self):
+        """【V0.9.5-tab-split-phase3-B3】匯出系統選股結果到 Excel
+
+        跟手動選股 / ETF 的匯出邏輯類似：
+        - 沒資料 → 跳 warning
+        - 詢問存檔位置、預設檔名 系統選股_YYYYMMDD_HHMM.xlsx
+        - 寫 xlsx（openpyxl）+ 標題列高亮 + 自動欄寬 + NaN 處理
+        - 提示：可直接餵回「使用 Excel 股票清單」
+        """
+        if not hasattr(self, "_last_select_df") or self._last_select_df is None or self._last_select_df.empty:
+            messagebox.showwarning("無資料", "請先按「▶ 執行系統選股」產生結果")
+            return
+
+        result = self._last_select_df.copy()
+
+        filepath = filedialog.asksaveasfilename(
+            title="匯出系統選股結果",
+            defaultextension=".xlsx",
+            filetypes=["Excel 活頁簿 (*.xlsx)"],
+            initialfile=f"系統選股_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        )
+        if not filepath:
+            return
+
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment
+
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "系統選股"
+
+            headers = list(result.columns)
+            ws.append(headers)
+
+            header_fill = PatternFill("solid", fgColor="4472C4")
+            header_font = Font(color="FFFFFF", bold=True)
+            for cell in ws[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center")
+
+            for row_data in result.values.tolist():
+                # NaN/None → 空字串（避免 Excel 顯示 nan）
+                ws.append([
+                    "" if (v is None or (isinstance(v, float) and pd.isna(v))) else v
+                    for v in row_data
+                ])
+
+            for col in ws.columns:
+                max_len = max(len(str(cell.value or "")) for cell in col)
+                ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 30)
+
+            wb.save(filepath)
+            self.logger.log(f"📤 [B-3] 已匯出 {len(result)} 檔到 {filepath}")
+            messagebox.showinfo(
+                "匯出成功",
+                f"已匯出 {len(result)} 檔\n→ {filepath}\n\n"
+                f"💡 這個檔案可以直接給「策略參數 → 使用 Excel 股票清單」讀取使用\n"
+                f"   （只取「股票代號」欄、其他欄位會被忽略）",
+            )
+        except Exception as e:
+            messagebox.showerror("匯出失敗", str(e))
+            self.logger.log(f"❌ [B-3] 匯出失敗：{e}")
 
 
 if __name__ == "__main__":
