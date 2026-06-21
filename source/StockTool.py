@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 21:17 (Asia/Taipei)
+最後更新: 2026-06-21 21:39 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5985,6 +5985,9 @@ class StrategyGUI(tk.Tk):
         self.adv_btn = ttk.Button(score_frame, text="⚙ 簡易評分進階設定", command=self._open_simple_score_settings)
         self.adv_btn.pack(fill="x", pady=(6, 0))
 
+        # Fix15 (2026-06-21): 回測模擬 Preset bar 移到最頂端
+        self._add_preset_bar(bt_left, "backtest")
+
         # 3. 技術指標（V0.9.5-tab-split Phase 2：移到回測模擬 tab）
         tech_frame = ttk.LabelFrame(bt_left, text="📈 技術指標 (強化版)", padding=5)
         tech_frame.pack(fill="x", pady=5)
@@ -6075,9 +6078,6 @@ class StrategyGUI(tk.Tk):
         ).pack(anchor="w", pady=(5, 0))
         ttk.Label(source_frame, text="  ※ 使用 Excel 股票清單 + 不經過買點過濾（強制滿倉）", foreground="gray").pack(anchor="w")
 
-        # Fix14: 回測模擬 Preset bar
-        self._add_preset_bar(bt_left, "backtest")
-
         # 7. 回測參數（Fix5：持股檔數+總投入資金移至此）
         bt_params_frame = ttk.LabelFrame(bt_left, text="📊 回測參數", padding=5)
         bt_params_frame.pack(fill="x", pady=5)
@@ -6099,12 +6099,8 @@ class StrategyGUI(tk.Tk):
         self.run_btn = ttk.Button(btn_frame, text="▶ 執行系統選股", command=self._on_run)
         self.run_btn.pack(fill="x", pady=2)
 
-        self.save_btn = ttk.Button(btn_frame, text="💾 儲存設定", command=self._on_save_config)
-        self.save_btn.pack(fill="x", pady=2)
-
-        self.reset_btn = ttk.Button(btn_frame, text="🔄 載入預設", command=self._on_reset_config)
-        self.reset_btn.pack(fill="x", pady=2)
-
+        # Fix15 (2026-06-21): 移除「💾 儲存設定」「🔄 載入預設」按鈕
+        # Preset bar 已取代這兩個功能（手動選股也是這樣）
         self.clear_btn = ttk.Button(btn_frame, text="🗑 清除控制台", command=self._on_clear_console)
         self.clear_btn.pack(fill="x", pady=2)
 
