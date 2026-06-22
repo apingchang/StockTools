@@ -1,14 +1,32 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-F (2026-06-22 14:00)       ║
+║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-G (2026-06-22 14:15)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-tab-split-phase3-F
-最後更新: 2026-06-22 13:56 (Asia/Taipei)
+Version: v0.9.5-tab-split-phase3-G
+最後更新: 2026-06-22 14:15 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-tab-split-phase3-G 新增內容】2026-06-22 14:15 (William 要求）
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 14:10 反映：ETF 選股和手動選股的「📤 匯出 Excel」按鈕位置和名稱都跟系統選股的「💾 匯出股票清單」不一致、改一致
+【修法】
+1. ETF tab 拿掉左邊參數區的「📤 匯出 Excel」按鈕
+2. 手動選股 tab 拿掉左邊參數區的「📤 匯出 Excel」按鈕
+3. 三個 tab 統一在右上面板右邊放「💾 匯出股票清單」按鈕（跟 select_tab 同名、同位置）
+4. ETF / 手動選股 right_frame 結構調整成跟 select_tab 一致：
+   - ttk.Frame（不是 LabelFrame）→ right_top（title + button）→ tree_frame
+5. 初始 state="disabled"、有資料時 _ms_display_results / _etf_display_results 結尾 enable
+6. fileheader / VERSION / User-Agent 同步到 phase3-G
+7. 8 個 pytest test 守住
+
+【評估】
+- 拿掉 2 個按鈕、加 2 個按鈕：總按鈕數不變、UX 完全一致
+- 風險：低（_ms_export_excel / _etf_export_excel 簽名不變、按鈕初始 disabled 避免誤觸）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-tab-split-phase3-F 新增內容】2026-06-22 14:00 (William 要求）
@@ -1491,7 +1509,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-tab-split-phase3-F"
+VERSION = "v0.9.5-tab-split-phase3-G"
 
 
 import io
@@ -3921,7 +3939,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-F",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-G",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3964,7 +3982,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-F",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-G",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -7053,15 +7071,34 @@ class StrategyGUI(tk.Tk):
         #   結果畫面勾選欄 header 已是 ☐/☑/▣ 動態 checkbox、可點全選/全不選
         #   參數區的全選/全不選按鈕重複、拿掉
         #   （_etf_select_all / _etf_select_none methods 保留、header click 仍會叫）
-        ttk.Button(btn_row, text="📤 匯出 Excel",
-                   command=self._etf_export_excel).pack(fill="x", pady=1)
+        # 【V0.9.5-tab-split-phase3-G】2026-06-22 William 反映：
+        #   匯出按鈕從左邊參數區移到右上面板右邊、跟系統選股一致
+        #   文字統一「💾 匯出股票清單」
 
-        # ── 右面板：Treeview ----
-        right_frame = ttk.LabelFrame(paned, text="📊 ETF 成份股持股統計（依 ETF 數排序）", padding=4)
+        # ── 右面板：title + export 按鈕 + Treeview（跟系統選股同結構）──
+        right_frame = ttk.Frame(paned)
         paned.add(right_frame, weight=1)
 
+        # 右上面板：title 左邊、export 按鈕右邊
+        right_top = ttk.Frame(right_frame)
+        right_top.pack(fill="x", pady=(0, 5))
+        ttk.Label(right_top, text="📊 ETF 成份股持股統計（依 ETF 數排序）",
+                  font=("Segoe UI", 11, "bold")).pack(side="left", anchor="w")
+        # 【V0.9.5-tab-split-phase3-G】跟 select_tab 同名、同位置
+        self.export_etf_btn = ttk.Button(
+            right_top,
+            text="💾 匯出股票清單",
+            command=self._etf_export_excel,
+            state="disabled",
+        )
+        self.export_etf_btn.pack(side="right")
+
+        # Treeview 子 frame
+        tree_frame = ttk.Frame(right_frame)
+        tree_frame.pack(fill="both", expand=True)
+
         cols = ("勾選", "代號", "名稱", "收盤價", "ETF數", "今日異動")
-        self._etf_tree = ttk.Treeview(right_frame, columns=cols, show="headings",
+        self._etf_tree = ttk.Treeview(tree_frame, columns=cols, show="headings",
                                       selectmode="none", height=25)
         col_widths = (40, 70, 130, 80, 70, 100)
         for col, w in zip(cols, col_widths):
@@ -7074,10 +7111,10 @@ class StrategyGUI(tk.Tk):
         except (IndexError, tk.TclError):
             pass
 
-        etf_scroll_y = ttk.Scrollbar(right_frame, orient="vertical", command=self._etf_tree.yview)
-        etf_scroll_x = ttk.Scrollbar(right_frame, orient="horizontal", command=self._etf_tree.xview)
+        etf_scroll_y = ttk.Scrollbar(tree_frame, orient="vertical", command=self._etf_tree.yview)
+        etf_scroll_x = ttk.Scrollbar(tree_frame, orient="horizontal", command=self._etf_tree.xview)
         self._etf_tree.configure(yscrollcommand=etf_scroll_y.set, xscrollcommand=etf_scroll_x.set)
-        self._etf_tree.pack(fill="both", expand=True)
+        self._etf_tree.pack(side="left", fill="both", expand=True)
         etf_scroll_y.pack(side="right", fill="y")
         etf_scroll_x.pack(side="bottom", fill="x")
 
@@ -7254,12 +7291,31 @@ class StrategyGUI(tk.Tk):
         #   結果畫面勾選欄 header 已是 ☐/☑/▣ 動態 checkbox、可點全選/全不選
         #   參數區的全選/全不選按鈕重複、拿掉
         #   （_ms_select_all / _ms_select_none methods 保留、header click 仍會叫）
-        ttk.Button(btn_row, text="📤 匯出 Excel",
-                   command=self._ms_export_excel).pack(fill="x", pady=1)
+        # 【V0.9.5-tab-split-phase3-G】2026-06-22 William 反映：
+        #   匯出按鈕從左邊參數區移到右上面板右邊、跟系統選股一致
+        #   文字統一「💾 匯出股票清單」
 
-        # ── 右面板：結果列表 ──
-        right_frame = ttk.LabelFrame(paned, text="📊 篩選結果", padding=4)
+        # ── 右面板：title + export 按鈕 + Treeview（跟系統選股同結構）──
+        right_frame = ttk.Frame(paned)
         paned.add(right_frame, weight=1)
+
+        # 右上面板：title 左邊、export 按鈕右邊
+        right_top = ttk.Frame(right_frame)
+        right_top.pack(fill="x", pady=(0, 5))
+        ttk.Label(right_top, text="📊 篩選結果",
+                  font=("Segoe UI", 11, "bold")).pack(side="left", anchor="w")
+        # 【V0.9.5-tab-split-phase3-G】跟 select_tab 同名、同位置
+        self.export_ms_btn = ttk.Button(
+            right_top,
+            text="💾 匯出股票清單",
+            command=self._ms_export_excel,
+            state="disabled",
+        )
+        self.export_ms_btn.pack(side="right")
+
+        # Treeview 子 frame
+        tree_frame = ttk.Frame(right_frame)
+        tree_frame.pack(fill="both", expand=True)
 
         # Treeview with checkbox
         # 【V0.9.5+ Phase 8 修 Bug】2026-06-15 William 反映：
@@ -7276,7 +7332,7 @@ class StrategyGUI(tk.Tk):
                 "PE","成交量(張)",
                 "去年股票","去年現金","去年現金殖%",
                 "資料日期")
-        self._ms_tree = ttk.Treeview(right_frame, columns=cols, show="headings",
+        self._ms_tree = ttk.Treeview(tree_frame, columns=cols, show="headings",
                                      selectmode="none", height=25)
         # 14 欄（拿掉 2 個股票殖利率 + 加 1 個資料日期）：原本 15 欄 - 2 + 1 = 14
         col_widths = (40, 60, 100, 70, 70, 60, 60, 80,
@@ -7292,10 +7348,10 @@ class StrategyGUI(tk.Tk):
         except (IndexError, tk.TclError):
             pass
 
-        ms_scroll_y = ttk.Scrollbar(right_frame, orient="vertical", command=self._ms_tree.yview)
-        ms_scroll_x = ttk.Scrollbar(right_frame, orient="horizontal", command=self._ms_tree.xview)
+        ms_scroll_y = ttk.Scrollbar(tree_frame, orient="vertical", command=self._ms_tree.yview)
+        ms_scroll_x = ttk.Scrollbar(tree_frame, orient="horizontal", command=self._ms_tree.xview)
         self._ms_tree.configure(yscrollcommand=ms_scroll_y.set, xscrollcommand=ms_scroll_x.set)
-        self._ms_tree.pack(fill="both", expand=True)
+        self._ms_tree.pack(side="left", fill="both", expand=True)
         ms_scroll_y.pack(side="right", fill="y")
         ms_scroll_x.pack(side="bottom", fill="x")
 
@@ -7963,6 +8019,9 @@ class StrategyGUI(tk.Tk):
         self._ms_status.set(f"✅ 符合條件：{len(result)} 檔（上限 {self._ms_limit_var.get()} 檔）｜排序：營收YoY > 今年股票 > 今年現金殖% > PE")
         # 【V0.9.5-tab-split-phase3-D】動態更新 checkbox header（新資料剛填、預設全未勾 → ☐）
         self._update_checkbox_header(self._ms_tree, self._ms_checked)
+        # 【V0.9.5-tab-split-phase3-G】enable 匯出按鈕（跟 select_tab 一致）
+        if hasattr(self, "export_ms_btn"):
+            self.export_ms_btn.config(state="normal")
 
         # 【V0.9.5-alpha Phase 6】2026-06-15：偵測 FinMind 402 額度錯誤
         # 情境：_fetch_finmind_dividend 中途被 402 中斷（已抓 X 筆寫入 DB），
@@ -8584,6 +8643,9 @@ class StrategyGUI(tk.Tk):
         )
         # 【V0.9.5-tab-split-phase3-D】動態更新 checkbox header（新資料剛填、預設全未勾 → ☐）
         self._update_checkbox_header(self._etf_tree, self._etf_checked)
+        # 【V0.9.5-tab-split-phase3-G】enable 匯出按鈕（跟 select_tab 一致）
+        if hasattr(self, "export_etf_btn"):
+            self.export_etf_btn.config(state="normal")
 
     def _etf_export_excel(self):
         """【V0.9.5-etf】匯出 ETF 成份股持股到 Excel
