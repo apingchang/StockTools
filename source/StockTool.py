@@ -1,14 +1,31 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-D (2026-06-22 09:35)       ║
+║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-E (2026-06-22 13:50)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-tab-split-phase3-D
-最後更新: 2026-06-22 10:06 (Asia/Taipei)
+Version: v0.9.5-tab-split-phase3-E
+最後更新: 2026-06-22 13:48 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-tab-split-phase3-E 新增內容】2026-06-22 13:50 (William 要求）
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 13:43 反映：篩選結果 console 的勾選欄 header 已可全選/全不選、ETF 和手動選股參數區的全選/全不選按鈕重複、拿掉
+【修法】
+1. 拿掉 ETF tab 參數區的 📋 全選 / ☐ 全不選 兩個按鈕（line 7011-7014）
+2. 拿掉手動選股 tab 參數區的 📋 全選 / ☐ 全不選 兩個按鈕（line 7210-7213）
+3. _etf_select_all / _etf_select_none / _ms_select_all / _ms_select_none methods 保留
+   （heading click 內部會叫、這些 method 是核心邏輯）
+4. 右鍵選單「☑ 全選 / ☐ 全不選」保留（另一個入口、不佔版面）
+5. 3 個 pytest test 守住「參數區按鈕已拿掉」
+
+【評估】
+- 拿掉 4 個按鈕：left_canvas 高度減少約 80px、UI 更精簡
+- 風險：低（methods 保留、header click 和右鍵選單都能觸發全選/全不選）
+- 預計 commit hash：v0.9.5-tab-split-phase3-E
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-tab-split-phase3-D 新增內容】2026-06-22 09:35 (William 要求）
@@ -1454,7 +1471,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-tab-split-phase3-D"
+VERSION = "v0.9.5-tab-split-phase3-E"
 
 
 import io
@@ -3884,7 +3901,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-D",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-E",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3927,7 +3944,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-D",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-E",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -7008,10 +7025,10 @@ class StrategyGUI(tk.Tk):
         self._etf_data_status = tk.StringVar(value="ETF 持股：未抓取")
         ttk.Label(btn_row, textvariable=self._etf_data_status,
                   font=("Helvetica", 8), foreground="#666666").pack(anchor="w", pady=(0, 4))
-        ttk.Button(btn_row, text="📋 全選",
-                   command=self._etf_select_all).pack(fill="x", pady=1)
-        ttk.Button(btn_row, text="☐ 全不選",
-                   command=self._etf_select_none).pack(fill="x", pady=1)
+        # 【V0.9.5-tab-split-phase3-E】2026-06-22 William 反映：
+        #   結果畫面勾選欄 header 已是 ☐/☑/▣ 動態 checkbox、可點全選/全不選
+        #   參數區的全選/全不選按鈕重複、拿掉
+        #   （_etf_select_all / _etf_select_none methods 保留、header click 仍會叫）
         ttk.Button(btn_row, text="📤 匯出 Excel",
                    command=self._etf_export_excel).pack(fill="x", pady=1)
 
@@ -7207,10 +7224,10 @@ class StrategyGUI(tk.Tk):
         self._ms_dividend_status = tk.StringVar(value="股利 DB: 計算中...")
         ttk.Label(btn_row, textvariable=self._ms_dividend_status,
                   font=("Helvetica", 8), foreground="#666666").pack(anchor="w", pady=(0, 4))
-        ttk.Button(btn_row, text="📋 全選",
-                   command=self._ms_select_all).pack(fill="x", pady=1)
-        ttk.Button(btn_row, text="☐ 全不選",
-                   command=self._ms_select_none).pack(fill="x", pady=1)
+        # 【V0.9.5-tab-split-phase3-E】2026-06-22 William 反映：
+        #   結果畫面勾選欄 header 已是 ☐/☑/▣ 動態 checkbox、可點全選/全不選
+        #   參數區的全選/全不選按鈕重複、拿掉
+        #   （_ms_select_all / _ms_select_none methods 保留、header click 仍會叫）
         ttk.Button(btn_row, text="📤 匯出 Excel",
                    command=self._ms_export_excel).pack(fill="x", pady=1)
 
