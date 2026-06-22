@@ -1,14 +1,34 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-E (2026-06-22 13:50)       ║
+║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-F (2026-06-22 14:00)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-tab-split-phase3-E
-最後更新: 2026-06-22 13:48 (Asia/Taipei)
+Version: v0.9.5-tab-split-phase3-F
+最後更新: 2026-06-22 13:56 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-tab-split-phase3-F 新增內容】2026-06-22 14:00 (William 要求）
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 13:52 反映：拿掉右鍵選單的「全選/全不選」、因為 header checkbox 已能全選/全不選、右鍵多一重入口多餘
+【修法】
+1. 拿掉 4 個右鍵 handler method：
+   - _on_select_tree_rclick（select_tree / backtest_tree 共用）
+   - _etf_tree_rclick_new（etf_tree）
+   - _ms_tree_rclick（ms_tree、原本是 dead code 被 _ms_show_context_menu 覆蓋）
+   - _ms_show_context_menu（ms_tree）
+2. 拿掉 4 個 <Button-3> bind：results_tree / _etf_tree / _ms_tree 兩次
+3. _etf_select_* / _ms_select_* / _select_* methods 保留
+   （heading click 內部會叫、這些 method 是核心邏輯）
+4. fileheader / VERSION / User-Agent 同步更新到 phase3-F
+5. 6 個 pytest test 守住「右鍵選單全選/全不選已拿掉」
+
+【評估】
+- 拿掉 4 個 method + 4 個 bind：code 減少約 30 行、無功能損失
+- 風險：低（header click 是唯一入口、這個入口已是動態 ☐/☑/▣、操作直覺）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-tab-split-phase3-E 新增內容】2026-06-22 13:50 (William 要求）
@@ -1471,7 +1491,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-tab-split-phase3-E"
+VERSION = "v0.9.5-tab-split-phase3-F"
 
 
 import io
@@ -3901,7 +3921,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-E",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-F",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3944,7 +3964,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-E",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-F",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -6249,7 +6269,11 @@ class StrategyGUI(tk.Tk):
         results_tree.bind("<Motion>", self._on_select_tree_hover)
         results_tree.bind("<Leave>", self._on_select_tree_leave)
         results_tree.bind("<Button-1>", self._on_select_tree_click)
-        results_tree.bind("<Button-3>", self._on_select_tree_rclick)
+        # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單
+        # 原本：results_tree.bind("<Button-3>", self._on_select_tree_rclick)
+        # 為什麼拿：header 已是 ☐/☑/▣ 動態 checkbox、點下去就是全選/全不選
+        #   右鍵選單多一重入口、重複、已不需要
+        #   拿掉 <Button-3> bind 後右鍵點 tree 不會跳選單（避免出現空選單）
 
         # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐（看起來像個 checkbox）
         try:
@@ -7073,7 +7097,9 @@ class StrategyGUI(tk.Tk):
         self._etf_tree.bind("<Motion>", self._etf_tree_hover_combined)
         self._etf_tree.bind("<Leave>", self._etf_tree_leave_combined)
         self._etf_tree.bind("<Button-1>", self._etf_toggle_check)
-        self._etf_tree.bind("<Button-3>", self._etf_tree_rclick_new)
+        # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單
+        # 原本：self._etf_tree.bind("<Button-3>", self._etf_tree_rclick_new)
+        # 為什麼拿：header 已是 ☐/☑/▣ 動態 checkbox、右鍵選單重複
 
         # 資料儲存（長期持有的 DataFrame）
         self._etf_long_df = None  # long-format raw（來自 build_etf_holdings_table）
@@ -7290,10 +7316,11 @@ class StrategyGUI(tk.Tk):
         self._ms_tree.bind("<Button-1>", self._ms_toggle_check)
         self._ms_tree.bind("<Motion>", self._ms_tree_hover)
         self._ms_tree.bind("<Leave>", self._ms_tree_leave)
-        self._ms_tree.bind("<Button-3>", self._ms_tree_rclick)
-
-        # 右鍵選單
-        self._ms_tree.bind("<Button-3>", self._ms_show_context_menu)
+        # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單
+        # 原本：
+        #   self._ms_tree.bind("<Button-3>", self._ms_tree_rclick)  # 原本是 dead code、被下面那行覆蓋
+        #   self._ms_tree.bind("<Button-3>", self._ms_show_context_menu)
+        # 為什麼拿：header 已是 ☐/☑/▣ 動態 checkbox、右鍵選單重複
 
         # 初始化：先 refresh preset 下拉（自動選中上次的）、再載入
         # 【V0.9.5+ Phase 7 修 Bug】2026-06-15 William 反映：
@@ -8061,13 +8088,6 @@ class StrategyGUI(tk.Tk):
         except Exception:
             pass
 
-    def _ms_tree_rclick(self, event):
-        """右鍵：全選 / 全不選"""
-        menu = tk.Menu(self.manual_select_tab, tearoff=0)
-        menu.add_command(label="☑ 全選", command=self._ms_select_all)
-        menu.add_command(label="☐ 全不選", command=self._ms_select_none)
-        menu.post(event.x_root, event.y_root)
-
     def _ms_select_all(self):
         for item in self._ms_tree.get_children():
             self._ms_checked[item] = True
@@ -8085,13 +8105,6 @@ class StrategyGUI(tk.Tk):
             self._ms_tree.item(item, values=vals, tags=("unchecked",))
         # 【V0.9.5-tab-split-phase3-D】動態更新 header
         self._update_checkbox_header(self._ms_tree, self._ms_checked)
-
-    def _ms_show_context_menu(self, event):
-        """右鍵：全選 / 全不選"""
-        menu = tk.Menu(self.manual_select_tab, tearoff=0)
-        menu.add_command(label="☑ 全選", command=self._ms_select_all)
-        menu.add_command(label="☐ 全不選", command=self._ms_select_none)
-        menu.post(event.x_root, event.y_root)
 
     # ==========================================================
     # 【V0.9.5-etf】主動式 ETF Tab — Hover / Toggle / Filter / Refresh / Export
@@ -8158,12 +8171,7 @@ class StrategyGUI(tk.Tk):
         except Exception:
             pass
 
-    def _etf_tree_rclick_new(self, event):
-        """右鍵：全選 / 全不選"""
-        menu = tk.Menu(self.etf_tab, tearoff=0)
-        menu.add_command(label="☑ 全選", command=self._etf_select_all)
-        menu.add_command(label="☐ 全不選", command=self._etf_select_none)
-        menu.post(event.x_root, event.y_root)
+    # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單（_etf_tree_rclick_new）
 
     def _on_etf_tree_hover(self, event):
         """【V0.9.5-etf】ETF Treeview hover：
@@ -10022,13 +10030,7 @@ class StrategyGUI(tk.Tk):
         # 【V0.9.5-tab-split-phase3-D】動態更新 header（個別 toggle 也會影響整體狀態）
         self._update_checkbox_header(tree, checked_dict)
 
-    def _on_select_tree_rclick(self, event):
-        """右鍵：全選 / 全不選"""
-        tree = event.widget
-        menu = tk.Menu(tree, tearoff=0)
-        menu.add_command(label="☑ 全選", command=lambda t=tree: self._select_all(t))
-        menu.add_command(label="☐ 全不選", command=lambda t=tree: self._select_none(t))
-        menu.post(event.x_root, event.y_root)
+    # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單（_on_select_tree_rclick）
 
     def _select_all(self, tree=None):
         tree = tree or self.select_tree

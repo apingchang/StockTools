@@ -131,15 +131,30 @@ def test_ms_heading_click_still_works():
     print("✅ ms heading click → _ms_select_all/_none 仍正常")
 
 
-def test_context_menu_still_has_select():
-    """右鍵選單的「全選/全不選」仍保留（另一個入口）"""
+def test_context_menu_removed():
+    """【V0.9.5-tab-split-phase3-F】右鍵選單的「全選/全不選」已拿掉
+
+    William 13:52 反映：header checkbox 已能全選/全不選、右鍵選單多一重入口多餘
+    拿掉 4 個右鍵 handler + 對應 bind
+    """
     content = _read()
-    assert "_ms_show_context_menu" in content, "❌ 找不到 _ms_show_context_menu"
-    assert "_etf_tree_rclick_new" in content, "❌ 找不到 ETF 右鍵 handler"
-    # 右鍵選單內的全選/全不選 command
-    assert 'label="☑ 全選"' in content, "❌ 右鍵選單的「全選」不見了"
-    assert 'label="☐ 全不選"' in content, "❌ 右鍵選單的「全不選」不見了"
-    print("✅ 右鍵選單的全選/全不選仍保留")
+    # 4 個右鍵 method 都不該存在
+    assert "def _on_select_tree_rclick" not in content, (
+        "❌ _on_select_tree_rclick 還在！Phase 3 F 應該拿掉"
+    )
+    assert "def _etf_tree_rclick_new" not in content, (
+        "❌ _etf_tree_rclick_new 還在！Phase 3 F 應該拿掉"
+    )
+    assert "def _ms_tree_rclick" not in content, (
+        "❌ _ms_tree_rclick 還在！Phase 3 F 應該拿掉"
+    )
+    assert "def _ms_show_context_menu" not in content, (
+        "❌ _ms_show_context_menu 還在！Phase 3 F 應該拿掉"
+    )
+    # 右鍵選單內的全選/全不選 command 也不該存在
+    assert 'label="☑ 全選"' not in content, "❌ 右鍵選單的「全選」還在"
+    assert 'label="☐ 全不選"' not in content, "❌ 右鍵選單的「全不選」還在"
+    print("✅ 4 個右鍵 handler + 全選/全不選選單項目已全部拿掉")
 
 
 if __name__ == "__main__":
@@ -151,5 +166,5 @@ if __name__ == "__main__":
     test_ms_select_methods_still_exist()
     test_etf_heading_click_still_works()
     test_ms_heading_click_still_works()
-    test_context_menu_still_has_select()
+    test_context_menu_removed()
     print("\n🎉 9 個 select_buttons_removed test 全綠")
