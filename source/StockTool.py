@@ -1,14 +1,35 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-B3 (2026-06-21 09:10)      ║
+║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-D (2026-06-22 09:35)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-tab-split-phase3-B3
-最後更新: 2026-06-21 22:12 (Asia/Taipei)
+Version: v0.9.5-tab-split-phase3-D
+最後更新: 2026-06-22 10:06 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-tab-split-phase3-D 新增內容】2026-06-22 09:35 (William 要求）
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 09:31 反映：結果畫面勾選欄 header 點下去沒反應、rows 都勾起來但 header 還是「☑」看不出反饋
+【修法】
+1. 新增 _update_checkbox_header(tree, checked_dict) helper
+   - 0 checked → ☐
+   - 全部 checked → ☑
+   - 部分 checked → ▣（混和狀態）
+2. 三個 Treeview 剛 build 時 header 初始顯示設為 ☐（看起來像個 checkbox）
+   - select_tree / backtest_tree（共用 _build_tab_layout）
+   - ms_tree（手動選股）
+   - etf_tree（ETF tab）
+3. _select_all / _select_none / _ms_select_all / _ms_select_none / _etf_select_all / _etf_select_none 都會在結尾叫 helper 更新 header
+4. 個別 row toggle（_on_select_tree_click / _ms_toggle_check / _etf_toggle_check）也會叫 helper
+5. ETF tab 的 _etf_toggle_check 補上 heading click → 全選/全不選（原本只處理 cell click）
+6. 10 個 pytest test 守住 (tests/test_checkbox_header_click.py)
+
+【向上相容】原本的 _select_all / _select_none / _ms_select_* / _etf_select_* 簽名不變、只是多叫 helper
+【受益者】所有用 Treeview checkbox 的 Tab：系統選股、手動選股、ETF、錢測（錢測 Treeview 不含 checkbox、不受影響）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-etf 新增內容】2026-06-19 23:05 (William 要求）
@@ -1433,7 +1454,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-tab-split-phase3-C"
+VERSION = "v0.9.5-tab-split-phase3-D"
 
 
 import io
@@ -3863,7 +3884,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-B3",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-D",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3906,7 +3927,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-B3",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-D",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -6213,6 +6234,13 @@ class StrategyGUI(tk.Tk):
         results_tree.bind("<Button-1>", self._on_select_tree_click)
         results_tree.bind("<Button-3>", self._on_select_tree_rclick)
 
+        # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐（看起來像個 checkbox）
+        try:
+            first_col = results_tree["columns"][0]
+            results_tree.heading(first_col, text="☐")
+        except (IndexError, tk.TclError):
+            pass
+
         # 【V0.9.5-tab-split-phase3-C】多回傳 right_frame
         return left_scrollable_frame, right_frame, results_tree
 
@@ -6999,6 +7027,12 @@ class StrategyGUI(tk.Tk):
             self._etf_tree.heading(col, text=col)
             self._etf_tree.column(col, width=w, anchor="center")
 
+        # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐（看起來像個 checkbox）
+        try:
+            self._etf_tree.heading(cols[0], text="☐")
+        except (IndexError, tk.TclError):
+            pass
+
         etf_scroll_y = ttk.Scrollbar(right_frame, orient="vertical", command=self._etf_tree.yview)
         etf_scroll_x = ttk.Scrollbar(right_frame, orient="horizontal", command=self._etf_tree.xview)
         self._etf_tree.configure(yscrollcommand=etf_scroll_y.set, xscrollcommand=etf_scroll_x.set)
@@ -7208,6 +7242,12 @@ class StrategyGUI(tk.Tk):
         for col, w in zip(cols, col_widths):
             self._ms_tree.heading(col, text=col)
             self._ms_tree.column(col, width=w, anchor="center")
+
+        # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐（看起來像個 checkbox）
+        try:
+            self._ms_tree.heading(cols[0], text="☐")
+        except (IndexError, tk.TclError):
+            pass
 
         ms_scroll_y = ttk.Scrollbar(right_frame, orient="vertical", command=self._ms_tree.yview)
         ms_scroll_x = ttk.Scrollbar(right_frame, orient="horizontal", command=self._ms_tree.xview)
@@ -7877,6 +7917,8 @@ class StrategyGUI(tk.Tk):
             ), tags=(tag,))
 
         self._ms_status.set(f"✅ 符合條件：{len(result)} 檔（上限 {self._ms_limit_var.get()} 檔）｜排序：營收YoY > 今年股票 > 今年現金殖% > PE")
+        # 【V0.9.5-tab-split-phase3-D】動態更新 checkbox header（新資料剛填、預設全未勾 → ☐）
+        self._update_checkbox_header(self._ms_tree, self._ms_checked)
 
         # 【V0.9.5-alpha Phase 6】2026-06-15：偵測 FinMind 402 額度錯誤
         # 情境：_fetch_finmind_dividend 中途被 402 中斷（已抓 X 筆寫入 DB），
@@ -7967,6 +8009,8 @@ class StrategyGUI(tk.Tk):
         vals[0] = "☑" if not current else "☐"
         self._ms_tree.item(item_id, values=vals,
                            tags=("checked" if not current else "unchecked",))
+        # 【V0.9.5-tab-split-phase3-D】動態更新 header
+        self._update_checkbox_header(self._ms_tree, self._ms_checked)
 
 
     def _ms_tree_hover(self, event):
@@ -8013,6 +8057,8 @@ class StrategyGUI(tk.Tk):
             vals = list(self._ms_tree.item(item, "values"))
             vals[0] = "☑"
             self._ms_tree.item(item, values=vals, tags=("checked",))
+        # 【V0.9.5-tab-split-phase3-D】動態更新 header
+        self._update_checkbox_header(self._ms_tree, self._ms_checked)
 
     def _ms_select_none(self):
         for item in self._ms_tree.get_children():
@@ -8020,6 +8066,8 @@ class StrategyGUI(tk.Tk):
             vals = list(self._ms_tree.item(item, "values"))
             vals[0] = "☐"
             self._ms_tree.item(item, values=vals, tags=("unchecked",))
+        # 【V0.9.5-tab-split-phase3-D】動態更新 header
+        self._update_checkbox_header(self._ms_tree, self._ms_checked)
 
     def _ms_show_context_menu(self, event):
         """右鍵：全選 / 全不選"""
@@ -8268,12 +8316,27 @@ class StrategyGUI(tk.Tk):
             self._etf_popup = None
 
     def _etf_toggle_check(self, event):
-        """【V0.9.5-etf】點 ETF Treeview → toggle 勾選"""
+        """【V0.9.5-etf】點 ETF Treeview → toggle 勾選
+        【V0.9.5-tab-split-phase3-D】header 點下去 → 全選/全不選（與 select_tree / ms_tree 一致）
+        """
         region = self._etf_tree.identify("region", event.x, event.y)
-        if region != "cell":
-            return
         column = self._etf_tree.identify_column(event.x)
         if column != "#1":
+            return
+
+        # header click → 全選/全不選
+        if region == "heading":
+            items = list(self._etf_tree.get_children())
+            if not items:
+                return
+            all_checked = all(self._etf_checked.get(iid, False) for iid in items)
+            if all_checked:
+                self._etf_select_none()
+            else:
+                self._etf_select_all()
+            return
+
+        if region != "cell":
             return
         item_id = self._etf_tree.identify_row(event.y)
         if not item_id:
@@ -8286,6 +8349,8 @@ class StrategyGUI(tk.Tk):
             item_id, values=vals,
             tags=("checked" if not current else "unchecked",),
         )
+        # 【V0.9.5-tab-split-phase3-D】動態更新 header
+        self._update_checkbox_header(self._etf_tree, self._etf_checked)
 
     def _etf_select_all(self):
         for item in self._etf_tree.get_children():
@@ -8293,6 +8358,8 @@ class StrategyGUI(tk.Tk):
             vals = list(self._etf_tree.item(item, "values"))
             vals[0] = "☑"
             self._etf_tree.item(item, values=vals, tags=("checked",))
+        # 【V0.9.5-tab-split-phase3-D】動態更新 header
+        self._update_checkbox_header(self._etf_tree, self._etf_checked)
 
     def _etf_select_none(self):
         for item in self._etf_tree.get_children():
@@ -8300,6 +8367,8 @@ class StrategyGUI(tk.Tk):
             vals = list(self._etf_tree.item(item, "values"))
             vals[0] = "☐"
             self._etf_tree.item(item, values=vals, tags=("unchecked",))
+        # 【V0.9.5-tab-split-phase3-D】動態更新 header
+        self._update_checkbox_header(self._etf_tree, self._etf_checked)
 
 
     # ── ETF 持股歷史庫（V0.9.5-etf-history）────────────────────────────────
@@ -8488,6 +8557,8 @@ class StrategyGUI(tk.Tk):
         self._etf_status.set(
             f"✅ 顯示 {len(df)} 檔個股（總資料 {len(agg_df)} 檔）"
         )
+        # 【V0.9.5-tab-split-phase3-D】動態更新 checkbox header（新資料剛填、預設全未勾 → ☐）
+        self._update_checkbox_header(self._etf_tree, self._etf_checked)
 
     def _etf_export_excel(self):
         """【V0.9.5-etf】匯出 ETF 成份股持股到 Excel
@@ -9711,6 +9782,11 @@ class StrategyGUI(tk.Tk):
             for col, w in zip(cols, col_widths):
                 self.select_tree.heading(col, text=col)
                 self.select_tree.column(col, width=w, anchor="center")
+            # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐（看起來像個 checkbox）
+            try:
+                self.select_tree.heading(cols[0], text="☐")
+            except (IndexError, tk.TclError):
+                pass
 
         # 填資料（取前 60 筆、避免太慢）
         display_count = 0
@@ -9751,6 +9827,8 @@ class StrategyGUI(tk.Tk):
             display_count += 1
 
         self.logger.log(f"📋 已顯示 {display_count} 筆選股結果（總共 {len(df_sel)} 筆）")
+        # 【V0.9.5-tab-split-phase3-D】動態更新 checkbox header（新資料剛填、預設全未勾 → ☐）
+        self._update_checkbox_header(self.select_tree, self._select_checked)
         # 【V0.9.5-tab-split-phase3-C】enable 匯出按鈕
         if hasattr(self, "export_select_btn"):
             self.export_select_btn.config(state="normal")
@@ -9924,6 +10002,8 @@ class StrategyGUI(tk.Tk):
         vals = list(tree.item(iid, "values"))
         vals[0] = "☑" if not current else "☐"
         tree.item(iid, values=vals, tags=("checked" if not current else "unchecked",))
+        # 【V0.9.5-tab-split-phase3-D】動態更新 header（個別 toggle 也會影響整體狀態）
+        self._update_checkbox_header(tree, checked_dict)
 
     def _on_select_tree_rclick(self, event):
         """右鍵：全選 / 全不選"""
@@ -9941,6 +10021,8 @@ class StrategyGUI(tk.Tk):
             vals = list(tree.item(item, "values"))
             vals[0] = "☑"
             tree.item(item, values=vals, tags=("checked",))
+        # 【V0.9.5-tab-split-phase3-D】動態更新 header
+        self._update_checkbox_header(tree, checked_dict)
 
     def _select_none(self, tree=None):
         tree = tree or self.select_tree
@@ -9950,6 +10032,47 @@ class StrategyGUI(tk.Tk):
             vals = list(tree.item(item, "values"))
             vals[0] = "☐"
             tree.item(item, values=vals, tags=("unchecked",))
+        # 【V0.9.5-tab-split-phase3-D】動態更新 header
+        self._update_checkbox_header(tree, checked_dict)
+
+    def _update_checkbox_header(self, tree, checked_dict):
+        """【V0.9.5-tab-split-phase3-D】依全選狀態動態更新 checkbox header ☑/☐/▣
+
+        - 0 個 rows 或 0 個 checked → ☐
+        - 全部 checked → ☑
+        - 部分 checked → ▣（混和狀態）
+
+        為什麼要動態更新？
+        - 原本 header 永遠是「勾選」字樣、不管全選/全不選都長一樣
+        - 使用者點 header 後 rows 都勾起來了、但 header 沒反饋、看不出點成功
+        - 動態切 ☑/☐/▣ 可以明確表達「目前整體狀態」
+
+        Args:
+            tree: ttk.Treeview（select_tree / backtest_tree / ms_tree / etf_tree 都可用）
+            checked_dict: dict[iid -> bool]
+        """
+        try:
+            items = list(tree.get_children())
+            if not items:
+                header_text = "☐"
+            else:
+                checked_count = sum(
+                    1 for iid in items if checked_dict.get(iid, False)
+                )
+                if checked_count == 0:
+                    header_text = "☐"
+                elif checked_count == len(items):
+                    header_text = "☑"
+                else:
+                    header_text = "▣"  # 混和狀態
+            # 取第一欄 ID 來更新 header
+            cols = tree["columns"]
+            if cols:
+                first_col = cols[0]
+                tree.heading(first_col, text=header_text)
+        except (tk.TclError, IndexError, KeyError):
+            # Treeview 已被銷毀 / 還沒建好 / 欄位未設定 → 靜默跳過
+            pass
 
 
 if __name__ == "__main__":
