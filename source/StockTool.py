@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-H
-最後更新: 2026-06-23 10:36 (Asia/Taipei)
+最後更新: 2026-06-23 13:51 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -8465,7 +8465,10 @@ class StrategyGUI(tk.Tk):
             for _, cr in stock_changes.iterrows():
                 etf_code = str(cr.get("etf_code", "")).strip()
                 etf_name = str(cr.get("etf_name", etf_code))
-                cl = cr.get("change_lots", 0) or 0
+                # 【V0.9.5-tab-split-phase3-H FixA2】2026-06-23 12:12 William 反映
+                # _compute_etf_changes 回傳欄位是 today_change_lots、不是 change_lots
+                # 之前用 change_lots 永遠抓到 0（.get 預設值）、沒人發現
+                cl = cr.get("today_change_lots", 0) or 0
                 if abs(cl) < 0.001:
                     continue
                 total += cl
@@ -8726,10 +8729,17 @@ class StrategyGUI(tk.Tk):
         if change_df is None:
             change_df = getattr(self, "_etf_change_df", None)
         if change_df is not None and not change_df.empty:
+            # 【V0.9.5-tab-split-phase3-H FixA2】2026-06-23 12:12 William 反映
+            # KeyError: 'Column not found: change_lots'
+            # _compute_etf_changes 回傳的欄位是 today_change_lots、不是 change_lots
+            # 這個 bug 之前測試沒抓到、是因為：
+            # - 過去 DB shares 全 0 → _compute_etf_changes 回傳空 DataFrame
+            # - 走 else 分支 df["total_change_lots"] = 0.0、不觸發 groupby
+            # - 今早 migration 補 shares → _compute_etf_changes 回傳有資料 → 才爆
             stock_change = (
-                change_df.groupby("stock_code", as_index=False)["change_lots"]
+                change_df.groupby("stock_code", as_index=False)["today_change_lots"]
                 .sum()
-                .rename(columns={"change_lots": "total_change_lots"})
+                .rename(columns={"today_change_lots": "total_change_lots"})
             )
             df = df.merge(
                 stock_change,
