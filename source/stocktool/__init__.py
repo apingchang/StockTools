@@ -109,3 +109,17 @@ from .technical import (
     calc_enhanced_tech_indicators,
     run_tech,
 )
+from .backtest import (
+    event_exit_return,
+    max_losing_streak,
+    profit_factor,
+    annualize_sharpe,
+    annualize_sortino,
+    signal_level_backtest_event,
+    build_gate_map,
+    portfolio_backtest_topk_event,
+    performance_by_year,
+    run_walk_forward,
+    get_codes_for_period,
+    quick_backtest_for_period,
+)
