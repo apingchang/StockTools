@@ -10,7 +10,7 @@ v1.1 重構：把 _CalendarDialog 從 StockTool.py 抽出
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import tkinter as tk

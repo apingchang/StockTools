@@ -1,13 +1,55 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v1.0 (2026-06-24 05:55)       ║
+║               台灣股市量化選股系統 v1.0 (2026-06-24 06:50)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.0
-最後更新: 2026-06-24 05:57 (Asia/Taipei)
+最後更新: 2026-06-24 06:50 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【v1.0.1 HOTFIX #2】2026-06-24 06:50 (William 06:45 重跑回測又炸、補 import)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-24 06:45 重跑回測、修完 datetime 後又炸：
+  ❌ 回測失敗：name 'get_column_letter' is not defined
+  Traceback (most recent call last):
+    File "source/StockTool.py", line 5581, in worker
+      result = run_pipeline(cfg, self.logger)
+    File "source/stocktool/pipeline.py", line 570, in run_pipeline
+      last_col = get_column_letter(ws_buy.max_column)
+  NameError: name 'get_column_letter' is not defined
+
+【根因】同 v1.1 重構漏 import、這次漏的是 openpyxl
+- stocktool/pipeline.py line 570: get_column_letter(ws_buy.max_column) → 沒 from openpyxl.utils import get_column_letter
+
+【意外發現】寫 lint test 順便抓出還有其他漏的
+- stocktool/gui/calendar.py 有 from datetime import date, timedelta、但檔案內 4 處用 datetime.xxx()、漏 import datetime
+  - 修法：from datetime import date, datetime, timedelta 加進去
+
+【修法】2 個檔案各加 1 行
+- pipeline.py: import requests 之後加 from openpyxl.utils import get_column_letter
+- gui/calendar.py: from datetime import date, datetime, timedelta（原本只 import date, timedelta）
+
+【評估】
+- 一樣是一行 import 修一個 bug
+- 寫精準 lint test 抓出來、不用等 William 實際跑才炸
+- 1 次 hotfix 抓 2 個 import 漏（pipeline + calendar）
+
+【test】tests/test_v1_1_imports_lint.py（新、14 個）
+- TestExternalImportLint: 結構性 lint 掃全部 stocktool/ 模組
+  - test_no_openpyxl_usage_without_import
+  - test_no_datetime_usage_without_import
+- TestPipelineGetColumnLetter: pipeline 有 import get_column_letter
+- TestNoNameErrorAtImport: 11 個 stocktool/ 模組都能順利 import 不炸
+- 全部 430 passed (416 既有 + 14 新）、0 failed
+
+【沒動】
+- VERSION / App title / User-Agent 仍是 v1.0
+- StockTool.py 本體邏輯沒改（純 hotfix + fileheader）
+- 使用手冊不需更新
 
 ════════════════════════════════════════════════════════════════════════════════
 【v1.0.1 HOTFIX】2026-06-24 05:55 (William 凌晨跑回測炸掉、5:52 主動反映）

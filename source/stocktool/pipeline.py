@@ -27,6 +27,8 @@ import pandas as pd
 import numpy as np
 import requests
 
+from openpyxl.utils import get_column_letter
+
 from .config import StrategyConfig, GuiLogger, build_session, VERSION
 from .fetch_market import (
     fetch_prices,
