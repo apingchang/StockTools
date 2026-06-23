@@ -45,3 +45,23 @@ from .cache import (
     get_or_fetch,
     _is_price_cache_valid,
 )
+from .database import (
+    DIV_HISTORY_SCHEMA,
+    DIV_HISTORY_MIGRATIONS,
+    EPS_HISTORY_SCHEMA,
+    ETF_HISTORY_SCHEMA,
+    _init_div_history_db,
+    _init_eps_history_db,
+    _init_etf_history_db,
+    _save_etf_holding_snapshot,
+    _query_etf_holdings_by_date,
+    _query_latest_two_dates,
+    _compute_etf_changes,
+    _upsert_div_history,
+    _query_div_history,
+    _query_div_history_with_fetched,
+    _div_history_stats,
+    _upsert_eps_history,
+    _query_eps_history,
+    _eps_history_stats,
+)
