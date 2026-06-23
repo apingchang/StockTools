@@ -1,12 +1,11 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-H (2026-06-23 09:55)       ║
+║               台灣股市量化選股系統 v1.0 (2026-06-23 14:42)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-tab-split-phase3-H
-最後更新: 2026-06-23 14:20 (Asia/Taipei)
+Version: v1.0
+最後更新: 2026-06-23 14:54 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -30,7 +29,7 @@ Python 版本: 3.8+
 
 
 ════════════════════════════════════════════════════════════════════════════════
-【v0.9.5-tab-split-phase3-H 新增內容】2026-06-23 09:55 (William 要求）
+【v1.0 正式版】2026-06-23 14:42 (William 要求）
 ════════════════════════════════════════════════════════════════════════════════
 【背景】William 09:55 反映 2 個問題：
 1. ETF 持股篩選的「今日異動」欄位全是 --（沒資料）
@@ -62,15 +61,27 @@ Python 版本: 3.8+
    - 修法：tests/conftest.py 加 autouse fixture、每個 test 後還原 _fetch_finmind_dividend
    - 效果：全部 407 個 test 一起跑 100% pass（原本 3 個會 fail）
 
+4. FixA2: today_change_lots 欄位名稱（2026-06-23 12:12 William 反映）
+   - 根因：_compute_etf_changes 回傳 today_change_lots，但 _etf_display_results / _show_etf_popup 用 change_lots → KeyError
+   - 修法：兩處都改 today_change_lots
+
+5. FixA3: column-missing 檢查移到 market-hours early-return 前面
+   - 根因：test_get_or_fetch_cache缺欄位_自動重抓 fail — column-missing 檢查本來在 last_update == today 分支內，但 market-hours early-return 在前面
+   - 修法：把 price cache 的 column-missing 檢查移到 get_or_fetch 最前面（結構問題優先於時間判斷）
+
 【評估】
 - FixA：ETF shares 是根本修正、不修就永遠顯示 --
 - FixB：cache 時間精準度提升、不會重抓舊 cache 也不會忘記抓新 cache
+- FixA2：DB migration 後才爆的 bug、要順便修
+- FixA3：test 發現的結構問題、要順便修
 - 風險：低（向後相容舊 cache、Fixture 不影響其他 test）
 
 【test】
 - FixA: test_etf_long_df_shares.py (4 個)
 - FixB: test_cache_time_logic.py (15 個)
-- 共 407 passed、0 failed
+- FixA2: test_etf_change_column_name.py (4 個)
+- FixA3: column-missing 檢查移到 get_or_fetch 最前面
+- 共 411 passed、0 failed
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-tab-split-phase3-F 新增內容】2026-06-22 14:00 (William 要求）
@@ -1553,7 +1564,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-tab-split-phase3-H"
+VERSION = "v1.0"
 
 
 import io
@@ -1823,7 +1834,7 @@ def get_cache_file(name):
 def save_cache(file_path, df):
     """寫入 cache（data + meta sheet）
 
-    【V0.9.5-cache-time 新增】2026-06-23 William 09:55 反映：
+    【v1.0-time 新增】2026-06-23 William 09:55 反映：
     - cache 只記日期、不記時間 → 跨日才重抓、不夠精準
     - 新規則：cache 要記時間，判斷 cache 是否在「最後一次收盤時間」之後
     - meta sheet 多寫 last_update_time (HH:MM:SS)
@@ -1847,7 +1858,7 @@ def load_cache(file_path):
     - 「Worksheet named 'meta' not found → fallback 讀舊 cache」錯訊
     - 修法：meta 不存在時 fallback 回傳今天日期（視為剛抓的、不觸發 refresh）
 
-    【V0.9.5-cache-time 新增】2026-06-23 William 09:55：
+    【v1.0-time 新增】2026-06-23 William 09:55：
     - 多回傳 last_update_time (HH:MM:SS)、None 表示沒紀錄
     - 舊 cache 沒 last_update_time 時、time=None → _is_price_cache_valid 視為過期、觸發重抓
     - 回傳值從 (df, date) 改為 (df, date, time)
@@ -1870,7 +1881,7 @@ def load_cache(file_path):
     return df, last_update, last_update_time
 
 
-# 【V0.9.5-cache-info 新增】2026-06-19 William 要求：
+# 【v1.0-info 新增】2026-06-19 William 要求：
 #   「_is_market_hours() 要處理台股半日盤（過年前封關日 13:00 收盤）」
 #   每年封關日不同、需手動維護此表
 #   來源：台灣證券交易所公告的「市場開休市日程」
@@ -1889,7 +1900,7 @@ def _is_market_hours(now: Optional[datetime] = None) -> bool:
     - 收盤後到隔天 09:00 開盤前：股價已固定 → 一天只要 refresh 一次
     - 週末（週六、週日）：不開盤 → 用上週五收盤價、一天只要 refresh 一次
 
-    V0.9.5-cache-info 新規則（William 2026-06-19 14:17）：
+    v1.0-info 新規則（William 2026-06-19 14:17）：
     - 半日盤（過年封關日等）：13:00 收盤、不是 13:30
     - 依據 _HALF_DAY_DATES 清單判斷
 
@@ -1916,7 +1927,7 @@ def _is_market_hours(now: Optional[datetime] = None) -> bool:
 
 
 def _is_price_cache_valid(last_update_date, last_update_time, now=None):
-    """【V0.9.5-cache-time 新增】2026-06-23 William 09:55 設定
+    """【v1.0-time 新增】2026-06-23 William 09:55 設定
 
     判斷 price cache 是否還是「最新收盤價」（可繼續用、免重抓）
 
@@ -1995,7 +2006,7 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
     # ============================================================
     # 【結構檢查】優先於時間判斷 — cache 缺欄位就該重抓
     # ============================================================
-    # 【V0.9.5-cache-vol 結構遷移】2026-06-19 William 反映
+    # 【v1.0-vol 結構遷移】2026-06-19 William 反映
     # 即使 cache 是今天的、也可能是 v0.9.5-goodinfo4+5 以前的舊版（缺 成交量_張 / data_date）
     # → 有缺欄位就強制重抓、寫入新結構（不管是否盤中/收盤後）
     # 【V0.9.5-tab-split-phase3-H Fix】2026-06-23 13:50：
@@ -2026,7 +2037,7 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
     # ============================================================
     # 【收盤後/盤前】時間基準 cache 有效性判斷
     # ============================================================
-    # 【V0.9.5-cache-time 新增】2026-06-23 William 09:55 反映：
+    # 【v1.0-time 新增】2026-06-23 William 09:55 反映：
     # 舊規則「收盤後用 cache」只看日期、不看時間
     # → 9:30 抓的 cache 到 14:00 仍被認為是有效的（其實已過收盤、價格應是收盤價）
     # 新規則：price 收盤後/盤前 → 用 cache 時間判斷（cache time >= 最近收盤時間才有效）
@@ -3433,7 +3444,7 @@ def _run_manual_selection(
         if name_col:
             price_cols.append(name_col)
         # 如果 cache 也有「股價」或「現價」也一起拉進來
-        # 【V0.9.5-cache-info】data_date 也要帶進來（Treeview 「資料日期」欄位用）
+        # 【v1.0-info】data_date 也要帶進來（Treeview 「資料日期」欄位用）
         for cc in ["股價", "現價", "成交量", "成交量_張", "漲跌", "data_date"]:
             if cc in price_df.columns and cc not in price_cols:
                 price_cols.append(cc)
@@ -3707,7 +3718,7 @@ def _run_manual_selection(
                 f"{cy}現金股利", f"{cy - 1}現金股利", f"{cy - 2}現金股利",
                 # V0.9.5-goodinfo3：殖利率加強欄位（10Y 平均殖利率已拿掉，William 不需要）
                 "今年股票殖利率(%)", "去年股票殖利率(%)",
-                "data_date"]  # 【V0.9.5-cache-info】Treeview 「資料日期」欄位用
+                "data_date"]  # 【v1.0-info】Treeview 「資料日期」欄位用
     out_cols = [c for c in out_cols if c in result.columns]
     # 整理重複的現金股利（保留乾淨的今年/去年/前年）
     result = result[out_cols].rename(columns={
@@ -3728,7 +3739,7 @@ def _run_manual_selection(
                   "去年股票股利", "去年現金股利", "去年現金殖利率(%)",
                   "今年股票殖利率(%)", "去年股票殖利率(%)",
                   "PE", "成交量(張)", "EPS本期",
-                  "data_date"]  # 【V0.9.5-cache-info】Treeview 「資料日期」欄位用
+                  "data_date"]  # 【v1.0-info】Treeview 「資料日期」欄位用
     final_cols = [c for c in final_cols if c in result.columns]
     return result[final_cols].rename(columns={
         "今年現金股利": "今年現金股利_原始",
@@ -4097,7 +4108,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-H",
+            "User-Agent": "StockTool/AdvisorStyle-v1.0",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -4140,7 +4151,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-H",
+            "User-Agent": "StockTool/AdvisorStyle-v1.0",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -4424,14 +4435,14 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
 
     _twse_date_col = find_col(twse.columns, ["Date", "資料日期"])
     _tpex_date_col = find_col(tpex.columns, ["Date", "資料日期"])
-    # 【V0.9.5-cache-vol 新增】2026-06-19 William 反映：成交量不會顯示「—」
+    # 【v1.0-vol 新增】2026-06-19 William 反映：成交量不會顯示「—」
     # TWSE STOCK_DAY_ALL 有 TradeVolume (股數)
     # TPEx tpex_mainboard_quotes 有 TradingShares (股數)
     # 兩者都是「股」單位、要 /1000 才變「張」
     _twse_vol_col = find_col(twse.columns, ["TradeVolume"])
     _tpex_vol_col = find_col(tpex.columns, ["TradingShares", "TradeVolume"])
 
-    # 【V0.9.5-cache-info 防呆】若某 API 完全失敗（empty df）→ 補上必要欄位
+    # 【v1.0-info 防呆】若某 API 完全失敗（empty df）→ 補上必要欄位
     # 否則後面 twse[["股票代號", ...]] 會 KeyError
     if twse.empty:
         twse = pd.DataFrame(columns=["股票代號", "公司名稱_來源", "股價", "漲跌"])
@@ -4456,7 +4467,7 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         **({_tpex_vol_col: "_raw_volume"} if _tpex_vol_col else {}),
     })
 
-    # 【V0.9.5-cache-info 新增】2026-06-19 William 要求：
+    # 【v1.0-info 新增】2026-06-19 William 要求：
     #   「篩選結果中增加一個欄位顯示個股資料所參考的最新日期」
     #   從 TWSE/TPEx 的 Date 欄位（民國年格式 "1150618"）轉西元 "2026-06-18"
     #   用來區分「cache 抓取日」vs「個股本身最後交易日」（個股暫停交易時這兩個會不同）
@@ -4475,18 +4486,18 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         except Exception:
             return ""
 
-    # 【V0.9.5-cache-info 防呆】若某 API 沒 date 欄位 → 以空字串代替
+    # 【v1.0-info 防呆】若某 API 沒 date 欄位 → 以空字串代替
     if "_raw_date" not in twse.columns:
         twse["_raw_date"] = ""
     if "_raw_date" not in tpex.columns:
         tpex["_raw_date"] = ""
-    # 【V0.9.5-cache-vol 防呆】若某 API 沒 volume 欄位 → 以空代替
+    # 【v1.0-vol 防呆】若某 API 沒 volume 欄位 → 以空代替
     if "_raw_volume" not in twse.columns:
         twse["_raw_volume"] = None
     if "_raw_volume" not in tpex.columns:
         tpex["_raw_volume"] = None
 
-    # 【V0.9.5-cache-vol】股數轉張、只保留「張」（不存原始股數）
+    # 【v1.0-vol】股數轉張、只保留「張」（不存原始股數）
     def _vol_to_kilos(s):
         """TradeVolume (e.g. "43019553" 股) → 張 (e.g. 43019.553)"""
         try:
@@ -6093,7 +6104,7 @@ class _CalendarDialog:
 class StrategyGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f"StockTool {VERSION} (Multi-Factor + Top10 Backtest + Portfolio + goodinfo)")
+        self.title(f"StockTool {VERSION} (Multi-Factor + Top10 Backtest + Portfolio + ETF + goodinfo)")
 
         self.log_queue = queue.Queue()
         self.logger = GuiLogger(self.log_queue)
@@ -7326,7 +7337,7 @@ class StrategyGUI(tk.Tk):
         paned.pack(fill="both", expand=True, padx=6, pady=6)
 
         # ── 左面板：篩選條件 + Preset + 按鈕 ──
-        # 【V0.9.5-cache-scrollfix 改】2026-06-19 22:12 William 反映：
+        # 【v1.0-scrollfix 改】2026-06-19 22:12 William 反映：
         # 「window size 不夠大、手動選股左邊欄位沒有全部顯示時請提供 scroll bar 可以 scroll」
         # 原實作 left_frame = ttk.LabelFrame(paned) → widget 比視窗高就被裁掉
         # 改為：外層 left_container（含 Canvas + scrollbar）→ 內層 left_frame（LabelFrame）
@@ -7431,7 +7442,7 @@ class StrategyGUI(tk.Tk):
         btn_row.pack(fill="x", pady=(12, 0))
         ttk.Button(btn_row, text="🔍 開始選股",
                    command=self._ms_run_selection).pack(fill="x", pady=1)
-        # 【V0.9.5-cache-cleanup1】2026-06-19 William 決定：
+        # 【v1.0-cleanup1】2026-06-19 William 決定：
         #   手動選股一律用 cache 的收盤價、不需要「即時抓股價」checkbox
         #   → 看即時 tick 改去「買賣紀錄」Tab（有 30 秒 polling）
         #   → 想強制重抓 cache 用「🔄 重新抓股價」按鈕即可
@@ -7520,7 +7531,7 @@ class StrategyGUI(tk.Tk):
         ms_scroll_y.pack(side="right", fill="y")
         ms_scroll_x.pack(side="bottom", fill="x")
 
-        # 【V0.9.5-cache-hover 新增】2026-06-19 William 要求：
+        # 【v1.0-hover 新增】2026-06-19 William 要求：
         # 滑鼠移到某 row 時、整列黃色 highlight、移走取消
         # 實現方式：建立 _hover iid 變數。
         #   - Motion 進新 row 時：把 _hover 設為該 iid、用 item.configure(tag) 動態改 tag
@@ -7641,10 +7652,10 @@ class StrategyGUI(tk.Tk):
             self._price_df = df
             self._price_last_update = datetime.now()
             self._update_price_status_label()
-            # 【V0.9.5-cache-info】順手加股價更新時間到 status bar
+            # 【v1.0-info】順手加股價更新時間到 status bar
             # 讓使用者不管在哪個 Tab 都看得到「最後更新時間」
             update_str = self._price_last_update.strftime("%Y-%m-%d %H:%M:%S")
-            # 【V0.9.5-cache-info】順手顯示 cache 的 data_date（個股最後交易日）
+            # 【v1.0-info】順手顯示 cache 的 data_date（個股最後交易日）
             # 若 df 有 data_date 欄位且有資料，顯示該日期
             data_date_hint = ""
             try:
@@ -7661,7 +7672,7 @@ class StrategyGUI(tk.Tk):
                             data_date_hint = f"｜資料日期：{_unique_dates[0]} ~ {_unique_dates[-1]}"
             except Exception:
                 pass
-            # 【V0.9.5-cache-vol-fix】2026-06-19 18:50 William 反映：
+            # 【v1.0-vol-fix】2026-06-19 18:50 William 反映：
             # 手動重抓股價完成後、Treeview 不會自動更新（要按「選股」才會 refresh）
             # 看起來「什麼都沒變」、使用者誤以為重抓失敗。
             # 修法：手動重抓完成時、如果 Treeview 已有結果 → 自動重跑選股 refresh Treeview。
@@ -7988,7 +7999,7 @@ class StrategyGUI(tk.Tk):
                 revenue_df = getattr(self, '_revenue_df', None)
                 eps_df = getattr(self, '_eps_df', None)
 
-                # 【V0.9.5-cache-cleanup1】2026-06-19 William 決定：
+                # 【v1.0-cleanup1】2026-06-19 William 決定：
                 #   手動選股一律用 cache 的收盤價、不再提供「即時抓股價」選項
                 #   → 拿掉舊的「即時抓股價」if 分支（原本用 TWSE 即時 API 抓）
                 #   → 仍保留「🔄 重新抓股價」按鈕（強制重抓 cache 用、走正常 fetch_prices）
@@ -8165,13 +8176,13 @@ class StrategyGUI(tk.Tk):
             # stock_yld_last_str = _fmt_float(row.get("去年股票殖利率(%)"))
 
             tag = "checked" if self._ms_checked.get(code, False) else "unchecked"
-            # 【V0.9.5-cache-info】加「資料日期」欄位（從 price_df.data_date）
+            # 【v1.0-info】加「資料日期」欄位（從 price_df.data_date）
             # 顯示個股本身的「最後交易日」、不是 cache 抓取日
             # 例：週五 13:35 抓的 cache、某些股週五暫停交易 → 顯示「2026-06-18」而不是「2026-06-19」
             data_date = str(row.get("data_date", "")).strip()
             data_date_str = data_date if data_date else "—"
             # 【V0.9.5-twser3】Treeview 從 15 欄變 13 欄（拿掉 2 個股票殖利率）
-            # 【V0.9.5-cache-info】再加 1 欄「資料日期」變 14 欄
+            # 【v1.0-info】再加 1 欄「資料日期」變 14 欄
             self._ms_tree.insert("", "end", iid=code, values=(
                 "☑" if self._ms_checked.get(code, False) else "☐",
                 code, name, price_str, rev_str,
@@ -8208,7 +8219,7 @@ class StrategyGUI(tk.Tk):
             )
 
     def _on_tree_hover(self, event):
-        """【V0.9.5-cache-hover】滑鼠移到 Treeview 任一列時
+        """【v1.0-hover】滑鼠移到 Treeview 任一列時
         - 若不是 cell (在捲軸/header) → 清除 hover
         - 若進入同一列 → 不動
         - 若進入新列 → 離開舊列 hover、進入新列 hover（黃色）
@@ -8233,11 +8244,11 @@ class StrategyGUI(tk.Tk):
         self._ms_tree.item(iid, tags=("hover",))
 
     def _on_tree_leave(self, event):
-        """【V0.9.5-cache-hover】滑鼠離開 Treeview → 清除 hover"""
+        """【v1.0-hover】滑鼠離開 Treeview → 清除 hover"""
         self._clear_hover()
 
     def _clear_hover(self):
-        """【V0.9.5-cache-hover】取消目前 hover、恢復該列原本的 checked/unchecked tag"""
+        """【v1.0-hover】取消目前 hover、恢復該列原本的 checked/unchecked tag"""
         if not self._ms_hover_iid:
             return
         old_iid = self._ms_hover_iid
@@ -9032,7 +9043,7 @@ class StrategyGUI(tk.Tk):
                 ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 30)
 
             wb.save(filepath)
-            # 【V0.9.5-cache-savelist-fix2】2026-06-19 22:15 William 反映：
+            # 【v1.0-savelist-fix2】2026-06-19 22:15 William 反映：
             # 「匯出 excel 可以餵回策略參數中的選股來源嗎？可以就只要這個功能」
             # 是的：load_stock_list_from_excel 只要「股票代號」欄（find_col 找「股票/code」）
             # 這個檔案包含「股票代號」+「股票名稱」+ 其他欄位 → load 只讀代號、其它忽略
