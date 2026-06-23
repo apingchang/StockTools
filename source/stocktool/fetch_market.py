@@ -1286,10 +1286,13 @@ def fetch_twse_stock_day_month(session: requests.Session, cfg: StrategyConfig, s
 
 
 def fetch_twse_history(session: requests.Session, cfg: StrategyConfig, codes: List[str], logger: GuiLogger, history_months: int) -> pd.DataFrame:
+    # 【v1.1 重構】避免循環 import fetch_market ↔ export_excel
+    # 改用 lazy lookup
+    from . import export_excel as _export_excel
     hist_list = []
     for code in codes:
         try:
-            df = get_stock_history(session, cfg, code, logger, history_months)
+            df = _export_excel.get_stock_history(session, cfg, code, logger, history_months)
             if df is not None and not df.empty:
                 df["股票代號"] = code
                 hist_list.append(df)

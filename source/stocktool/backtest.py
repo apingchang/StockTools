@@ -25,8 +25,9 @@ import pandas as pd
 import numpy as np
 import requests
 
-from .config import StrategyConfig, GuiLogger
-from .fetch_market import fetch_twse_history
+from .config import StrategyConfig, GuiLogger, find_col
+from .fetch_market import fetch_twse_history, fetch_prices
+from .cache import get_or_fetch
 from .technical import calc_enhanced_tech_indicators
 
 
