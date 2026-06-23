@@ -5,7 +5,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.0
-最後更新: 2026-06-24 00:12 (Asia/Taipei)
+最後更新: 2026-06-24 00:17 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1668,6 +1668,7 @@ from stocktool.fetch_market import (
     safe_parse_json,
     fetch_twse_stock_day_month,
     fetch_twse_history,
+    _MS_PROGRESS,
 )
 from stocktool.etf import (
     fetch_active_etf_list,
@@ -2541,7 +2542,14 @@ class StrategyGUI(tk.Tk):
         try:
             while True:
                 msg = self.log_queue.get_nowait()
-                self.console.insert("end", msg + "\n")
+                # v1.1 重構：GuiLogger 把 log 包成 (type, msg) tuple
+                # 解構拿 msg_text
+                if isinstance(msg, tuple) and len(msg) == 2 and msg[0] == "log":
+                    msg_text = msg[1]
+                else:
+                    # backward compat: 舊版直接傳 str
+                    msg_text = str(msg)
+                self.console.insert("end", msg_text + "\n")
                 self.console.see("end")
         except queue.Empty:
             pass
