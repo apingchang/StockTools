@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-H
-最後更新: 2026-06-23 13:55 (Asia/Taipei)
+最後更新: 2026-06-23 14:05 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -8774,12 +8774,10 @@ class StrategyGUI(tk.Tk):
         if self._etf_only_with_price_var.get():
             df = df[df["收盤價"].notna()]
 
-        # 【V0.9.5-etf-history】依總異動絕對值降序（沒有異動的擺最後）
-        has_change = df["total_change_lots"].abs() > 0.001
-        df = pd.concat([
-            df[has_change].sort_values("total_change_lots", key=lambda x: x.abs(), ascending=False),
-            df[~has_change].sort_values("etf_count", ascending=False),
-        ], ignore_index=True)
+        # 【V0.9.5-etf-history】依 ETF 數降序（William 2026-06-23 14:04 反映）
+        # 原本「有異動排前面、按異動排序」的邏輯跟 UI 標題「依 ETF 數排序」矛盾
+        # → 統一改成：不分有沒有異動、統一按 etf_count 降序
+        df = df.sort_values("etf_count", ascending=False)
 
         # 結果上限
         limit = self._etf_limit_var.get()
