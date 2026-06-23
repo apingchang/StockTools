@@ -5,7 +5,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.0
-最後更新: 2026-06-24 00:07 (Asia/Taipei)
+最後更新: 2026-06-24 00:12 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1616,6 +1616,7 @@ from stocktool.config import (
     build_session,
     find_col,
     _is_market_hours,
+    VERSION,
 )
 from stocktool.cache import (
     get_cache_file,
