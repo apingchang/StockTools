@@ -99,3 +99,13 @@ from .database import (
     _query_eps_history,
     _eps_history_stats,
 )
+from .scoring import (
+    _run_manual_selection,
+    calculate_multi_factor_score,
+    calculate_enhanced_score,
+    calculate_simple_score,
+)
+from .technical import (
+    calc_enhanced_tech_indicators,
+    run_tech,
+)
