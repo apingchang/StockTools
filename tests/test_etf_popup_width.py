@@ -28,13 +28,19 @@ STOCKTOOL_PY = os.path.join(
 
 def test_display_width_helper_exists():
     """【核心守護】StockTool.py 必須有 _display_width helper
+
+    【v1.1 重構】已搬到 stocktool/etf.py
     """
-    with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+    ETF_PY = os.path.join(
+        os.path.dirname(__file__), "..", "source", "stocktool", "etf.py"
+    )
+    target = ETF_PY if os.path.exists(ETF_PY) else STOCKTOOL_PY
+    with open(target, "r", encoding="utf-8") as f:
         content = f.read()
 
     match = re.search(r"def _display_width\(s:\s*str\)\s*->\s*int:", content)
     assert match, (
-        "❌ 找不到 _display_width helper！\n"
+        f"❌ {target} 找不到 _display_width helper！\n"
         "popup 需要它來計算 Text widget 寬度（中文字算 2、其他算 1）。"
     )
 

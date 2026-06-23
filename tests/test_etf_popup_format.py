@@ -23,13 +23,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 STOCKTOOL_PY = os.path.join(
     os.path.dirname(__file__), "..", "source", "StockTool.py"
 )
+ETF_PY = os.path.join(
+    os.path.dirname(__file__), "..", "source", "stocktool", "etf.py"
+)
 
 
 def test_etf_list_uses_newline_separator():
     """【核心守護】aggregate_etf_holdings 產出的 etf_list 用 \\n 分隔、不再用 " | "
     → 讓 popup 可以一行一個 ETF 顯示
     """
-    with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+    # 【v1.1 重構】etf_list 定義已搬到 stocktool/etf.py
+    target = ETF_PY if os.path.exists(ETF_PY) else STOCKTOOL_PY
+    with open(target, "r", encoding="utf-8") as f:
         content = f.read()
 
     # 找 etf_list 定義的那段（aggregate_etf_holdings 內）

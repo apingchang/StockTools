@@ -21,7 +21,8 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
-import StockTool as st  # noqa: E402
+import StockTool as st
+from stocktool import etf as st_etf  # noqa: E402  # v1.1 重構  # noqa: E402
 
 
 # ==========================================================
@@ -41,8 +42,8 @@ def test_build_etf_holdings_table_包含shares欄位():
         {"stock_code": "2330", "stock_name": "台積電", "weight": 25.0, "shares": 100000000, "industry": "半導體"},
     ]
 
-    with patch.object(st, "fetch_active_etf_list") as mock_list, \
-         patch.object(st, "fetch_etf_top10_holdings") as mock_top10:
+    with patch.object(st_etf, "fetch_active_etf_list") as mock_list, \
+         patch.object(st_etf, "fetch_etf_top10_holdings") as mock_top10:
 
         # mock ETF list
         mock_list.return_value = MagicMock()
@@ -97,8 +98,8 @@ def test_build_etf_holdings_table_shares為0_也要帶欄位():
         {"stock_code": "2330", "stock_name": "台積電", "weight": 57.01, "shares": 0, "industry": ""},
     ]
 
-    with patch.object(st, "fetch_active_etf_list") as mock_list, \
-         patch.object(st, "fetch_etf_top10_holdings") as mock_top10:
+    with patch.object(st_etf, "fetch_active_etf_list") as mock_list, \
+         patch.object(st_etf, "fetch_etf_top10_holdings") as mock_top10:
 
         mock_list.return_value = MagicMock()
         mock_list.return_value.iterrows.return_value = iter([
@@ -123,8 +124,8 @@ def test_build_etf_holdings_table_包含industry欄位():
         {"stock_code": "2330", "stock_name": "台積電", "weight": 57.01, "shares": 100, "industry": "半導體"},
     ]
 
-    with patch.object(st, "fetch_active_etf_list") as mock_list, \
-         patch.object(st, "fetch_etf_top10_holdings") as mock_top10:
+    with patch.object(st_etf, "fetch_active_etf_list") as mock_list, \
+         patch.object(st_etf, "fetch_etf_top10_holdings") as mock_top10:
 
         mock_list.return_value = MagicMock()
         mock_list.return_value.iterrows.return_value = iter([
