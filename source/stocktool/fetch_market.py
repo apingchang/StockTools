@@ -55,7 +55,9 @@ from .database import (
     _upsert_eps_history,
     _query_div_history,
     _query_div_history_with_fetched,
+    _query_eps_history,
     _div_history_stats,
+    _eps_history_stats,
     _init_div_history_db,
     _init_eps_history_db,
 )

@@ -24,7 +24,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.formatting.rule import CellIsRule
 
-from .config import find_col, StrategyConfig, GuiLogger
+from .config import find_col, StrategyConfig, GuiLogger, HISTORY_DIR
 from .cache import save_cache, load_cache
 from .fetch_market import month_starts_back, fetch_twse_stock_day_month
 
