@@ -6,7 +6,7 @@
 V0.9.5-cache
 【版本資訊】
 Version: v0.9.5-tab-split-phase3-H
-最後更新: 2026-06-23 13:51 (Asia/Taipei)
+最後更新: 2026-06-23 13:55 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1992,6 +1992,28 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
         return df
     df, last_update, last_update_time = load_cache(file_path)
 
+    # ============================================================
+    # 【結構檢查】優先於時間判斷 — cache 缺欄位就該重抓
+    # ============================================================
+    # 【V0.9.5-cache-vol 結構遷移】2026-06-19 William 反映
+    # 即使 cache 是今天的、也可能是 v0.9.5-goodinfo4+5 以前的舊版（缺 成交量_張 / data_date）
+    # → 有缺欄位就強制重抓、寫入新結構（不管是否盤中/收盤後）
+    # 【V0.9.5-tab-split-phase3-H Fix】2026-06-23 13:50：
+    # 这个检查要放在 market-hours early-return 前面，因為結構問題優先於時間判斷
+    if name == "price":
+        required_cols = {"成交量_張", "data_date"}
+        missing = required_cols - set(df.columns)
+        if missing:
+            logger.log(
+                f"♻️ [{name}] cache 缺欄位 {sorted(missing)}、強制重抓一次 → 寫入新結構"
+            )
+            df = fetch_func()
+            save_cache(file_path, df)
+            return df
+
+    # ============================================================
+    # 【盤中】強制 refresh（revenue/eps 不適用）
+    # ============================================================
     # V0.9.5+ Phase 7（William 2026-06-15 09:56）：
     # 股價 (price) 在盤中會一直變 → 強制 refresh、不限次數
     # 注：revenue/eps 不適用本規則、仍用原本「last_update == today」判斷
@@ -2001,6 +2023,9 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
         save_cache(file_path, df)
         return df
 
+    # ============================================================
+    # 【收盤後/盤前】時間基準 cache 有效性判斷
+    # ============================================================
     # 【V0.9.5-cache-time 新增】2026-06-23 William 09:55 反映：
     # 舊規則「收盤後用 cache」只看日期、不看時間
     # → 9:30 抓的 cache 到 14:00 仍被認為是有效的（其實已過收盤、價格應是收盤價）
@@ -2011,21 +2036,11 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
         )
         return df
 
+    # ============================================================
+    # 【一般】日期基準 cache 有效性判斷（revenue/eps / 舊 price cache）
+    # ============================================================
     # revenue/eps / 舊 price cache (沒時間紀錄) → 沿用原本「last_update == today」判斷
     if last_update == today:
-        # 【V0.9.5-cache-vol 結構遷移】2026-06-19 William 反映
-        # 即使 cache 是今天的、也可能是 v0.9.5-goodinfo4+5 以前的舊版（缺 成交量_張 / data_date）
-        # 加一次結構檢查：有缺欄位就強制重抓一次、寫入新結構
-        if name == "price":
-            required_cols = {"成交量_張", "data_date"}
-            missing = required_cols - set(df.columns)
-            if missing:
-                logger.log(
-                    f"♻️ [{name}] cache 缺欄位 {sorted(missing)}、強制重抓一次 → 寫入新結構"
-                )
-                df = fetch_func()
-                save_cache(file_path, df)
-                return df
         # 【V0.9.5-tab-split-phase3-C Fix11】2026-06-21 William 反映
         # 即使 cache 是今天的、也可能是 Fix10 以前的舊版（缺 EPSYoY_顯示(%) 或全 NaN）
         # 缺欄位或 YoY 全 NaN → 強制重抓一次、讓 Fix10 GoodInfo 12QEPSRate 覆蓋邏輯跑
