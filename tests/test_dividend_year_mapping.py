@@ -34,6 +34,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+import pytest
+
+
+# 【V0.9.5-cache-time 修復】autouse fixture: 避免 test 間污染
+# test_dividend_year_mapping 直接 st._fetch_finmind_dividend = ... 沒還原
+# → 後面的 test_dividend_yield_fix 跑時還是 mock 版 → fail
+@pytest.fixture(autouse=True)
+def _restore_finmind_fetch():
+    original = st._fetch_finmind_dividend
+    yield
+    st._fetch_finmind_dividend = original
 
 
 def _mock_finmind(codes, fake_div):

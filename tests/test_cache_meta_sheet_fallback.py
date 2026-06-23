@@ -57,9 +57,11 @@ def test_load_cache_沒有meta_sheet_不crash():
             # 故意不寫 meta
 
         # 讀取：應該不 crash、回傳 today 日期
-        loaded_df, last_update = st.load_cache(tmp_path)
+        loaded_df, last_update, last_update_time = st.load_cache(tmp_path)
         today = datetime.now().strftime("%Y-%m-%d")
         assert last_update == today, f"meta 缺失時應 fallback 今天日期、實際: {last_update}"
+        # 【V0.9.5-cache-time】舊 cache 沒 last_update_time 時、應為 None
+        assert last_update_time is None, f"meta 缺失時 last_update_time 應為 None、實際: {last_update_time}"
         assert len(loaded_df) == 2, f"應讀到 2 筆、實際: {len(loaded_df)}"
         print("PASS: test_load_cache_沒有meta_sheet_不crash")
     finally:
@@ -78,8 +80,10 @@ def test_load_cache_有meta_sheet_正常讀取():
             meta = pd.DataFrame({"last_update": ["2026-06-17"]})
             meta.to_excel(writer, sheet_name="meta", index=False)
 
-        loaded_df, last_update = st.load_cache(tmp_path)
+        loaded_df, last_update, last_update_time = st.load_cache(tmp_path)
         assert last_update == "2026-06-17", f"應讀到 2026-06-17、實際: {last_update}"
+        # 【V0.9.5-cache-time】舊 meta 沒 last_update_time 欄位時、應為 None
+        assert last_update_time is None, f"last_update_time 應為 None、實際: {last_update_time}"
         assert len(loaded_df) == 1
         print("PASS: test_load_cache_有meta_sheet_正常讀取")
     finally:
@@ -136,10 +140,17 @@ def test_save_cache_同時寫data和meta():
         assert "data" in wb.sheetnames, "data sheet 應存在"
         assert "meta" in wb.sheetnames, "meta sheet 應存在"
 
-        # 驗證 meta 有今天日期
+        # 驗證 meta 有今天日期 + 時間
         meta = pd.read_excel(tmp_path, sheet_name="meta", engine="openpyxl")
         today = datetime.now().strftime("%Y-%m-%d")
         assert meta.loc[0, "last_update"] == today
+        # 【V0.9.5-cache-time】也要有 last_update_time
+        assert "last_update_time" in meta.columns, (
+            f"meta sheet 應有 last_update_time 欄位、實際欄位: {list(meta.columns)}"
+        )
+        assert str(meta.loc[0, "last_update_time"]).strip() != "", (
+            "last_update_time 不應為空"
+        )
         print("PASS: test_save_cache_同時寫data和meta")
     finally:
         os.unlink(tmp_path)

@@ -286,9 +286,15 @@ def test_get_or_fetch_cache缺欄位_自動重抓(monkeypatch, tmp_path):
 
 
 def test_get_or_fetch_cache已完整_不重抓(monkeypatch, tmp_path):
-    """【V0.9.5-cache-vol】cache 已是新結構 → 走快取、不重抓"""
+    """【V0.9.5-cache-vol + V0.9.5-cache-time】cache 已是新結構 → 走快取、不重抓
+
+    【V0.9.5-cache-time 新增】為了讓測試可重現、需 mock：
+    - _is_market_hours() → False（收盤後、不走盤中路徑）
+    - 手寫 cache meta → 模擬「收盤後 14:00 抓的」、cache 有效
+    """
     import StockTool as st
     import pandas as pd
+    from datetime import datetime as _dt
 
     fake_cache = tmp_path / "price.xlsx"
     new_df = pd.DataFrame({
@@ -299,7 +305,16 @@ def test_get_or_fetch_cache已完整_不重抓(monkeypatch, tmp_path):
         "data_date": ["2026-06-18"],
         "成交量_張": [25000.0],
     })
-    st.save_cache(str(fake_cache), new_df)
+
+    # 【V0.9.5-cache-time】手寫 cache → 模擬「收盤後抓的」、記錄日期+時間
+    today_str = _dt.now().strftime("%Y-%m-%d")
+    with pd.ExcelWriter(str(fake_cache), engine="openpyxl") as writer:
+        new_df.to_excel(writer, sheet_name="data", index=False)
+        meta = pd.DataFrame({"last_update": [today_str], "last_update_time": ["14:00:00"]})
+        meta.to_excel(writer, sheet_name="meta", index=False)
+
+    # 【V0.9.5-cache-time】mock 盤中為 False、確保走時間判斷路徑
+    monkeypatch.setattr(st, "_is_market_hours", lambda now=None: False)
 
     monkeypatch.setattr(st, "get_cache_file", lambda name: str(fake_cache))
 
@@ -313,4 +328,4 @@ def test_get_or_fetch_cache已完整_不重抓(monkeypatch, tmp_path):
             pass
 
     df = st.get_or_fetch("price", fake_fetch, FakeLogger())
-    assert call_count["n"] == 0, "cache 已有新結構時不該重抓"
+    assert call_count["n"] == 0, "cache 已有新結構且是收盤後抓的、不該重抓"

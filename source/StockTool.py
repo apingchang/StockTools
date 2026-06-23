@@ -1,12 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-G (2026-06-22 14:15)       ║
+║               台灣股市量化選股系統 v0.9.5-tab-split-phase3-H (2026-06-23 09:55)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 V0.9.5-cache
 【版本資訊】
-Version: v0.9.5-tab-split-phase3-G
-最後更新: 2026-06-22 14:15 (Asia/Taipei)
+Version: v0.9.5-tab-split-phase3-H
+最後更新: 2026-06-23 10:36 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -27,6 +27,50 @@ Python 版本: 3.8+
 【評估】
 - 拿掉 2 個按鈕、加 2 個按鈕：總按鈕數不變、UX 完全一致
 - 風險：低（_ms_export_excel / _etf_export_excel 簽名不變、按鈕初始 disabled 避免誤觸）
+
+
+════════════════════════════════════════════════════════════════════════════════
+【v0.9.5-tab-split-phase3-H 新增內容】2026-06-23 09:55 (William 要求）
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 09:55 反映 2 個問題：
+1. ETF 持股篩選的「今日異動」欄位全是 --（沒資料）
+2. Cache 只記日期不記時間、跨日才重抓不夠精準（盤前/盤後該重抓時不重抓）
+
+【修法】
+1. FixA: ETF shares 寫進 DB
+   - 根因：build_etf_holdings_table 沒把 shares 放進 long_df → _save_etf_holdings_to_db 寫入 DB 全是 0 → _compute_etf_changes 算 change_lots 全 0 → 顯示 --
+   - 修法：build_etf_holdings_table 加 shares + industry 欄位 → long_df 帶 shares → DB 寫對
+   - migration：一次性重抓今天的 ETF 持股、把 shares 補回 DB（昨天的 shares 補不回去、明天起正常）
+   - 4 個 pytest test 守住
+
+2. FixB: Cache 加時間邏輯
+   - 根因：save_cache 只寫 last_update（YYYY-MM-DD）、不寫時間
+   - 場景：昨天 09:30 抓的 cache 到今天 14:00 被視為「有效」（因為 last_update == today）
+     但 cache 內容是 09:30 的盤中價、不是 14:00 的收盤價
+   - 修法：
+     a. save_cache 多寫 last_update_time (HH:MM:SS)
+     b. load_cache 多回傳 time (向後相容、舊 cache time=None)
+     c. 新增 _is_price_cache_valid(date, time) helper：
+        - 收盤後（>= 13:30 或半日盤 13:00）：cache date == 今天 且 cache time >= 今天收盤時間 → 有效
+        - 收盤前（< 09:00）：cache date == 昨天 且 cache time >= 昨天收盤時間 → 有效
+        - 其他（含盤中）：過期、需重抓
+     d. get_or_fetch 對 price 走新邏輯（revenue/eps 仍用舊 last_update == today 判斷）
+   - 15 個 pytest test 守住（含半日盤、週末、邊界）
+
+3. 順手修 test 隔離 bug (pre-existing)
+   - 根因：多個 test 直接 st._fetch_finmind_dividend = lambda 沒還原 → 後面 test_dividend_yield_fix 跑時仍是 mock 版
+   - 修法：tests/conftest.py 加 autouse fixture、每個 test 後還原 _fetch_finmind_dividend
+   - 效果：全部 407 個 test 一起跑 100% pass（原本 3 個會 fail）
+
+【評估】
+- FixA：ETF shares 是根本修正、不修就永遠顯示 --
+- FixB：cache 時間精準度提升、不會重抓舊 cache 也不會忘記抓新 cache
+- 風險：低（向後相容舊 cache、Fixture 不影響其他 test）
+
+【test】
+- FixA: test_etf_long_df_shares.py (4 個)
+- FixB: test_cache_time_logic.py (15 個)
+- 共 407 passed、0 failed
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-tab-split-phase3-F 新增內容】2026-06-22 14:00 (William 要求）
@@ -1509,7 +1553,7 @@ from __future__ import annotations
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
 # 中央管理版本號、避免各處手動改不到
-VERSION = "v0.9.5-tab-split-phase3-G"
+VERSION = "v0.9.5-tab-split-phase3-H"
 
 
 import io
@@ -1777,11 +1821,21 @@ def get_cache_file(name):
 
 
 def save_cache(file_path, df):
+    """寫入 cache（data + meta sheet）
+
+    【V0.9.5-cache-time 新增】2026-06-23 William 09:55 反映：
+    - cache 只記日期、不記時間 → 跨日才重抓、不夠精準
+    - 新規則：cache 要記時間，判斷 cache 是否在「最後一次收盤時間」之後
+    - meta sheet 多寫 last_update_time (HH:MM:SS)
+    - 舊 cache 只有 last_update 欄位、也讀得到、不會爆
+    """
     os.makedirs("cache", exist_ok=True)
-    today = datetime.today().strftime("%Y-%m-%d")
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H:%M:%S")
     with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="data", index=False)
-        meta = pd.DataFrame({"last_update": [today]})
+        meta = pd.DataFrame({"last_update": [today], "last_update_time": [time_str]})
         meta.to_excel(writer, sheet_name="meta", index=False)
 
 
@@ -1792,16 +1846,28 @@ def load_cache(file_path):
     - 之前舊 cache 只有 data sheet、沒有 meta → load_cache 直接 crash
     - 「Worksheet named 'meta' not found → fallback 讀舊 cache」錯訊
     - 修法：meta 不存在時 fallback 回傳今天日期（視為剛抓的、不觸發 refresh）
+
+    【V0.9.5-cache-time 新增】2026-06-23 William 09:55：
+    - 多回傳 last_update_time (HH:MM:SS)、None 表示沒紀錄
+    - 舊 cache 沒 last_update_time 時、time=None → _is_price_cache_valid 視為過期、觸發重抓
+    - 回傳值從 (df, date) 改為 (df, date, time)
     """
     df = pd.read_excel(file_path, sheet_name="data", engine="openpyxl")
+    last_update = None
+    last_update_time = None
     try:
         meta = pd.read_excel(file_path, sheet_name="meta", engine="openpyxl")
-        last_update = meta.loc[0, "last_update"]
+        last_update = str(meta.loc[0, "last_update"])
+        # 向後相容：last_update_time 可能不存在（舊 cache 只有 date）
+        if "last_update_time" in meta.columns:
+            _t = meta.loc[0, "last_update_time"]
+            if pd.notna(_t) and str(_t).strip() != "":
+                last_update_time = str(_t)
     except Exception:
-        # 舊 cache 沒 meta sheet → 視為剛抓的、不觸發 refresh
-        # 下次 save_cache 時會補上 meta sheet
+        # 舊 cache 沒 meta sheet → fallback 視為剛抓（但 time=None 會觸發時間-based 重抓）
         last_update = datetime.today().strftime("%Y-%m-%d")
-    return df, last_update
+        last_update_time = None
+    return df, last_update, last_update_time
 
 
 # 【V0.9.5-cache-info 新增】2026-06-19 William 要求：
@@ -1849,6 +1915,73 @@ def _is_market_hours(now: Optional[datetime] = None) -> bool:
     return market_open <= now <= market_close
 
 
+def _is_price_cache_valid(last_update_date, last_update_time, now=None):
+    """【V0.9.5-cache-time 新增】2026-06-23 William 09:55 設定
+
+    判斷 price cache 是否還是「最新收盤價」（可繼續用、免重抓）
+
+    新規則（取代舊的「跨日才重抓」）：
+    - 收盤後（>= 收盤時間 13:30 或半日盤 13:00）：cache time >= 今天的收盤時間 → 仍有效
+    - 收盤前（< 09:00）：cache time >= 昨天的收盤時間 → 仍有效
+    - 其他情況（last_update_date/time 不對、沒時間紀錄）→ False、要重抓
+
+    盤中已由 _is_market_hours() 在 get_or_fetch 先處理、本函式只在「非盤中」被呼。
+
+    跟舊規則的差別：
+    - 舊規則：cache 日期 == 今天 → 用 cache（不分時間、只看日期）
+      → 9:30 抓的跟 14:00 抓的 cache 一樣處理
+    - 新規則：cache 時間 >= 最近收盤時間 → 才用 cache
+      → 9:30 抓的 cache 在 14:00 後視為「過期」、要重抓成收盤價
+
+    Args:
+        last_update_date: 'YYYY-MM-DD' 或 None
+        last_update_time: 'HH:MM:SS' 或 None
+        now: 測試用、可注入 datetime
+
+    Returns:
+        bool: True = cache 仍是最新收盤價（可直接用）
+    """
+    if last_update_date is None or last_update_time is None:
+        return False
+
+    now = now or datetime.now()
+    from datetime import timedelta
+    today_str = now.strftime("%Y-%m-%d")
+
+    # 判斷現在是收盤後還是收盤前
+    is_half_today = today_str in _HALF_DAY_DATES
+    close_hour = 13
+    close_minute = 0 if is_half_today else 30
+    today_close = now.replace(hour=close_hour, minute=close_minute, second=0, microsecond=0)
+
+    if now >= today_close:
+        # 收盤後 → 看今天的收盤時間
+        target_date = today_str
+        target_close = today_close
+    else:
+        # 收盤前 → 看昨天的收盤時間
+        yesterday = now - timedelta(days=1)
+        target_date = yesterday.strftime("%Y-%m-%d")
+        is_half_y = target_date in _HALF_DAY_DATES
+        yh = 13
+        ym = 0 if is_half_y else 30
+        target_close = yesterday.replace(hour=yh, minute=ym, second=0, microsecond=0)
+
+    # cache 日期必須對得上目標日期
+    if str(last_update_date).strip() != target_date:
+        return False
+
+    # cache 時間必須 >= 目標收盤時間
+    try:
+        cache_dt = datetime.strptime(
+            f"{target_date} {last_update_time}",
+            "%Y-%m-%d %H:%M:%S",
+        )
+    except Exception:
+        return False
+    return cache_dt >= target_close
+
+
 def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
     file_path = get_cache_file(name)
     today = datetime.today().strftime("%Y-%m-%d")
@@ -1857,11 +1990,10 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
         df = fetch_func()
         save_cache(file_path, df)
         return df
-    df, last_update = load_cache(file_path)
+    df, last_update, last_update_time = load_cache(file_path)
 
     # V0.9.5+ Phase 7（William 2026-06-15 09:56）：
     # 股價 (price) 在盤中會一直變 → 強制 refresh、不限次數
-    # 盤後/盤前/週末 → 一天只 refresh 一次（last_update == today → 用 cache）
     # 注：revenue/eps 不適用本規則、仍用原本「last_update == today」判斷
     if name == "price" and _is_market_hours():
         logger.log(f"🔄 [{name}] 盤中時段 → 強制 refresh 股價")
@@ -1869,6 +2001,17 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
         save_cache(file_path, df)
         return df
 
+    # 【V0.9.5-cache-time 新增】2026-06-23 William 09:55 反映：
+    # 舊規則「收盤後用 cache」只看日期、不看時間
+    # → 9:30 抓的 cache 到 14:00 仍被認為是有效的（其實已過收盤、價格應是收盤價）
+    # 新規則：price 收盤後/盤前 → 用 cache 時間判斷（cache time >= 最近收盤時間才有效）
+    if name == "price" and _is_price_cache_valid(last_update, last_update_time):
+        logger.log(
+            f"✅ [{name}] cache 仍是最新收盤價（{last_update} {last_update_time}）、免重抓"
+        )
+        return df
+
+    # revenue/eps / 舊 price cache (沒時間紀錄) → 沿用原本「last_update == today」判斷
     if last_update == today:
         # 【V0.9.5-cache-vol 結構遷移】2026-06-19 William 反映
         # 即使 cache 是今天的、也可能是 v0.9.5-goodinfo4+5 以前的舊版（缺 成交量_張 / data_date）
@@ -3892,7 +4035,7 @@ def get_stock_history(session, cfg, stock_id, logger, history_months):
         df = init_stock_history(session, cfg, stock_id, history_months)
         save_cache(file_path, df)
         return df
-    df_old, _ = load_cache(file_path)
+    df_old, _, _ = load_cache(file_path)
     logger.log(f"🔄 [{stock_id}] 更新當月資料")
     df_new = update_stock_history(session, cfg, stock_id, df_old)
     save_cache(file_path, df_new)
@@ -3939,7 +4082,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-G",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-H",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -3982,7 +4125,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-G",
+            "User-Agent": "StockTool/AdvisorStyle-v0.9.5-tab-split-phase3-H",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
@@ -4138,12 +4281,19 @@ def build_etf_holdings_table(session: requests.Session, cfg: StrategyConfig,
         try:
             holdings = fetch_etf_top10_holdings(session, cfg, etf_code)
             for h in holdings:
+                # 【V0.9.5-tab-split-phase3-H FixA】2026-06-23 William 09:55 反映
+                # ETF 持股篩選結果「今日異動」全是 -- → 根因是 build_etf_holdings_table
+                # 沒把 shares 放進 long_df → _save_etf_holdings_to_db 寫入 DB 全是 0
+                # → _compute_etf_changes 算出 change_lots 全 0 → 顯示 --。
+                # 修法：shares 也要放進 long_df → DB 才會有 shares → 異動才會算得出來。
                 all_rows.append({
                     "stock_code": h["stock_code"],
                     "stock_name": h["stock_name"],
                     "etf_code": etf_code,
                     "etf_name": etf_name,
                     "weight": h["weight"],
+                    "shares": h.get("shares", 0),
+                    "industry": h.get("industry", ""),
                 })
             logger.log(f"  ✅ [{etf_code}] {etf_name} 抓到 {len(holdings)} 檔前 10 大")
         except Exception as e:
@@ -8771,7 +8921,7 @@ class StrategyGUI(tk.Tk):
         回傳的 df 至少含欄位：股票代號、股價
         """
         try:
-            df, _ = load_cache(get_cache_file("price"))
+            df, _, _ = load_cache(get_cache_file("price"))
             if df is not None and not df.empty and "股票代號" in df.columns:
                 return df
         except Exception as e:

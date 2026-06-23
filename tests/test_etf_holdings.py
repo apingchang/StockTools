@@ -151,7 +151,7 @@ def test_build_etf_holdings_table_合併多檔ETF():
     logger = MagicMock()
     df = st.build_etf_holdings_table(s, st.StrategyConfig(), logger)
     assert len(df) == 4  # 2+2
-    assert df.columns.tolist() == ["stock_code", "stock_name", "etf_code", "etf_name", "weight"]
+    assert df.columns.tolist() == ["stock_code", "stock_name", "etf_code", "etf_name", "weight", "shares", "industry"]
     # 2330 出現 2 次（被 2 檔 ETF 持有）
     assert len(df[df["stock_code"] == "2330"]) == 2
 
