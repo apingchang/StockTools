@@ -27,7 +27,7 @@ import pandas as pd
 import numpy as np
 import requests
 
-from .config import StrategyConfig, GuiLogger
+from .config import StrategyConfig, GuiLogger, build_session
 from .fetch_market import (
     fetch_prices,
     fetch_revenue_latest,
@@ -37,14 +37,24 @@ from .scoring import (
     calculate_multi_factor_score,
     calculate_enhanced_score,
     calculate_simple_score,
+    format_for_output,
+    ensure_str_column,
 )
 from .technical import run_tech
-from .backtest import portfolio_backtest_topk_event
+from .backtest import (
+    portfolio_backtest_topk_event,
+    build_gate_map,
+    signal_level_backtest_event,
+    performance_by_year,
+    run_walk_forward,
+)
+from .cache import get_or_fetch
 from .export_excel import (
     autosize_columns,
     style_header,
     write_explanation,
     highlight_true,
+    load_stock_list_from_excel,
 )
 
 
