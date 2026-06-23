@@ -1,13 +1,53 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v1.0 (2026-06-23 14:42)       ║
+║               台灣股市量化選股系統 v1.0 (2026-06-24 05:55)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.0
-最後更新: 2026-06-24 00:17 (Asia/Taipei)
+最後更新: 2026-06-24 05:57 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+【v1.0.1 HOTFIX】2026-06-24 05:55 (William 凌晨跑回測炸掉、5:52 主動反映）
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-24 05:52 凌晨跑回測、所有股票抓不到歷史日K：
+  ❌ [2330] 歷史資料錯誤: name 'datetime' is not defined
+  ❌ [2454] 歷史資料錯誤: name 'datetime' is not defined
+  ❌ [2308] 歷史資料錯誤: name 'datetime' is not defined
+  ❌ 無歷史資料，請檢查網路連線
+
+【根因】v1.1 重構時把 datetime 用法從 StockTool.py 搬到各個新 module（export_excel / backtest / technical）、
+但 import 沒跟著搬、造成 NameError：
+- stocktool/export_excel.py  line 65:  datetime.today() (update_stock_history)
+- stocktool/backtest.py       line 351: datetime.now()
+- stocktool/technical.py      line 26:  datetime.today() (calc_enhanced_tech_indicators)
+
+【修法】3 個檔案各自加 `from datetime import datetime` 即可
+- export_excel.py: import os → import os / from datetime import datetime
+- backtest.py: import logging → import logging / from datetime import datetime
+- technical.py: import math → import math / from datetime import datetime
+
+【評估】
+- 一行 import 修一個 bug、零風險
+- 其他 datetime 子項目（date / timedelta）全專案無使用、未漏
+- 為什麼之前測試沒抓到：update_stock_history / calc_enhanced_tech_indicators 都是要走 fetch 流程才會被呼叫、
+  既有 test 都用 mock 跳過、所以漏到 William 實際跑才炸
+- 順便寫結構性 lint test 守全部 stocktool/ module
+  （任何檔案「用 datetime.XXX 但沒 import datetime」就 fail）→ 避免下次重構又漏
+
+【test】
+- tests/test_v1_1_datetime_imports.py（新、5 個）
+  - TestDatetimeImportPresence: 3 個 module 都有 datetime import
+  - TestUpdateStockHistoryCallable: update_stock_history 走 update 分支不 NameError
+  - TestDatetimeUsageLint: 結構性 lint 掃全部 stocktool/ module
+- 全部 416 passed (411 既有 + 5 新）、0 failed
+
+【沒動的】
+- VERSION 還是 v1.0、App title 還是 v1.0-GUI、User-Agent 還是 v1.0-GUI
+- StockTool.py 本體沒改（只動 fileheader）、完全 hotfix 性質
+- 使用手冊不需要更新（v1.0 行為不變）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-tab-split-phase3-G 新增內容】2026-06-22 14:15 (William 要求）

@@ -17,6 +17,7 @@ v1.1 重構：把 Excel 相關函數從 StockTool.py 抽出
 from __future__ import annotations
 
 import os
+from datetime import datetime
 import pandas as pd
 from typing import List, Dict, Any, Optional, Tuple
 
