@@ -11,6 +11,9 @@ import re
 STOCKTOOL_PY = os.path.join(
     os.path.dirname(__file__), "..", "source", "StockTool.py"
 )
+CONFIG_PY = os.path.join(
+    os.path.dirname(__file__), "..", "source", "stocktool", "config.py"
+)
 
 
 def test_run_pipeline_return_handles_top10_codes():
@@ -54,21 +57,29 @@ def test_top10_codes_assignment_in_if_block():
 
 
 def test_use_top10_backtest_default_false():
-    """確認 use_top10_backtest 預設是 False（讓 use_top10_backtest=False 是常見路徑）"""
-    with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+    """確認 use_top10_backtest 預設是 False（讓 use_top10_backtest=False 是常見路徑）
+
+    【v1.1 重構】StrategyConfig 已搬到 stocktool/config.py、
+    但如果該檔不存在時仍 fallback 到 StockTool.py
+    """
+    target = CONFIG_PY if os.path.exists(CONFIG_PY) else STOCKTOOL_PY
+    with open(target, "r", encoding="utf-8") as f:
         content = f.read()
 
     # 找 use_top10_backtest 預設值
-    import re
     m = re.search(r'use_top10_backtest:\s*bool\s*=\s*(True|False)', content)
-    assert m, "❌ 找不到 use_top10_backtest 預設值"
+    assert m, f"❌ {target} 找不到 use_top10_backtest 預設值"
     default = m.group(1)
-    print(f"✅ use_top10_backtest 預設為 {default}")
+    print(f"✅ use_top10_backtest 預設為 {default}（{target}）")
 
     if default == "False":
         # 如果預設 False、則 try/except 修法必須存在（否則必爆）
+        # 【v1.1 重構】預設值在 stocktool/config.py、但 run_pipeline 仍在 StockTool.py
+        # 所以 try/except pattern 要到 StockTool.py 裡找
+        with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+            stocktool_content = f.read()
         pattern = r"try:\s*\n\s*_top10_codes\s*=\s*top10_codes"
-        assert re.search(pattern, content), (
-            "❌ use_top10_backtest 預設 False 但沒保護 top10_codes return！"
+        assert re.search(pattern, stocktool_content), (
+            "❌ use_top10_backtest 預設 False 但 run_pipeline 沒保護 top10_codes return！"
         )
         print("✅ 預設 False → try/except 保護存在")

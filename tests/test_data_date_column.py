@@ -28,6 +28,9 @@ os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 import requests
 
 import StockTool as st  # noqa: E402
+from stocktool import cache as st_cache  # noqa: E402
+# 【v1.1 重構】get_cache_file / save_cache / load_cache / get_or_fetch / _is_market_hours 已搬到 stocktool.cache
+# monkeypatch 需指向 stocktool.cache, 不是 st（st 裡只剩 re-export、指向原始 module）
 
 
 def _mock_session_factory(twse_data=None, tpex_data=None):
@@ -260,8 +263,8 @@ def test_get_or_fetch_cache缺欄位_自動重抓(monkeypatch, tmp_path):
     })
     st.save_cache(str(fake_cache), old_df)
 
-    # 2. monkeypatch get_cache_file
-    monkeypatch.setattr(st, "get_cache_file", lambda name: str(fake_cache))
+    # 2. monkeypatch get_cache_file【v1.1 重構】patch stocktool.cache
+    monkeypatch.setattr(st_cache, "get_cache_file", lambda name: str(fake_cache))
 
     # 3. monkeypatch fetch_func → 計數被呼叫幾次
     call_count = {"n": 0}
@@ -313,10 +316,10 @@ def test_get_or_fetch_cache已完整_不重抓(monkeypatch, tmp_path):
         meta = pd.DataFrame({"last_update": [today_str], "last_update_time": ["14:00:00"]})
         meta.to_excel(writer, sheet_name="meta", index=False)
 
-    # 【V0.9.5-cache-time】mock 盤中為 False、確保走時間判斷路徑
-    monkeypatch.setattr(st, "_is_market_hours", lambda now=None: False)
+    # 【V0.9.5-cache-time】mock 盤中為 False、確保走時間判斷路徑【v1.1 重構】patch stocktool.cache
+    monkeypatch.setattr(st_cache, "_is_market_hours", lambda now=None: False)
 
-    monkeypatch.setattr(st, "get_cache_file", lambda name: str(fake_cache))
+    monkeypatch.setattr(st_cache, "get_cache_file", lambda name: str(fake_cache))
 
     call_count = {"n": 0}
     def fake_fetch():

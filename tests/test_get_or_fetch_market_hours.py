@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import cache as st_cache  # noqa: E402  # v1.1 重構：cache 在 stocktool.cache
 
 
 # ==========================================================
@@ -67,8 +68,8 @@ def test_price_盤中_即使cache是今天也強制refresh(tmp_path):
     today = datetime.now().strftime("%Y-%m-%d")
     _make_fake_cache(cache_path, today, _fake_price_df())
 
-    with patch.object(st, "get_cache_file", return_value=cache_path), \
-         patch.object(st, "_is_market_hours", return_value=True), \
+    with patch.object(st_cache, "get_cache_file", return_value=cache_path), \
+         patch.object(st_cache, "_is_market_hours", return_value=True), \
          patch.object(st, "datetime") as mock_dt:
         # 讓 datetime.now() 回傳盤中（避免真實時間影響）
         mock_dt.now.return_value = datetime(2026, 6, 15, 10, 0, 0)
@@ -99,8 +100,8 @@ def test_price_盤後_用cache不refresh(tmp_path):
     today = datetime.now().strftime("%Y-%m-%d")
     _make_fake_cache(cache_path, today, _fake_price_df())
 
-    with patch.object(st, "get_cache_file", return_value=cache_path), \
-         patch.object(st, "_is_market_hours", return_value=False):
+    with patch.object(st_cache, "get_cache_file", return_value=cache_path), \
+         patch.object(st_cache, "_is_market_hours", return_value=False):
         mock_logger = MagicMock()
         fetch_called = []
 
@@ -126,8 +127,8 @@ def test_price_盤後_cache是昨天_走正常refresh路徑(tmp_path):
     yesterday = "2026-06-14"  # 假設今天是 2026-06-15
     _make_fake_cache(cache_path, yesterday, _fake_price_df())
 
-    with patch.object(st, "get_cache_file", return_value=cache_path), \
-         patch.object(st, "_is_market_hours", return_value=False), \
+    with patch.object(st_cache, "get_cache_file", return_value=cache_path), \
+         patch.object(st_cache, "_is_market_hours", return_value=False), \
          patch.object(st, "datetime") as mock_dt:
         mock_dt.now.return_value = datetime(2026, 6, 15, 14, 0, 0)  # 盤後
         mock_dt.today.return_value = mock_dt.now.return_value
@@ -160,8 +161,8 @@ def test_revenue_盤中_不強制refresh_走原本邏輯(tmp_path):
     revenue_df = pd.DataFrame({"股票代號": ["2330"], "營收YoY(%)": [25.0]})
     _make_fake_cache(cache_path, today, revenue_df)
 
-    with patch.object(st, "get_cache_file", return_value=cache_path), \
-         patch.object(st, "_is_market_hours", return_value=True):
+    with patch.object(st_cache, "get_cache_file", return_value=cache_path), \
+         patch.object(st_cache, "_is_market_hours", return_value=True):
         mock_logger = MagicMock()
         fetch_called = []
 
@@ -189,8 +190,8 @@ def test_eps_盤中_不強制refresh_走原本邏輯(tmp_path):
     })
     _make_fake_cache(cache_path, today, eps_df)
 
-    with patch.object(st, "get_cache_file", return_value=cache_path), \
-         patch.object(st, "_is_market_hours", return_value=True):
+    with patch.object(st_cache, "get_cache_file", return_value=cache_path), \
+         patch.object(st_cache, "_is_market_hours", return_value=True):
         mock_logger = MagicMock()
         fetch_called = []
 

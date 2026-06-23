@@ -1,0 +1,47 @@
+"""
+stocktool - StockTool 模組化 package
+====================================
+
+v1.1 重構：把原本的 10,341 行超級檔案拆成 11 個聚焦模組
+
+模組清單：
+- stocktool.config        設定 / Logger / Session / 盤中判斷
+- stocktool.cache         快取 I/O
+- stocktool.database      3 個歷史 DB CRUD
+- stocktool.fetch_market  行情資料抓取
+- stocktool.etf           ETF 持股統計
+- stocktool.scoring       評分系統
+- stocktool.technical     技術指標
+- stocktool.backtest      回測引擎
+- stocktool.export_excel  Excel 樣式
+- stocktool.pipeline      選股流程組合
+- stocktool.gui.*         GUI 主視窗 + 4 個 Tab
+
+向後相容：本 __init__.py re-export 所有常用符號，
+原本 `from StockTool import StrategyConfig` 的程式碼可以無痛改成 `from stocktool import StrategyConfig`。
+"""
+
+__version__ = "1.1.0"
+
+# 向後相容：重新 export 常用符號
+from .config import (
+    DEFAULT_CONFIG,
+    CONFIG_FILE,
+    HISTORY_DIR,
+    _HALF_DAY_DATES,
+    load_config,
+    save_config,
+    StrategyConfig,
+    GuiLogger,
+    PrintLogger,
+    build_session,
+    find_col,
+    _is_market_hours,
+)
+from .cache import (
+    get_cache_file,
+    save_cache,
+    load_cache,
+    get_or_fetch,
+    _is_price_cache_valid,
+)
