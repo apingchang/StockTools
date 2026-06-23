@@ -43,6 +43,10 @@ def test_compute_etf_changes_回傳欄位是today_change_lots():
     """【V0.9.5-tab-split-phase3-H FixA2 守護】
     _compute_etf_changes 回傳的 DataFrame 必須有 today_change_lots 欄位（不是 change_lots）
     """
+    from datetime import datetime, timedelta
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         tmp_path = tmp.name
 
@@ -54,11 +58,11 @@ def test_compute_etf_changes_回傳欄位是today_change_lots():
         # 今天 2330 有 1000 股
         st._save_etf_holding_snapshot(tmp_path, "00400A", [
             {"stock_code": "2330", "stock_name": "台積電", "weight": 50.0, "shares": 1000, "industry": ""},
-        ], date_str="2026-06-23")
+        ], date_str=today_str)
         # 昨天 2330 有 500 股
         st._save_etf_holding_snapshot(tmp_path, "00400A", [
             {"stock_code": "2330", "stock_name": "台積電", "weight": 50.0, "shares": 500, "industry": ""},
-        ], date_str="2026-06-22")
+        ], date_str=yesterday_str)
 
         result = st._compute_etf_changes(tmp_path)
 

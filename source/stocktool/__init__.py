@@ -139,3 +139,4 @@ from .pipeline import (
     _run_selection_only,
     run_pipeline,
 )
+from .gui.calendar import _CalendarDialog
