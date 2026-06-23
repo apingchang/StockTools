@@ -11,6 +11,9 @@ import re
 STOCKTOOL_PY = os.path.join(
     os.path.dirname(__file__), "..", "source", "StockTool.py"
 )
+PIPELINE_PY = os.path.join(
+    os.path.dirname(__file__), "..", "source", "stocktool", "pipeline.py"
+)
 
 
 def test_strong_filter_helper_exists():
@@ -19,7 +22,9 @@ def test_strong_filter_helper_exists():
     Phase 3 B-2-fix：原本是 nested function、導致 use_top10_backtest 路徑呼叫時 UnboundLocalError
     改為 module-level function
     """
-    with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+    # 【v1.1 重構】_apply_strong_filter 已搬到 stocktool/pipeline.py
+    target = PIPELINE_PY if os.path.exists(PIPELINE_PY) else STOCKTOOL_PY
+    with open(target, "r", encoding="utf-8") as f:
         content = f.read()
 
     # 必須有 module-level helper（頂層、不在函式內）
@@ -39,7 +44,8 @@ def test_strong_filter_helper_exists():
 
 def test_helper_filters_all_four_conditions():
     """helper 必須過濾 4 個條件：營收YoY、EPS>0、PE、股價"""
-    with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+    target = PIPELINE_PY if os.path.exists(PIPELINE_PY) else STOCKTOOL_PY
+    with open(target, "r", encoding="utf-8") as f:
         content = f.read()
 
     # 找 helper body
@@ -68,7 +74,8 @@ def test_helper_filters_all_four_conditions():
 
 def test_strong_filter_called_in_top10_path():
     """use_top10_backtest 路徑必須呼叫 _apply_strong_filter"""
-    with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+    target = PIPELINE_PY if os.path.exists(PIPELINE_PY) else STOCKTOOL_PY
+    with open(target, "r", encoding="utf-8") as f:
         content = f.read()
 
     # 找「if cfg.use_top10_backtest」區塊到下一個「return」
@@ -89,7 +96,8 @@ def test_strong_filter_called_in_top10_path():
 
 def test_strong_filter_called_in_normal_path():
     """正常回測路徑必須呼叫 _apply_strong_filter"""
-    with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+    target = PIPELINE_PY if os.path.exists(PIPELINE_PY) else STOCKTOOL_PY
+    with open(target, "r", encoding="utf-8") as f:
         content = f.read()
 
     # 找 use_top10_backtest 區塊之後的「正常回測模式」段
@@ -112,7 +120,8 @@ def test_strong_filter_called_in_normal_path():
 
 def test_ui_label_changed():
     """UI label 必須從「💪 強勢股過濾 (報表用)」改為「💪 強勢股過濾」"""
-    with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+    target = PIPELINE_PY if os.path.exists(PIPELINE_PY) else STOCKTOOL_PY
+    with open(target, "r", encoding="utf-8") as f:
         content = f.read()
 
     # 不應再有「(報表用)」
@@ -129,7 +138,8 @@ def test_ui_label_changed():
 
 def test_helper_logs_filter_counts():
     """helper 必須 log 過濾前/後筆數"""
-    with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+    target = PIPELINE_PY if os.path.exists(PIPELINE_PY) else STOCKTOOL_PY
+    with open(target, "r", encoding="utf-8") as f:
         content = f.read()
 
     m = re.search(

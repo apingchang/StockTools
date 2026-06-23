@@ -123,3 +123,19 @@ from .backtest import (
     get_codes_for_period,
     quick_backtest_for_period,
 )
+from .export_excel import (
+    load_stock_list_from_excel,
+    get_history_file,
+    init_stock_history,
+    update_stock_history,
+    get_stock_history,
+    autosize_columns,
+    style_header,
+    write_explanation,
+    highlight_true,
+)
+from .pipeline import (
+    _apply_strong_filter,
+    _run_selection_only,
+    run_pipeline,
+)

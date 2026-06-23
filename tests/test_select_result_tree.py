@@ -13,11 +13,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 STOCKTOOL_PY = os.path.join(
     os.path.dirname(__file__), "..", "source", "StockTool.py"
 )
+PIPELINE_PY = os.path.join(
+    os.path.dirname(__file__), "..", "source", "stocktool", "pipeline.py"
+)
 
 
 def test_run_pipeline_returns_df_sel():
-    """run_pipeline 結尾必須 return dict 含 df_sel"""
-    with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
+    """run_pipeline 結尾必須 return dict 含 df_sel【v1.1 重構】run_pipeline 已搬到 pipeline.py"""
+    target = PIPELINE_PY if os.path.exists(PIPELINE_PY) else STOCKTOOL_PY
+    with open(target, "r", encoding="utf-8") as f:
         content = f.read()
 
     # 找 run_pipeline 結尾、要有 return 包含 df_sel
