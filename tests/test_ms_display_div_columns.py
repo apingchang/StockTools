@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構：fetch_market 函式改用此模組
 
 
 CY = datetime.now().year  # 2026
@@ -40,7 +41,7 @@ def test_run_manual_selection_產出含元後綴股利欄位():
     """【核心整合守護】_run_manual_selection 產出的 df 必須含「(元)」後綴欄位
     這是 _ms_display_results 跟 _run_manual_selection 的契約測試
     """
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "2330",
             f"{CY}現金股利": 2.5,
@@ -155,7 +156,7 @@ def test_股利為0時_現金殖利率應為None():
     """【邊界】現金股利 = 0（公司該年未配息）→ 現金殖利率應為 None、不該是 0%
     這是 _run_manual_selection 計算殖利率時的既有邏輯
     """
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "9999",
             # V0.9.5-goodinfo 新語意：今年=cy → 把「不配息」移到 CY

@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構
 
 
 def _mock_finmind(codes, fake_div):
@@ -49,7 +50,7 @@ def test_PE_接近零時_應為None():
         "2024現金股利": [2.5], "2024股票股利": [0.0],
         "2023現金股利": [1.5], "2023股票股利": [0.0],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("6171", "大城地產", 24.0, 800)])
     rev = pd.DataFrame({"股票代號": ["6171"], "營收YoY(%)": [None]})
@@ -68,7 +69,7 @@ def test_PE_負值時_應為None():
         "2024現金股利": [None], "2024股票股利": [None],
         "2023現金股利": [None], "2023股票股利": [None],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("LOSE1", "虧損股", 20.0, 100)])
     rev = pd.DataFrame({"股票代號": ["LOSE1"], "營收YoY(%)": [None]})
@@ -87,7 +88,7 @@ def test_PE_正常值_應正確計算():
         "2024現金股利": [1.0], "2024股票股利": [0.0],
         "2023現金股利": [0.8], "2023股票股利": [0.0],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("OK1", "正常股", 50.0, 500)])
     rev = pd.DataFrame({"股票代號": ["OK1"], "營收YoY(%)": [None]})
@@ -106,7 +107,7 @@ def test_PE_邊界值_EPS_等於0_05時_應計算():
         "2024現金股利": [None], "2024股票股利": [None],
         "2023現金股利": [None], "2023股票股利": [None],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("BORDER", "邊界股", 10.0, 100)])
     rev = pd.DataFrame({"股票代號": ["BORDER"], "營收YoY(%)": [None]})
@@ -126,7 +127,7 @@ def test_PE_邊界值_EPS_略低於0_05時_應為None():
         "2024現金股利": [None], "2024股票股利": [None],
         "2023現金股利": [None], "2023股票股利": [None],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("BORDER2", "邊界股2", 10.0, 100)])
     rev = pd.DataFrame({"股票代號": ["BORDER2"], "營收YoY(%)": [None]})

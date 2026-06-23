@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構
 
 CY = 2026
 
@@ -25,7 +26,7 @@ def test_bug1_fetch_returns_yield():
         insert9(db, "TST1", CY, 3.5, 1.0, "goodinfo", "2026-07-15", 120.0, 2.91, 0.83)
         insert9(db, "TST1", CY - 1, 2.8, 0.5, "goodinfo", "2025-07-16", 115.0, 2.43, 0.43)
 
-        result = st._fetch_finmind_dividend(["TST1"], db_path=db, skip_remote=True)
+        result = st_fetch_market._fetch_finmind_dividend(["TST1"], db_path=db, skip_remote=True)
         assert not result.empty
         row = result.iloc[0]
 
@@ -54,7 +55,7 @@ def test_bug1_multi_stocks():
         insert9(db, "M001", CY, 1.0, 0.5, "goodinfo", None, None, 1.5, 0.75)
         insert9(db, "M002", CY, 2.0, 0.0, "goodinfo", None, None, 3.2, 0.0)
 
-        result = st._fetch_finmind_dividend(["M001", "M002"], db_path=db, skip_remote=True)
+        result = st_fetch_market._fetch_finmind_dividend(["M001", "M002"], db_path=db, skip_remote=True)
         assert len(result) == 2
         by_code = {row["股票代號"]: row for _, row in result.iterrows()}
 
@@ -140,15 +141,15 @@ def test_skip_remote_no_finmind():
     insert9(db, "SKIP1", CY - 2, 3.5, 0.0, "goodinfo", None, None, 2.9, 0.0)
 
     called = []
-    orig = st._finmind_get
+    orig = st_fetch_market._finmind_get
     def tracker(*a, **kw):
         called.append((a, kw))
         return []
-    st._finmind_get = tracker
+    st_fetch_market._finmind_get = tracker
     try:
-        result = st._fetch_finmind_dividend(["SKIP1"], db_path=db, skip_remote=True)
+        result = st_fetch_market._fetch_finmind_dividend(["SKIP1"], db_path=db, skip_remote=True)
     finally:
-        st._finmind_get = orig
+        st_fetch_market._finmind_get = orig
 
     assert len(called) == 0, f"skip_remote=True must NOT call FinMind, called {len(called)} times"
     row = result.iloc[0]

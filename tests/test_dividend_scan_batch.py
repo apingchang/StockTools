@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構
 
 
 def _fake_get_factory(call_log):
@@ -41,9 +42,9 @@ def test_batch_size_限制_只抓前N檔():
         st._init_div_history_db(db_path)
         # 5 檔全部不在 DB
         call_log = []
-        st._finmind_get = _fake_get_factory(call_log)
+        st_fetch_market._finmind_get = _fake_get_factory(call_log)
 
-        added = st._background_fetch_all_dividend(
+        added = st_fetch_market._background_fetch_all_dividend(
             ["A1", "A2", "A3", "A4", "A5"], db_path=db_path, batch_size=3,
         )
         # 應抓 3 檔、call_log 應為前 3 個
@@ -62,9 +63,9 @@ def test_batch_size_None_等於全部抓():
     try:
         st._init_div_history_db(db_path)
         call_log = []
-        st._finmind_get = _fake_get_factory(call_log)
+        st_fetch_market._finmind_get = _fake_get_factory(call_log)
 
-        added = st._background_fetch_all_dividend(
+        added = st_fetch_market._background_fetch_all_dividend(
             ["A1", "A2", "A3", "A4", "A5"], db_path=db_path, batch_size=None,
         )
         assert added == 5, f"應抓 5 檔，實際: {added}"
@@ -81,9 +82,9 @@ def test_batch_size_超過缺漏_等於全部抓():
     try:
         st._init_div_history_db(db_path)
         call_log = []
-        st._finmind_get = _fake_get_factory(call_log)
+        st_fetch_market._finmind_get = _fake_get_factory(call_log)
 
-        added = st._background_fetch_all_dividend(
+        added = st_fetch_market._background_fetch_all_dividend(
             ["A1", "A2", "A3", "A4", "A5"], db_path=db_path, batch_size=100,
         )
         assert added == 5, f"應抓 5 檔，實際: {added}"
@@ -104,9 +105,9 @@ def test_batch_size_跳過已在DB的_再切片():
         st._upsert_div_history(db_path, [("A2", 2025, 1.0, 0.0, "test")])
 
         call_log = []
-        st._finmind_get = _fake_get_factory(call_log)
+        st_fetch_market._finmind_get = _fake_get_factory(call_log)
 
-        added = st._background_fetch_all_dividend(
+        added = st_fetch_market._background_fetch_all_dividend(
             ["A1", "A2", "A3", "A4", "A5", "A6", "A7"], db_path=db_path, batch_size=3,
         )
         assert added == 3, f"應抓 3 檔（A3/A4/A5），實際: {added}"
@@ -124,10 +125,10 @@ def test_batch_size_0或負數_等於None():
     try:
         st._init_div_history_db(db_path)
         call_log = []
-        st._finmind_get = _fake_get_factory(call_log)
+        st_fetch_market._finmind_get = _fake_get_factory(call_log)
 
         # batch_size=0
-        added = st._background_fetch_all_dividend(
+        added = st_fetch_market._background_fetch_all_dividend(
             ["A1", "A2", "A3"], db_path=db_path, batch_size=0,
         )
         assert added == 3, f"batch=0 應抓全部，實際: {added}"
@@ -135,7 +136,7 @@ def test_batch_size_0或負數_等於None():
 
         # batch_size=-1
         call_log.clear()
-        added = st._background_fetch_all_dividend(
+        added = st_fetch_market._background_fetch_all_dividend(
             ["B1", "B2", "B3"], db_path=db_path, batch_size=-1,
         )
         assert added == 3, f"batch=-1 應抓全部，實際: {added}"
@@ -155,9 +156,9 @@ def test_batch_size_全部已在DB_回傳0():
             st._upsert_div_history(db_path, [(c, 2025, 1.0, 0.0, "test")])
 
         call_log = []
-        st._finmind_get = _fake_get_factory(call_log)
+        st_fetch_market._finmind_get = _fake_get_factory(call_log)
 
-        added = st._background_fetch_all_dividend(
+        added = st_fetch_market._background_fetch_all_dividend(
             ["A1", "A2", "A3"], db_path=db_path, batch_size=2,
         )
         assert added == 0, f"應回傳 0，實際: {added}"
@@ -175,9 +176,9 @@ def test_batch_size_402_仍回傳負值():
         st._init_div_history_db(db_path)
         def fake_get_with_402(*args, **kwargs):
             raise RuntimeError("FinMind 額度已用完（status 402）")
-        st._finmind_get = fake_get_with_402
+        st_fetch_market._finmind_get = fake_get_with_402
 
-        added = st._background_fetch_all_dividend(
+        added = st_fetch_market._background_fetch_all_dividend(
             ["A1", "A2", "A3", "A4", "A5"], db_path=db_path, batch_size=3,
         )
         # 第一檔就 402 → 立刻 break → 回傳 -1
@@ -204,9 +205,9 @@ def test_100檔_次_典型情境():
             st._upsert_div_history(db_path, [(c, 2025, 1.0, 0.0, "test")])
 
         call_log = []
-        st._finmind_get = _fake_get_factory(call_log)
+        st_fetch_market._finmind_get = _fake_get_factory(call_log)
 
-        added = st._background_fetch_all_dividend(
+        added = st_fetch_market._background_fetch_all_dividend(
             all_codes, db_path=db_path, batch_size=100,
         )
         # 應抓 100 檔

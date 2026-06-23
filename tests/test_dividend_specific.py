@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構
 
 
 def _parse_codes(raw: str, max_n: int = 100):
@@ -92,7 +93,7 @@ def test_specific_dividend_只抓缺漏的():
                     "StockEarningsDistribution": 0.0,
                 }]
             return []
-        st._finmind_get = fake_get
+        st_fetch_market._finmind_get = fake_get
 
         # 用戶輸入 2330, 3188, 2317
         user_input = "2330,3188,2317"
@@ -104,7 +105,7 @@ def test_specific_dividend_只抓缺漏的():
         assert "3188" not in to_fetch
         assert set(to_fetch) == {"2330", "2317"}
 
-        added = st._background_fetch_all_dividend(to_fetch, db_path=db_path)
+        added = st_fetch_market._background_fetch_all_dividend(to_fetch, db_path=db_path)
         assert added == 2
 
         # 2330 應在 DB

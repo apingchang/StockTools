@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構：fetch_market 函式改用此模組
 
 
 def _mock_finmind(codes, fake_div):
@@ -69,7 +70,7 @@ def test_今年殖利率100用goodinfo_不走fallback():
         "2025現金殖利率_goodinfo": [4.55],
         "2024現金殖利率_goodinfo": [3.20],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("2330", "台積電", 100.0, 5000)])
     rev, eps = _empty_revenue_eps()
@@ -93,7 +94,7 @@ def test_去年殖利率100用goodinfo_不走cash_exDateClose_fallback():
         "2025除息日": ["2026-08-15"],
         "2025除息日收盤價": [1200.0],   # DB 有 ex_date_close
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("2330", "台積電", 100.0, 5000)])
     rev, eps = _empty_revenue_eps()
@@ -123,7 +124,7 @@ def test_cash0_但goodinfo有值_殖利率直接用goodinfo():
         "2025現金殖利率_goodinfo": [0.76],
         "2024現金殖利率_goodinfo": [0.48],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("5386", "捷敏", 499.0, 1000)])
     rev, eps = _empty_revenue_eps()
@@ -150,7 +151,7 @@ def test_goodinfo殖利率0_未配息_顯示0():
         "2026現金殖利率_goodinfo": [0.0],   # 該年未配息 = 0%
         "2025現金殖利率_goodinfo": [0.4],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("2408", "南亞科", 340.0, 1000)])
     rev, eps = _empty_revenue_eps()
@@ -174,7 +175,7 @@ def test_完全無goodinfo殖利率_殖利率None():
         "2024現金股利": [3.5], "2024股票股利": [0.0],
         # 故意不給殖利率
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("9999", "新上市股", 100.0, 500)])
     rev, eps = _empty_revenue_eps()
@@ -201,7 +202,7 @@ def test_今年股票殖利率用goodinfo():
         "2025股票殖利率_goodinfo": [1.78],
         "2024股票殖利率_goodinfo": [1.07],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("5386", "捷敏", 499.0, 1000)])
     rev, eps = _empty_revenue_eps()
@@ -229,7 +230,7 @@ def test_10Y平均殖利率欄位已拿掉():
         "2025現金殖利率_goodinfo": [4.55],
         "2024現金殖利率_goodinfo": [3.20],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("2330", "台積電", 100.0, 5000)])
     rev, eps = _empty_revenue_eps()
@@ -254,7 +255,7 @@ def test_3231_緯創_去年殖利率直接用goodinfo():
         "2025現金殖利率_goodinfo": [3.3],   # ← goodinfo 提供
         "2024現金殖利率_goodinfo": [2.36],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("3231", "緯創", 158.00, 1000)])
     rev, eps = _empty_revenue_eps()
@@ -284,7 +285,7 @@ def test_5386_捷敏_殖利率用goodinfo_不為None():
         "2025股票殖利率_goodinfo": [1.78],
         "2024股票殖利率_goodinfo": [1.07],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("5386", "捷敏", 499.0, 1000)])
     rev, eps = _empty_revenue_eps()
@@ -318,7 +319,7 @@ def test_殖利率0_0_不該當None_應為0_00():
         # goodinfo 殖利率 = 0（該年未配息）
         "2026現金殖利率_goodinfo": [0.0],   # ← 關鍵
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("2408", "南亞科", 340.0, 1000)])
     rev, eps = _empty_revenue_eps()

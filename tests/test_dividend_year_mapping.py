@@ -34,17 +34,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構：fetch_market 函式改用此模組
 import pytest
 
 
 # 【V0.9.5-cache-time 修復】autouse fixture: 避免 test 間污染
-# test_dividend_year_mapping 直接 st._fetch_finmind_dividend = ... 沒還原
+# test_dividend_year_mapping 直接 st_fetch_market._fetch_finmind_dividend = ... 沒還原
 # → 後面的 test_dividend_yield_fix 跑時還是 mock 版 → fail
 @pytest.fixture(autouse=True)
 def _restore_finmind_fetch():
-    original = st._fetch_finmind_dividend
+    original = st_fetch_market._fetch_finmind_dividend
     yield
-    st._fetch_finmind_dividend = original
+    st_fetch_market._fetch_finmind_dividend = original
 
 
 def _mock_finmind(codes, fake_div):
@@ -99,7 +100,7 @@ def test_3188_鑫龍騰_去年殖利率不該用今年現金股利():
         "2025現金殖利率_goodinfo": [7.21],
         "2024現金殖利率_goodinfo": [5.54],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("3188", "鑫龍騰", 24.95, 500)])
     rev, eps = _empty_revenue_eps()
@@ -133,7 +134,7 @@ def test_2408_南亞科_無DB資料時今年股利是None_不是用去年頂替(
         "2024現金股利": [None], "2024股票股利": [None],
         "2023現金股利": [None], "2023股票股利": [None],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("2408", "南亞科", 340.0, 1000)])
     rev, eps = _empty_revenue_eps()
@@ -165,7 +166,7 @@ def test_2408_南亞科_殖利率用goodinfo():
         # V0.9.5-goodinfo3：殖利率 100% 用 goodinfo
         "2026現金殖利率_goodinfo": [0.32],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("2408", "南亞科", 340.0, 1000)])
     rev, eps = _empty_revenue_eps()
@@ -194,7 +195,7 @@ def test_6171_大城地產_前年現金股利指向cy3():
         "2025現金殖利率_goodinfo": [6.25],
         "2024現金殖利率_goodinfo": [3.05],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("6171", "大城地產", 24.0, 800)])
     rev, eps = _empty_revenue_eps()
@@ -231,7 +232,7 @@ def test_year_mapping_不互相覆蓋():
         "2023現金股利": [1.0],
         "2023股票股利": [0.0],
     })
-    st._fetch_finmind_dividend = _mock_finmind(None, fake_div)
+    st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
 
     price_df = _make_input([("TEST1", "測試股", 100.0, 100)])
     rev, eps = _empty_revenue_eps()

@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構：fetch_market 函式改用此模組
 
 
 # 取得當前年份（測試用）
@@ -55,7 +56,7 @@ def _make_div_df(codes_with_div: dict) -> pd.DataFrame:
 
 def _setup_mock(stock_divs: dict):
     """設定 _fetch_finmind_dividend mock"""
-    st._fetch_finmind_dividend = lambda codes, **kw: _make_div_df(stock_divs)
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: _make_div_df(stock_divs)
 
 
 def _build_price_df(rows: list) -> pd.DataFrame:

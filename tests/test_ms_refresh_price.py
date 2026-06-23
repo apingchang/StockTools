@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構：fetch_market 函式改用此模組
 
 
 def test_選股永遠走cache不呼叫finmind_price_batch():
@@ -38,8 +39,8 @@ def test_選股永遠走cache不呼叫finmind_price_batch():
             {"股票代號": "3188", "現價": 100.0, "成交量_張": 500.0},
         ])
 
-    st._fetch_finmind_prices_batch = fake_batch
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame()
+    st_fetch_market._fetch_finmind_prices_batch = fake_batch
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame()
 
     # 模擬 price_df
     price_df = pd.DataFrame([

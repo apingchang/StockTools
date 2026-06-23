@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構
 
 
 def _mock_finmind_for_6231():
@@ -49,10 +50,10 @@ def test_background_fetch_all_dividend_跳過已在DB的():
         def fake_get(dataset, code, start, end, retry=2):
             call_count["n"] += 1
             return _mock_finmind_for_6231()
-        st._finmind_get = fake_get
+        st_fetch_market._finmind_get = fake_get
 
         # 只給 3188 + 6231，3188 在 DB 應跳過、6231 應被抓
-        added = st._background_fetch_all_dividend(["3188", "6231"], db_path=db_path)
+        added = st_fetch_market._background_fetch_all_dividend(["3188", "6231"], db_path=db_path)
         assert added == 1, f"應抓 1 檔（6231），實際: {added}"
         assert call_count["n"] == 1, f"應只 call FinMind 1 次，實際: {call_count['n']}"
     finally:
@@ -69,8 +70,8 @@ def test_background_fetch_all_dividend_progress_callback():
         progress_calls = []
         def cb(done, total):
             progress_calls.append((done, total))
-        st._finmind_get = lambda *args, **kwargs: []
-        st._background_fetch_all_dividend(
+        st_fetch_market._finmind_get = lambda *args, **kwargs: []
+        st_fetch_market._background_fetch_all_dividend(
             ["A1", "A2", "A3"], db_path=db_path, progress_callback=cb,
         )
         # 應有 3 次 callback（每檔一次）
@@ -93,9 +94,9 @@ def test_background_fetch_all_dividend_全部已在DB_回傳0():
         def fake_get(*args, **kwargs):
             call_count["n"] += 1
             return []
-        st._finmind_get = fake_get
+        st_fetch_market._finmind_get = fake_get
 
-        added = st._background_fetch_all_dividend(["3188"], db_path=db_path)
+        added = st_fetch_market._background_fetch_all_dividend(["3188"], db_path=db_path)
         assert added == 0, f"應 0，實際: {added}"
         assert call_count["n"] == 0, f"FinMind 不該被呼叫，實際: {call_count['n']}"
     finally:
@@ -118,9 +119,9 @@ def test_background_fetch_all_dividend_寫入DB後可查詢():
                     "StockEarningsDistribution": 0.0,
                 }]
             return []
-        st._finmind_get = fake_get
+        st_fetch_market._finmind_get = fake_get
 
-        st._background_fetch_all_dividend(["6231"], db_path=db_path)
+        st_fetch_market._background_fetch_all_dividend(["6231"], db_path=db_path)
 
         # 查詢
         cached = st._query_div_history(db_path, ["6231"])
@@ -180,9 +181,9 @@ def test_background_fetch_all_dividend_FinMind額度錯誤_回傳負值():
         # 模擬 _finmind_get 扡 402
         def fake_get_with_402(*args, **kwargs):
             raise RuntimeError("FinMind 額度已用完（status 402）")
-        st._finmind_get = fake_get_with_402
+        st_fetch_market._finmind_get = fake_get_with_402
 
-        added = st._background_fetch_all_dividend(["A1", "A2", "A3"], db_path=db_path)
+        added = st_fetch_market._background_fetch_all_dividend(["A1", "A2", "A3"], db_path=db_path)
         # 額度錯誤應回傳 -1 (不是 3、不是 0)
         assert added == -1, f"FinMind 額度錯誤應回傳 -1，實際: {added}"
     finally:

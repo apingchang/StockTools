@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構：fetch_market 函式改用此模組
 
 
 CY = datetime.now().year  # 2026
@@ -114,7 +115,7 @@ def test_成交量_盤中不再顯示橫線():
 
 def test_排序_以營收累計YoY_降序為主():
     """【V0.9.5-goodinfo4+5 守護】篩選結果依營收累計YoY 由大到小排序"""
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {"股票代號": "1111", f"{CY}現金股利": 1.0, f"{CY}股票股利": 0.0,
          f"{CY - 1}現金股利": 1.0, f"{CY - 1}股票股利": 0.0,
          f"{CY - 2}現金股利": 1.0, f"{CY - 2}股票股利": 0.0,
@@ -151,7 +152,7 @@ def test_排序_以營收累計YoY_降序為主():
 
 def test_排序_同_營收YoY_時_殖利率高排前():
     """【V0.9.5-goodinfo4+5 守護】營收YoY 相同時、殖利率高排前面"""
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {"股票代號": "1111", f"{CY}現金股利": 3.0, f"{CY}股票股利": 0.0,
          f"{CY - 1}現金股利": 0.0, f"{CY - 1}股票股利": 0.0,
          f"{CY - 2}現金股利": 0.0, f"{CY - 2}股票股利": 0.0,
@@ -182,7 +183,7 @@ def test_排序_同_營收YoY_時_殖利率高排前():
 
 def test_排序_None_排最後():
     """【V0.9.5-goodinfo4+5 守護】營收YoY None（-9999）排最後"""
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {"股票代號": "1111", f"{CY}現金股利": 1.0, f"{CY}股票股利": 0.0,
          f"{CY - 1}現金股利": 0.0, f"{CY - 1}股票股利": 0.0,
          f"{CY - 2}現金股利": 0.0, f"{CY - 2}股票股利": 0.0,

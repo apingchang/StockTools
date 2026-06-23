@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構：fetch_market 函式改用此模組
 
 
 def test_查詢DB_含fetched_at_新加函數():
@@ -62,9 +63,9 @@ def test_DB空_cache_全部要抓():
         def fake_get(dataset, code, start, end, retry=2):
             call_log.append(code)
             return []
-        st._finmind_get = fake_get
+        st_fetch_market._finmind_get = fake_get
 
-        result_df = st._fetch_finmind_dividend(
+        result_df = st_fetch_market._fetch_finmind_dividend(
             ["A1", "A2", "A3"], db_path=db_path,
         )
         assert isinstance(result_df, pd.DataFrame)
@@ -96,9 +97,9 @@ def test_DB有資料_新鮮_不重抓():
         def fake_get(dataset, code, start, end, retry=2):
             call_log.append(code)
             return []
-        st._finmind_get = fake_get
+        st_fetch_market._finmind_get = fake_get
 
-        st._fetch_finmind_dividend(
+        st_fetch_market._fetch_finmind_dividend(
             ["3188"], db_path=db_path, cache_max_age_days=30,
         )
         # 1 天前抓的，沒過期 → 不打 FinMind
@@ -129,9 +130,9 @@ def test_DB有資料_過期_重抓():
         def fake_get(dataset, code, start, end, retry=2):
             call_log.append(code)
             return []
-        st._finmind_get = fake_get
+        st_fetch_market._finmind_get = fake_get
 
-        st._fetch_finmind_dividend(
+        st_fetch_market._fetch_finmind_dividend(
             ["3188"], db_path=db_path, cache_max_age_days=30,
         )
         # 60 天前抓的，過期 → 重抓
@@ -164,9 +165,9 @@ def test_部分過期_只重抓過期的():
         def fake_get(dataset, code, start, end, retry=2):
             call_log.append(code)
             return []
-        st._finmind_get = fake_get
+        st_fetch_market._finmind_get = fake_get
 
-        st._fetch_finmind_dividend(
+        st_fetch_market._fetch_finmind_dividend(
             ["A1", "A2", "A3"], db_path=db_path, cache_max_age_days=30,
         )
         assert call_log == ["A2"], f"應只抓 A2，實際: {call_log}"
@@ -187,9 +188,9 @@ def test_cache_max_age_days_0_全部視為過期():
         def fake_get(dataset, code, start, end, retry=2):
             call_log.append(code)
             return []
-        st._finmind_get = fake_get
+        st_fetch_market._finmind_get = fake_get
 
-        st._fetch_finmind_dividend(
+        st_fetch_market._fetch_finmind_dividend(
             ["3188"], db_path=db_path, cache_max_age_days=0,
         )
         # cache=0 天 → 剛抓的也算過期 → 重抓
@@ -220,9 +221,9 @@ def test_cache_max_age_days_負數_視為無限大():
         def fake_get(dataset, code, start, end, retry=2):
             call_log.append(code)
             return []
-        st._finmind_get = fake_get
+        st_fetch_market._finmind_get = fake_get
 
-        st._fetch_finmind_dividend(
+        st_fetch_market._fetch_finmind_dividend(
             ["3188"], db_path=db_path, cache_max_age_days=-1,
         )
         # cache=-1 → 永不過期 → 不打 FinMind
@@ -252,9 +253,9 @@ def test_skip_remote_仍跳過FinMind():
         def fake_get(dataset, code, start, end, retry=2):
             call_log.append(code)
             return []
-        st._finmind_get = fake_get
+        st_fetch_market._finmind_get = fake_get
 
-        st._fetch_finmind_dividend(
+        st_fetch_market._fetch_finmind_dividend(
             ["3188"], db_path=db_path, cache_max_age_days=30, skip_remote=True,
         )
         # skip_remote=True → 不打 FinMind

@@ -47,6 +47,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構：fetch_market 函式改用此模組
 
 
 CY = datetime.now().year  # 2026
@@ -58,7 +59,7 @@ CY = datetime.now().year  # 2026
 
 def test_股票股利顯示_3位小數():
     """【V0.9.5-goodinfo4+5 守護】股票股利顯示 3 位小數（不會被四捨五入掉）"""
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "2442",
             f"{CY}現金股利": 2.0,
@@ -90,7 +91,7 @@ def test_股票股利顯示_3位小數():
 
 def test_現金股利顯示_3位小數():
     """【V0.9.5-goodinfo4+5 守護】現金股利顯示 3 位小數"""
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "2442",
             f"{CY}現金股利": 2.0,
@@ -121,7 +122,7 @@ def test_現金股利顯示_3位小數():
 
 def test_去年股票股利顯示_3位小數():
     """【V0.9.5-goodinfo4+5 守護】去年股票股利也 3 位"""
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "4114",
             f"{CY}現金股利": 0.85,

@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構：fetch_market 函式改用此模組
 
 
 def _today_roc():
@@ -31,7 +32,7 @@ def test_今天有資料_選今天():
         {"date": "1150616", "close": 101.0, "Trading_Volume": 2000},
         {"date": str(today), "close": 102.0, "Trading_Volume": 3000},
     ]
-    row, date = st._pick_latest_price_row(data)
+    row, date = st_fetch_market._pick_latest_price_row(data)
     assert row["close"] == 102.0, f"應選今日 102.0，實際: {row['close']}"
     assert str(date) == str(today)
 
@@ -43,7 +44,7 @@ def test_週末_沒今日資料_取最後一筆():
         {"date": "1150615", "close": 100.0, "Trading_Volume": 1000},
         {"date": "1150616", "close": 101.0, "Trading_Volume": 2000},  # 週五收盤
     ]
-    row, date = st._pick_latest_price_row(data)
+    row, date = st_fetch_market._pick_latest_price_row(data)
     # 找不到今日 → 取最後一筆（週五收盤）
     assert row["close"] == 101.0, f"週末應取最後一筆 101.0，實際: {row['close']}"
 
@@ -56,7 +57,7 @@ def test_今天在後面_不取data_負1():
         {"date": "1150616", "close": 101.0, "Trading_Volume": 2000},
         # 注意：data 順序不一定照日期遞增（測資就長這樣）
     ]
-    row, date = st._pick_latest_price_row(data)
+    row, date = st_fetch_market._pick_latest_price_row(data)
     # 從後往前找到第一個今日 → 101.0（這個測資是壞的、要調換順序）
     # 因為我們是從後往前找、第一個遇到的今日就是 data[1] = 101.0
     # 修正：把 data 改回正確順序
@@ -65,13 +66,13 @@ def test_今天在後面_不取data_負1():
         {"date": "1150616", "close": 101.0, "Trading_Volume": 2000},
         {"date": str(today), "close": 102.0, "Trading_Volume": 3000},
     ]
-    row, date = st._pick_latest_price_row(data)
+    row, date = st_fetch_market._pick_latest_price_row(data)
     assert row["close"] == 102.0, f"應選今日 102.0，實際: {row['close']}"
 
 
 def test_空資料_回None():
     """data 為空 → 回 None"""
-    row, date = st._pick_latest_price_row([])
+    row, date = st_fetch_market._pick_latest_price_row([])
     assert row is None
     assert date is None
 
@@ -90,7 +91,7 @@ def test_今天盤中即時_選今日_不是昨日():
         {"date": "1150616", "close": 425.0, "Trading_Volume": 100000000},   # 昨日收盤 2408
         {"date": str(today), "close": 437.0, "Trading_Volume": 50000000},   # 今日盤中 11:30
     ]
-    row, date = st._pick_latest_price_row(data)
+    row, date = st_fetch_market._pick_latest_price_row(data)
     # 應選今日 437.0（不是昨日 425.0）
     assert row["close"] == 437.0, \
         f"盤中應選今日 437.0，實際: {row['close']}"
@@ -104,6 +105,6 @@ def test_昨天收盤當_今日_避免誤判():
         {"date": "1150615", "close": 100.0, "Trading_Volume": 1000},
         {"date": "1150616", "close": 101.0, "Trading_Volume": 2000},
     ]
-    row, date = st._pick_latest_price_row(data)
+    row, date = st_fetch_market._pick_latest_price_row(data)
     # 沒今日 → data[-1] = 101.0
     assert row["close"] == 101.0

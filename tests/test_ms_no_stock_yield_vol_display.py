@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構：fetch_market 函式改用此模組
 
 
 CY = datetime.now().year  # 2026
@@ -92,7 +93,7 @@ def test_run_manual_selection_還是產出_stock_yield_欄位():
 
     因為 Excel 匯出還需要這欄、只有 Treeview 不顯示
     """
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {"股票代號": "2548", f"{CY}現金股利": 8.5, f"{CY}股票股利": 0.5,
          f"{CY - 1}現金股利": 6.0, f"{CY - 1}股票股利": 0.5,
          f"{CY - 2}現金股利": 0.0, f"{CY - 2}股票股利": 0.0,
@@ -121,7 +122,7 @@ def test_run_manual_selection_還是產出_stock_yield_欄位():
 
 def test_cash_strictly_cash_only():
     """【V0.9.5-goodinfo3 守護】DB cash 跟 stock 是分開存分開顯示、不會加總"""
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {"股票代號": "2548", f"{CY}現金股利": 8.5, f"{CY}股票股利": 0.5,
          f"{CY - 1}現金股利": 6.0, f"{CY - 1}股票股利": 0.5,
          f"{CY - 2}現金股利": 0.0, f"{CY - 2}股票股利": 0.0,

@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構
 
 
 CY = datetime.now().year  # 2026
@@ -110,7 +111,7 @@ def test_update_ex_date_close寫入緩存(tmp_path):
     # 先插一筆
     st._upsert_div_history(db_path, [("2330", 2025, 2.5, 0.5, "finmind", "2025-08-15", None)])
     # 更新 ex_date_close
-    st._update_ex_date_close(db_path, "2330", 2025, "2025-08-15", 620.0)
+    st_fetch_market._update_ex_date_close(db_path, "2330", 2025, "2025-08-15", 620.0)
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
             "SELECT ex_date, ex_date_close FROM dividend_history WHERE stock_id='2330' AND year=2025"
@@ -125,54 +126,54 @@ def test_update_ex_date_close寫入緩存(tmp_path):
 
 def test_fetch_ex_date_close_正常抓到():
     """【核心】除息日當天有資料 → 抓該日 close"""
-    with patch.object(st, "_finmind_get") as mock_fm:
+    with patch.object(st_fetch_market, "_finmind_get") as mock_fm:
         mock_fm.return_value = [
             {"date": "2025-08-13", "close": 618.0},
             {"date": "2025-08-14", "close": 620.0},
             {"date": "2025-08-15", "close": 622.0},  # ex_date 當天
             {"date": "2025-08-16", "close": 624.0},
         ]
-        close = st._fetch_ex_date_close("2330", "2025-08-15")
+        close = st_fetch_market._fetch_ex_date_close("2330", "2025-08-15")
     assert close == 622.0  # ex_date 當天的 close
 
 
 def test_fetch_ex_date_close_除息日是假日找最近():
     """【邊界】除息日是週末（沒資料）→ 找 ±3 天內最近交易日"""
-    with patch.object(st, "_finmind_get") as mock_fm:
+    with patch.object(st_fetch_market, "_finmind_get") as mock_fm:
         mock_fm.return_value = [
             {"date": "2025-08-14", "close": 620.0},  # 最近交易日
             {"date": "2025-08-18", "close": 625.0},
         ]
-        close = st._fetch_ex_date_close("2330", "2025-08-16")  # 週六
+        close = st_fetch_market._fetch_ex_date_close("2330", "2025-08-16")  # 週六
     # 8/16 距 8/14 = 2 天、距 8/18 = 2 天 → 兩個一樣近、取第一個
     assert close == 620.0
 
 
 def test_fetch_ex_date_close_空字串回傳None():
     """ex_date 空字串 → 不打 API、回 None"""
-    assert st._fetch_ex_date_close("2330", "") is None
-    assert st._fetch_ex_date_close("2330", None) is None
+    assert st_fetch_market._fetch_ex_date_close("2330", "") is None
+    assert st_fetch_market._fetch_ex_date_close("2330", None) is None
 
 
 def test_fetch_ex_date_close_額度用完回傳None():
     """FinMind 額度用完（raise RuntimeError）→ 不爆、silently 回 None"""
-    with patch.object(st, "_finmind_get", side_effect=RuntimeError("402")):
-        close = st._fetch_ex_date_close("2330", "2025-08-15")
+    with patch.object(st_fetch_market, "_finmind_get", side_effect=RuntimeError("402")):
+        close = st_fetch_market._fetch_ex_date_close("2330", "2025-08-15")
     assert close is None
 
 
 def test_fetch_ex_date_close_沒資料回傳None():
     """API 回空 list → 回 None"""
-    with patch.object(st, "_finmind_get", return_value=[]):
-        close = st._fetch_ex_date_close("2330", "2025-08-15")
+    with patch.object(st_fetch_market, "_finmind_get", return_value=[]):
+        close = st_fetch_market._fetch_ex_date_close("2330", "2025-08-15")
     assert close is None
 
 
 def test_fetch_ex_date_close_close為0回傳None():
     """close = 0（不合理）→ 回 None"""
-    with patch.object(st, "_finmind_get") as mock_fm:
+    with patch.object(st_fetch_market, "_finmind_get") as mock_fm:
         mock_fm.return_value = [{"date": "2025-08-15", "close": 0}]
-        close = st._fetch_ex_date_close("2330", "2025-08-15")
+        close = st_fetch_market._fetch_ex_date_close("2330", "2025-08-15")
     assert close is None
 
 
@@ -216,9 +217,9 @@ def test_去年現金殖利率_用ex_date_close_不是現價():
     """【V0.9.5+ Phase 10 核心】2330 的 ex_date_close=620、去年現金=2.5
     → 殖利率 = 3.0/620*100 = 0.48%
     若誤用現價（60.0）算 → 5.0%（差 10 倍）"""
-    st._fetch_finmind_dividend = lambda codes, **kw: _make_div_df_with_ex_date()
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: _make_div_df_with_ex_date()
     # _fetch_ex_date_close 對 2317（沒緩存）回 100
-    st._fetch_ex_date_close = lambda code, ex_date: 100.0 if code == "2317" else None
+    st_fetch_market._fetch_ex_date_close = lambda code, ex_date: 100.0 if code == "2317" else None
 
     price_df = pd.DataFrame([
         {"股票代號": "2330", "股票名稱": "台積電", "現價": 60.0,
@@ -250,7 +251,7 @@ def test_去年現金殖利率_沒goodinfo_殖利率為None():
     原本（V0.9.5+ Phase 10）：ex_date 空且 fetch 失敗 → fallback 用現價 = 2.0%
     V0.9.5-goodinfo3：拿掉所有 fallback → 沒 goodinfo = None
     """
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "9999",
             f"{CY}現金股利": None, f"{CY}股票股利": None,
@@ -262,7 +263,7 @@ def test_去年現金殖利率_沒goodinfo_殖利率為None():
         }
     ])
     # fetch 也回 None
-    st._fetch_ex_date_close = lambda code, ex_date: None
+    st_fetch_market._fetch_ex_date_close = lambda code, ex_date: None
 
     price_df = pd.DataFrame([
         {"股票代號": "9999", "股票名稱": "測試", "現價": 50.0,
@@ -278,7 +279,7 @@ def test_去年現金殖利率_沒goodinfo_殖利率為None():
 
 def test_去年現金殖利率_現金股利為0_殖利率為None():
     """【邊界】去年現金股利=0 → 殖利率 None（跟原本行為一致）"""
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "9999",
             f"{CY}現金股利": None, f"{CY}股票股利": None,
@@ -307,7 +308,7 @@ def test_去年現金殖利率_殖利率100用goodinfo_不走fetch():
     原本（V0.9.5+ Phase 10）：DB 沒 ex_date_close → 自動 fetch → 寫入緩存 → 用 1.36%
     V0.9.5-goodinfo3：直接用 goodinfo 提供的殖利率、不需 fetch
     """
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {
             "股票代號": "9999",
             f"{CY}現金股利": None, f"{CY}股票股利": None,
@@ -321,10 +322,10 @@ def test_去年現金殖利率_殖利率100用goodinfo_不走fetch():
         }
     ])
     # 不應被呼叫：殖利率不走 fetch 路徑
-    st._fetch_ex_date_close = lambda code, ex_date: 110.0  # 故意設錯、避免誤用
+    st_fetch_market._fetch_ex_date_close = lambda code, ex_date: 110.0  # 故意設錯、避免誤用
 
     # 抓 _update_ex_date_close 不應被呼叫
-    with patch.object(st, "_update_ex_date_close") as mock_update:
+    with patch.object(st_fetch_market, "_update_ex_date_close") as mock_update:
         price_df = pd.DataFrame([
             {"股票代號": "9999", "股票名稱": "測試", "現價": 50.0,
              "營收YoY(%)": 10.0, "成交量_張": 1000.0, "PE": 20.0, "EPS本期": 2.5},

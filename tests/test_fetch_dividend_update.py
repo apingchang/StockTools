@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構
 
 
 def _make_temp_db():
@@ -197,7 +198,7 @@ def test_update後殖利率算法仍正確():
     CY = datetime.now().year
 
     # 直接組裝 finmind mock：3546 cash=2.0, goodinfo yield=2.44
-    st._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
+    st_fetch_market._fetch_finmind_dividend = lambda codes, **kw: pd.DataFrame([
         {"股票代號": "3546",
          f"{CY}現金股利": 2.0, f"{CY}股票股利": 0.5,
          f"{CY - 1}現金股利": 4.1, f"{CY - 1}股票股利": 1.0,

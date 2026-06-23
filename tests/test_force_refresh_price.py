@@ -34,12 +34,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構
 
 
 def test_force_refresh_參數存在():
     """【API 守護】_fetch_finmind_prices_batch 必須有 force_refresh 參數"""
     import inspect
-    sig = inspect.signature(st._fetch_finmind_prices_batch)
+    sig = inspect.signature(st_fetch_market._fetch_finmind_prices_batch)
     assert "force_refresh" in sig.parameters, \
         "_fetch_finmind_prices_batch 缺 force_refresh 參數"
     # 預設值應為 False
@@ -50,9 +51,9 @@ def test_force_refresh_參數存在():
 def test_force_refresh_true_清cache():
     """【核心】force_refresh=True 時 _FINMIND_PRICE_CACHE 必須被清空"""
     # 預先填入假 cache
-    st._FINMIND_PRICE_CACHE["3188"] = {"close": 999.0, "Trading_Volume": 50000}
-    st._FINMIND_PRICE_CACHE["2330"] = {"close": 500.0, "Trading_Volume": 100000}
-    assert len(st._FINMIND_PRICE_CACHE) == 2
+    st_fetch_market._FINMIND_PRICE_CACHE["3188"] = {"close": 999.0, "Trading_Volume": 50000}
+    st_fetch_market._FINMIND_PRICE_CACHE["2330"] = {"close": 500.0, "Trading_Volume": 100000}
+    assert len(st_fetch_market._FINMIND_PRICE_CACHE) == 2
 
     # Mock _finmind_get、記錄呼叫次數
     call_log = []
@@ -60,10 +61,10 @@ def test_force_refresh_true_清cache():
         call_log.append((dataset, stock_id))
         return [{"date": "1150617", "close": 100.0, "Trading_Volume": 1000}]
 
-    st._finmind_get = fake_finmind_get
+    st_fetch_market._finmind_get = fake_finmind_get
 
     # 呼叫 force_refresh=True
-    result = st._fetch_finmind_prices_batch(
+    result = st_fetch_market._fetch_finmind_prices_batch(
         ["3188", "2330"], force_refresh=True
     )
 
@@ -82,8 +83,8 @@ def test_force_refresh_true_清cache():
 def test_force_refresh_false_走cache():
     """【核心】force_refresh=False（默認）時用 cache、不打 FinMind"""
     # 清空 cache 然後填入
-    st._FINMIND_PRICE_CACHE.clear()
-    st._FINMIND_PRICE_CACHE["3188"] = {"close": 50.0, "Trading_Volume": 20000}
+    st_fetch_market._FINMIND_PRICE_CACHE.clear()
+    st_fetch_market._FINMIND_PRICE_CACHE["3188"] = {"close": 50.0, "Trading_Volume": 20000}
 
     # Mock _finmind_get、記錄呼叫次數（不該被呼叫）
     call_log = []
@@ -91,9 +92,9 @@ def test_force_refresh_false_走cache():
         call_log.append((dataset, stock_id))
         return []
 
-    st._finmind_get = fake_finmind_get
+    st_fetch_market._finmind_get = fake_finmind_get
 
-    result = st._fetch_finmind_prices_batch(["3188"], force_refresh=False)
+    result = st_fetch_market._fetch_finmind_prices_batch(["3188"], force_refresh=False)
 
     # 【關鍵】cache 命中、不打 FinMind
     assert len(call_log) == 0, \
@@ -105,25 +106,25 @@ def test_force_refresh_false_走cache():
 
 def test_force_refresh_預設為False_不破壞既有行為():
     """【向後相容】不傳 force_refresh 應等同於 force_refresh=False"""
-    st._FINMIND_PRICE_CACHE.clear()
-    st._FINMIND_PRICE_CACHE["3188"] = {"close": 50.0, "Trading_Volume": 20000}
+    st_fetch_market._FINMIND_PRICE_CACHE.clear()
+    st_fetch_market._FINMIND_PRICE_CACHE["3188"] = {"close": 50.0, "Trading_Volume": 20000}
 
     call_log = []
     def fake_finmind_get(dataset, stock_id, start, end, retry=2):
         call_log.append((dataset, stock_id))
         return []
 
-    st._finmind_get = fake_finmind_get
+    st_fetch_market._finmind_get = fake_finmind_get
 
     # 不傳 force_refresh（用默認值）
-    result = st._fetch_finmind_prices_batch(["3188"])
+    result = st_fetch_market._fetch_finmind_prices_batch(["3188"])
     assert len(call_log) == 0, \
         f"不傳 force_refresh 應用 cache，實際: {len(call_log)}"
 
 
 def test_force_refresh_進度callback_被呼叫():
     """【UI 守護】force_refresh=True 時 progress_callback 真的被觸發"""
-    st._FINMIND_PRICE_CACHE.clear()
+    st_fetch_market._FINMIND_PRICE_CACHE.clear()
 
     call_log = []
     def fake_finmind_get(dataset, stock_id, start, end, retry=2):
@@ -132,10 +133,10 @@ def test_force_refresh_進度callback_被呼叫():
     def progress_cb(n_done, n_total):
         call_log.append((n_done, n_total))
 
-    st._finmind_get = fake_finmind_get
+    st_fetch_market._finmind_get = fake_finmind_get
 
     # 12 檔、每 10 檔 callback 一次 → 應觸發 1 次（第 10 檔）
-    st._fetch_finmind_prices_batch(
+    st_fetch_market._fetch_finmind_prices_batch(
         [str(i) for i in range(12)],
         progress_callback=progress_cb,
         force_refresh=True,
@@ -148,31 +149,35 @@ def test_force_refresh_進度callback_被呼叫():
 def test_force_refresh_清空邏輯():
     """【白箱】force_refresh=True 必須清空 cache（不是用新值覆蓋）"""
     # 先清空再填入 5 檔
-    st._FINMIND_PRICE_CACHE.clear()
+    st_fetch_market._FINMIND_PRICE_CACHE.clear()
     for i in range(5):
-        st._FINMIND_PRICE_CACHE[str(i)] = {"close": 999.0, "Trading_Volume": 0}
-    n_before = len(st._FINMIND_PRICE_CACHE)
+        st_fetch_market._FINMIND_PRICE_CACHE[str(i)] = {"close": 999.0, "Trading_Volume": 0}
+    n_before = len(st_fetch_market._FINMIND_PRICE_CACHE)
     assert n_before == 5
 
     # Mock _finmind_get 回傳空
-    st._finmind_get = lambda *a, **kw: []
+    st_fetch_market._finmind_get = lambda *a, **kw: []
 
     # 呼叫 force_refresh=True、傳 3 檔
-    st._fetch_finmind_prices_batch(["a", "b", "c"], force_refresh=True)
+    st_fetch_market._fetch_finmind_prices_batch(["a", "b", "c"], force_refresh=True)
 
     # 清空後只有 3 筆 None（被抓但沒資料）寫入
-    n_after = len(st._FINMIND_PRICE_CACHE)
+    n_after = len(st_fetch_market._FINMIND_PRICE_CACHE)
     assert n_after == 3, \
         f"清空後 cache 應剩 3 筆（被寫 None），實際: {n_after}"
 
 
 def test_FINMIND_PRICE_CACHE_是module_level():
-    """【架構守護】_FINMIND_PRICE_CACHE 必須在 module 層級、不在 function 內"""
+    """【架構守護】_FINMIND_PRICE_CACHE 必須在 module 層級、不在 function 內
+
+    【v1.1 重構】已在 stocktool.fetch_market 內
+    """
     # 取 import 後的模組
     import StockTool
-    # 必須能從 module 拿到（不是 function local）
-    assert hasattr(StockTool, "_FINMIND_PRICE_CACHE"), \
-        "_FINMIND_PRICE_CACHE 不在 module 層級、無法被 _ms_run_selection 清空"
+    from stocktool import fetch_market as fm
+    # 必須能從 stocktool.fetch_market 拿到（不是 function local）
+    assert hasattr(fm, "_FINMIND_PRICE_CACHE"), \
+        "_FINMIND_PRICE_CACHE 不在 stocktool.fetch_market 層級、無法被 _ms_run_selection 清空"
 
 
 if __name__ == "__main__":

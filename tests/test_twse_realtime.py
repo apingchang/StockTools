@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
 os.chdir(os.path.join(os.path.dirname(__file__), "..", "source"))
 
 import StockTool as st  # noqa: E402
+from stocktool import fetch_market as st_fetch_market  # noqa: E402  # v1.1 重構
 
 
 def _mock_get_factory(msg_array):
@@ -194,7 +195,7 @@ def test_成交量單位是張():
 
 def test_TWSE_batch_size常數():
     """【架構守護】_TWSE_REALTIME_BATCH_SIZE = 10"""
-    assert st._TWSE_REALTIME_BATCH_SIZE == 10
+    assert st_fetch_market._TWSE_REALTIME_BATCH_SIZE == 10
 
 
 if __name__ == "__main__":
