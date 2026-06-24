@@ -1,11 +1,11 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v1.1 (2026-06-24 21:55)       ║
+║               台灣股市量化選股系統 v1.1 (2026-06-24 22:12)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-24 22:09 (Asia/Taipei)
+最後更新: 2026-06-24 22:15 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -219,6 +219,32 @@ Python 版本: 3.8+
 【沒動】
 - VERSION / App title / User-Agent 仍是 v1.1
 - 使用手冊不需更新
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【v1.1.1 HOTFIX #5】2026-06-24 22:12 (William 22:10 反映、App 啟動 crash AttributeError)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 22:10 重啟 App 撞到
+  AttributeError: '_tkinter.tkapp' object has no attribute '_preset_vars'
+  File "_init_tab_presets_on_startup", line 2607, in `if tab_key in self._preset_vars:`
+
+【根因】Fix14 「開機自動載入 Preset」（v0.9.5-alpha 5th commit）加的 _init_tab_presets_on_startup
+是在 _build_ui 開頭就 call（line 2076）、但 self._preset_vars = {} 是 _add_preset_bar 內部才設定。
+原設計靠 _add_preset_bar 內的 `if not hasattr` defensive check 判斷是不是第一次、決定要不要 init。
+但 _init 比 _add 還早 → hasattr 還是 False → 沒人 init → 讀取時 AttributeError。
+
+【修法】_build_ui 一進來就預先初始化 self._preset_vars = {} 和 self._preset_combos = {}
+（_add_preset_bar 內的 hasattr check 仍保留當安全網）
+
+【新增 test】
+- tests/test_init_tab_presets_init_order.py (3 個)
+  · test_build_ui_先初始化_preset_vars (AST 確認)
+  · test_build_ui_也初始化_preset_combos (AST 確認)
+  · test_init_tab_presets_不crash即使preset_vars空白 (邏輯測試)
+
+【驗證】手動 source .venv/bin/activate && python source/StockTool.py 成功啟動 ✅
+
+【沒動】VERSION / App title / User-Agent 仍是 v1.1
 
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1 正式版】2026-06-24 08:50 (William 08:47 決定、趁 v1.0 穩定後推進)
@@ -2037,6 +2063,15 @@ class StrategyGUI(tk.Tk):
 
     def _build_ui(self):
         self.geometry("1280x720")
+
+        # 【v1.1.1 HOTFIX #5】2026-06-24 22:10 William 反映：App 啟動時 crash
+        # _init_tab_presets_on_startup() 會讀 self._preset_vars、
+        # 但 _add_preset_bar() 在後面才 call、原設計是 _add_preset_bar 內部的
+        # 「if not hasattr」defensive check 負責初始化，但 _init 早於 _add 就會 crash。
+        # 修法：_build_ui 一進來就預設初始化 _preset_vars / _preset_combos
+        #      （後面 _add_preset_bar 的 hasattr check 仍是安全網）
+        self._preset_vars = {}
+        self._preset_combos = {}
 
         # V0.9.4 Tab 化：notebook 包兩個分頁（不改 V0.9.3 既有 widget 結構）
         # 2026-06-20 V0.9.5-tab-split-fix3：先建 top_frame 並 pack、
