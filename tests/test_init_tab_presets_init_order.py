@@ -55,6 +55,24 @@ class TestBuildUiPresetVarsInit(unittest.TestCase):
         self.assertRegex(build_ui_body, r'self\._preset_combos\s*=\s*\{\}',
             msg="【v1.1.1 HOTFIX #5】修法：_build_ui 開頭也初始化 _preset_combos = {}")
 
+    def test_build_ui_也初始化_vars(self):
+        """_build_ui 應也初始化 self.vars
+
+        修法：self.vars = {} 也要在 _build_ui 開頭就 init、
+        因為 _apply_tab_values 會讀 self.vars.get(k)、但 self.vars 原本在
+        line 2140 才設定、在 _init_tab_presets_on_startup (line 2111) 之後。
+        """
+        path = os.path.join(os.path.dirname(__file__), '..', 'source', 'StockTool.py')
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        init_pos = content.find('self._init_tab_presets_on_startup()')
+        build_ui_start = content.rfind('def _build_ui(', 0, init_pos)
+        build_ui_body = content[build_ui_start:init_pos]
+        self.assertRegex(build_ui_body, r'self\.vars\s*=\s*\{\}',
+            msg="【v1.1.1 HOTFIX #5】修法：_build_ui 開頭也初始化 self.vars = {}、"
+                "避免 _apply_tab_values 早於 _add_entry 觸發 AttributeError")
+
     def test_init_tab_presets_不crash即使preset_vars空白(self):
         """即使 _preset_vars 是空 {}、_init_tab_presets_on_startup 也不會 crash"""
         # 模擬 _init_tab_presets_on_startup 的核心邏輯
