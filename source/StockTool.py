@@ -1,11 +1,11 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v1.0 (2026-06-24 06:50)       ║
+║               台灣股市量化選股系統 v1.1 (2026-06-24 08:50)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.0
-最後更新: 2026-06-24 06:50 (Asia/Taipei)
+Version: v1.1
+最後更新: 2026-06-24 08:55 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -92,7 +92,62 @@ Python 版本: 3.8+
 - 使用手冊不需要更新（v1.0 行為不變）
 
 ════════════════════════════════════════════════════════════════════════════════
-【v0.9.5-tab-split-phase3-G 新增內容】2026-06-22 14:15 (William 要求）
+【v1.1 正式版】2026-06-24 08:50 (William 08:47 決定、趁 v1.0 穩定後推進)
+════════════════════════════════════════════════════════════════════════════════
+【背景】v1.0 (2026-06-23 14:42) 發版後、所有功能都能跑、但內部程式碼結構是 4700+ 行的單檔 StockTool.py、難以維護。
+趁沒新需求時推 v1.1 重構、把代碼拆成 stocktool/ 子模組。
+
+【重構內容】7 階段、7 個 refactor commit
+- refactor-1,2: 抽 config.py + cache.py           (5ce464f)
+- refactor-3:   抽 database.py                     (1e7ca20)
+- refactor-4:   抽 fetch_market.py                 (b1014ed)
+- refactor-5a:  抽 etf.py                          (49bf412)
+- refactor-5b:  抽 scoring.py + technical.py       (0842b88)
+- refactor-6a:  抽 backtest.py                     (8bc7cd4)
+- refactor-6b:  抽 export_excel.py + pipeline.py   (cc09688)
+- refactor-7a:  抽 gui/calendar.py                 (2386764)
+
+最終結構：
+- source/StockTool.py        ← 主視窗 + GUI 控制器（4700+ → 本版本）
+- source/stocktool/__init__.py
+- source/stocktool/config.py    ← StrategyConfig / GuiLogger / VERSION / HISTORY_DIR / find_col / build_session
+- source/stocktool/cache.py     ← save_cache / load_cache / get_or_fetch / 市場時段判斷
+- source/stocktool/database.py  ← sqlite 存取
+- source/stocktool/fetch_market.py ← TWSE / TPEx / FinMind 抓取
+- source/stocktool/etf.py        ← ETF 持股、變動、Session / User-Agent
+- source/stocktool/scoring.py    ← 多因子 / 簡易評分
+- source/stocktool/technical.py  ← MA / RSI / MACD / MTF / 背離
+- source/stocktool/backtest.py   ← 回測引擎
+- source/stocktool/export_excel.py ← Excel 樣式 + History Cache
+- source/stocktool/pipeline.py   ← run_pipeline 主流程組合
+- source/stocktool/gui/calendar.py ← _CalendarDialog 日期選單
+
+【修法】所有被依賴的 module 透渦 lazy import 避免 import cycle：
+- 例：fetch_market.py 在 fetch_twse_history 內 `from . import export_excel as _export_excel`
+- 例：pipeline.py 從各個 module import 所需函式
+
+【評估】
+- 使用者介面、Tab、功能、輸入輸出全部不變 → 完全向後相容 v1.0
+- 程式碼結構提升：4787 行變成 13 個 module、各自 < 1300 行、未來維護更方便
+- 開發體驗提升：每個 module 可單獨測試、不再需動整個 StockTool.py
+- 風險：低（全部 430 test pass、實際回測實戰跑過 5 次皆無 error）
+
+【修記】v1.1 重構期間爆發 7 個 import 漏 bug（5a2fcf4 / b13fe5b / 233d22a / ac1ea8d / ee46639 / 676d74c / 5c6b10d）
+- 結構性 lint test 已寫：未來任何 stocktool/ module 漏 import 會被 pytest 立刻抓出來
+- 全部 430 passed (411 → 430、7 個 hotfix + 12 個結構性 lint)
+
+【version bump】
+- VERSION = "v1.0" → "v1.1"
+- User-Agent: StockTool/AdvisorStyle-v1.0 → StockTool/AdvisorStyle-v1.1
+- App title: StockTool {VERSION} (...) → 自動改 v1.1
+- 啟動 log: 🚀 StockTool {VERSION} 開始執行 → 自動改 v1.1
+
+════════════════════════════════════════════════════════════════════════════════
+【v1.0.1 HOTFIX #2】2026-06-24 06:50 (William 06:45 重跑回測又炸、補 import)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-24 06:45 重跑回測、修完 datetime 後又炸：
+
+[6049 more lines in use offset=17 to continue]
 ════════════════════════════════════════════════════════════════════════════════
 【背景】William 14:10 反映：ETF 選股和手動選股的「📤 匯出 Excel」按鈕位置和名稱都跟系統選股的「💾 匯出股票清單」不一致、改一致
 【修法】
