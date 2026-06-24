@@ -5,7 +5,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-24 10:45 (Asia/Taipei)
+最後更新: 2026-06-24 11:21 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -2949,9 +2949,20 @@ class StrategyGUI(tk.Tk):
             val_lbl.pack(anchor="w")
             self._summary_labels[key] = val_lbl
 
+        # 按鈕區：移至「持倉總攬」與「持倉明細」之間（William 2026-06-24 11:19 反映）
+        btn_frame = ttk.Frame(parent)
+        btn_frame.pack(fill="x", padx=8, pady=(4, 4))
+        ttk.Button(btn_frame, text="➕ 新增買入", command=self._open_buy_dialog).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="➖ 新增賣出", command=self._open_sell_dialog).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="💲 更新現價", command=self._update_prices_dialog).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="🗑 刪除選中", command=self._delete_selected_tx).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="🔄 重新整理", command=self._refresh_portfolio_view).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="✏️ 編輯", command=self._open_edit_tx_dialog).pack(side="left", padx=2)  # V0.9.4 phase2.3
+        ttk.Button(btn_frame, text="📤 匯出 Excel", command=self._export_portfolio_excel).pack(side="right", padx=2)
+
         # 中間：持倉明細 Treeview
         pos_frame = ttk.LabelFrame(parent, text="🌳 持倉明細", padding=4)
-        pos_frame.pack(fill="both", expand=True, padx=8, pady=4)
+        pos_frame.pack(fill="both", expand=False, padx=8, pady=(0, 4))
         pos_cols = ("代號", "名稱", "股數", "均價", "現價", "市值", "未實現損益", "報酬率%", "已實現損益")
         self._positions_tree = ttk.Treeview(pos_frame, columns=pos_cols, show="headings", height=8)
         for col, w in zip(pos_cols, [60, 80, 80, 70, 70, 90, 90, 70, 90]):
@@ -2975,17 +2986,6 @@ class StrategyGUI(tk.Tk):
         self._tx_tree.configure(yscrollcommand=tx_scroll.set)
         self._tx_tree.pack(side="left", fill="both", expand=True)
         tx_scroll.pack(side="right", fill="y")
-
-        # 最下：按鈕區
-        btn_frame = ttk.Frame(parent)
-        btn_frame.pack(fill="x", padx=8, pady=(4, 8))
-        ttk.Button(btn_frame, text="➕ 新增買入", command=self._open_buy_dialog).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="➖ 新增賣出", command=self._open_sell_dialog).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="💲 更新現價", command=self._update_prices_dialog).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="🗑 刪除選中", command=self._delete_selected_tx).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="🔄 重新整理", command=self._refresh_portfolio_view).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="✏️ 編輯", command=self._open_edit_tx_dialog).pack(side="left", padx=2)  # V0.9.4 phase2.3
-        ttk.Button(btn_frame, text="📤 匯出 Excel", command=self._export_portfolio_excel).pack(side="right", padx=2)
 
     # ==========================================================
     # 【V0.9.5-etf】主動式 ETF 持股 Tab
