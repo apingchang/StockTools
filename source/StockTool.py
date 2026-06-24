@@ -1,11 +1,11 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v1.1 (2026-06-24 09:15)       ║
+║               台灣股市量化選股系統 v1.1 (2026-06-24 10:45)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-24 09:29 (Asia/Taipei)
+最後更新: 2026-06-24 10:45 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -136,6 +136,24 @@ Python 版本: 3.8+
 【沒動】
 - VERSION 仍是 v1.1、App title 仍是 v1.1、User-Agent 仍是 v1.1
 - 使用手冊 v1.1.docx 不需更新（UX 行為不變）
+
+════════════════════════════════════════════════════════════════════════════════
+【v1.1.1 HOTFIX #2】2026-06-24 10:45 (William 10:39 反映、ETF 排序需求)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 10:39 反映：ETF 選股後的排序應改為：
+- 今日有異動的股票優先
+- 有異動者：依 total_change_lots 降序（由大到小）
+- 無異動者：在底部、保持原有 etf_count 順序
+
+【修法】_etf_display_results 中的 sort 逻辑
+- 舊：df.sort_values("etf_count", ascending=False)
+- 新：以 today_mover 為第一 key（True > False → movers first）
+  + 第二 key 為 total_change_lots 降序
+  + 結果：movers 前、依張數大→小；non-movers 在底部
+
+【沒動】
+- VERSION / App title / User-Agent 仍是 v1.1
+- 使用手冊不需更新（只有內部排序邏輯變化）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1 正式版】2026-06-24 08:50 (William 08:47 決定、趁 v1.0 穩定後推進)
@@ -4609,10 +4627,18 @@ class StrategyGUI(tk.Tk):
         if self._etf_only_with_price_var.get():
             df = df[df["收盤價"].notna()]
 
-        # 【V0.9.5-etf-history】依 ETF 數降序（William 2026-06-23 14:04 反映）
-        # 原本「有異動排前面、按異動排序」的邏輯跟 UI 標題「依 ETF 數排序」矛盾
-        # → 統一改成：不分有沒有異動、統一按 etf_count 降序
-        df = df.sort_values("etf_count", ascending=False)
+        # 【v1.1.1 ETF sort】William 2026-06-24 10:39 反映：
+        # 排序邏輯：
+        # 1. 今日有異動的股票優先（total_change_lots != 0）
+        # 2. 有異動者：依 total_change_lots 降序（由大到小）
+        # 3. 無異動者：依 total_change_lots 升序（由小到大，all 0，保持原有 etf_count 順序）
+        # 實作：today_mover 作為第一 key（True > False → movers first）
+        df["today_mover"] = df["total_change_lots"] != 0
+        df = df.sort_values(
+            ["today_mover", "total_change_lots"],
+            ascending=[False, False],  # movers first, 各自內部降序
+        )
+        df = df.drop(columns=["today_mover"])
 
         # 結果上限
         limit = self._etf_limit_var.get()
