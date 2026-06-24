@@ -62,6 +62,7 @@ from openpyxl.formatting.rule import CellIsRule
 
 # requests（單股報價用）
 import requests
+import time
 
 # ==========================================================
 # 常數：手續費 / 稅率
@@ -221,48 +222,67 @@ def fetch_stock_info(stock_id: str,
                 continue  # 這個交易所沒資料，換下一個
             item = arr[0]
 
-            def _num(key: str) -> float:
-                """TWSE 回傳數字字串，轉 float"""
+            # 【V0.9.5+ Phase 9 + v1.1.1 z-retry】William 2026-06-24 11:45：
+            #   z='-' 時 sleep 2 秒後再讀一次（共最多 2 次 request），仍是 '-' 才走 fallback
+            # 實作：第一次讀完後若 z='-' 就 sleep+重讀一次；第二次讀完仍 z='-' 才用 h+l 中價
+            def _num_field(it, key: str) -> float:
+                """解析 TWSE 回傳的數字欄位，'-'/空/None → 0.0"""
                 try:
-                    return float(item.get(key, 0) or 0)
+                    v = it.get(key, 0) or 0
+                    return float(v)
                 except (ValueError, TypeError):
                     return 0.0
 
+            # 第一次 request
+            z_raw = item.get("z", "0")
+            price = _num_field(item, "z")
             result.update({
                 "name": item.get("n", "") or "",
                 "full_name": item.get("nf", "") or "",
-                "price": _num("z"),
-                "open": _num("o"),
-                "high": _num("h"),
-                "low": _num("l"),
-                "prev_close": _num("y"),
-                "volume": int(_num("v")),
+                "price": price,
+                "open": _num_field(item, "o"),
+                "high": _num_field(item, "h"),
+                "low": _num_field(item, "l"),
+                "prev_close": _num_field(item, "y"),
+                "volume": int(_num_field(item, "v")),
                 "exchange": exchange,
                 "trade_time": item.get("t", "") or "",
                 "ok": True,
                 "error": "",
             })
-            # 【V0.9.5+ Phase 9 修 Bug】2026-06-15 William 反映：
-            #   00403A 現價一直停在 10.61 不動
-            #   根因：TWSE 在「没成交瞬間」 z='-' → _num('z') 轉成 0.0
-            #         → _apply_fetched_prices price=0 跳過更新 → 保持舊值
-            #   修法：z=0 時 fallback 到 h+l 中價（今日高低中點、比昨收更接近即時）
-            #         並標記 price_fallback='mid'、讓 UI 知道是估算價
-            if result["price"] == 0:
-                h = result["high"]
-                l = result["low"]
-                if h > 0 and l > 0:
-                    result["price"] = round((h + l) / 2, 4)   # 保留 4 位跟 TWSE 精度一致
-                    result["price_fallback"] = "mid"         # 標記是中價估算
-                else:
-                    # h/l 也 0（TWSE 連 h/l 都没資料） → fallback 到昨收
-                    if result["prev_close"] > 0:
-                        result["price"] = result["prev_close"]
-                        result["price_fallback"] = "prev_close"
-                    else:
-                        result["price_fallback"] = ""
+            if result["price"] != 0:
+                # 有即時成交（非 z='-'），不需要 fallback
+                result["price_fallback"] = ""
+                return result
+
+            # z='-'：sleep 2 秒後重讀一次
+            time.sleep(2)
+            r2 = session.get(url, timeout=timeout)
+            r2.raise_for_status()
+            data2 = r2.json()
+            arr2 = data2.get("msgArray", [])
+            if arr2:
+                item2 = arr2[0]
+                z_raw2 = item2.get("z", "0")
+                price2 = _num_field(item2, "z")
+                result["name"] = item2.get("n", "") or ""
+                result["price"] = price2
+                result["trade_time"] = item2.get("t", "") or ""
+                if result["price"] != 0:
+                    result["price_fallback"] = ""
+                    return result
+
+            # 第二次仍是 z='-'：用第一次的 h+l 中價（已有 prev_close 也保留）
+            h = result["high"]
+            l = result["low"]
+            if h > 0 and l > 0:
+                result["price"] = round((h + l) / 2, 4)
+                result["price_fallback"] = "mid"
+            elif result["prev_close"] > 0:
+                result["price"] = result["prev_close"]
+                result["price_fallback"] = "prev_close"
             else:
-                result["price_fallback"] = ""  # 即時成交價、不需要 fallback
+                result["price_fallback"] = ""
             return result
 
         except requests.RequestException as e:
