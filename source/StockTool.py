@@ -1,11 +1,11 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v1.1 (2026-06-24 10:45)       ║
+║               台灣股市量化選股系統 v1.1 (2026-06-24 21:36)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-24 11:39 (Asia/Taipei)
+最後更新: 2026-06-24 21:46 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -154,6 +154,36 @@ Python 版本: 3.8+
 【沒動】
 - VERSION / App title / User-Agent 仍是 v1.1
 - 使用手冊不需更新（只有內部排序邏輯變化）
+
+════════════════════════════════════════════════════════════════════════════════
+【v1.1.1 HOTFIX #3】2026-06-24 21:36 (William 21:35 反映、評分系統 UI 選項重排)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 21:35 反映：「因子權重」是「多因子評分」的參數、「⚙ 簡易評分進階設定」是「簡易評分」的參數。
+原本順序是 多因子/簡易評分 radio → 因子權重 entries → ⚙ 簡易評分進階設定 button、
+因子權重跟簡易評分 button 跨在兩者中間，看起來怪怪的。
+
+【修法】評分系統 UI 重排
+- 舊順序：
+    ○ 多因子評分 (動能+成長)
+    ● 簡易評分 (可調權重+門檻)
+    因子權重:
+      動能1M / 動能3M / 動能6M / 營收YoY / EPS YoY
+    [⚙ 簡易評分進階設定]
+
+- 新順序（用 padx=20 縮排、讓設定看起來屬於上面那個 radio）：
+    ○ 多因子評分 (動能+成長)
+        因子權重:
+          動能1M / 動能3M / 動能6M / 營收YoY / EPS YoY
+    ● 簡易評分 (可調權重+門檻)
+        [⚙ 簡易評分進階設定]
+
+【為什麼用縮排而不是重新整理成兩個 LabelFrame】
+保持原本 LabelFrame「⭐ 評分系統」結構、不增加外觀重量。
+縮排已能明確表達「設定屬於哪個 radio」的視覺關係。
+
+【沒動】
+- VERSION / App title / User-Agent 仍是 v1.1
+- 使用手冊不需更新（純 UI 重排）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1 正式版】2026-06-24 08:50 (William 08:47 決定、趁 v1.0 穩定後推進)
@@ -2056,10 +2086,10 @@ class StrategyGUI(tk.Tk):
 
         self.use_enhanced_score_var = tk.BooleanVar(value=self.cfg.use_enhanced_score)
         ttk.Radiobutton(score_frame, text="多因子評分 (動能+成長)", variable=self.use_enhanced_score_var, value=True).pack(anchor="w")
-        ttk.Radiobutton(score_frame, text="簡易評分 (可調權重+門檻)", variable=self.use_enhanced_score_var, value=False).pack(anchor="w")
 
+        # 多因子評分的設定（與 radio button 同一個視覺區塊）
         weight_frame = ttk.Frame(score_frame)
-        weight_frame.pack(fill="x", pady=5)
+        weight_frame.pack(fill="x", padx=(20, 0), pady=(0, 5))
         ttk.Label(weight_frame, text="因子權重:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self._add_entry(weight_frame, "動能1M", "factor_weight_mom1", tk.DoubleVar, self.cfg.factor_weight_mom1)
         self._add_entry(weight_frame, "動能3M", "factor_weight_mom3", tk.DoubleVar, self.cfg.factor_weight_mom3)
@@ -2067,8 +2097,11 @@ class StrategyGUI(tk.Tk):
         self._add_entry(weight_frame, "營收YoY", "factor_weight_rev", tk.DoubleVar, self.cfg.factor_weight_rev)
         self._add_entry(weight_frame, "EPS YoY", "factor_weight_eps", tk.DoubleVar, self.cfg.factor_weight_eps)
 
+        ttk.Radiobutton(score_frame, text="簡易評分 (可調權重+門檻)", variable=self.use_enhanced_score_var, value=False).pack(anchor="w")
+
+        # 簡易評分的設定（與 radio button 同一個視覺區塊）
         self.adv_btn = ttk.Button(score_frame, text="⚙ 簡易評分進階設定", command=self._open_simple_score_settings)
-        self.adv_btn.pack(fill="x", pady=(6, 0))
+        self.adv_btn.pack(fill="x", padx=(20, 0), pady=(0, 5))
 
         # Fix15 (2026-06-21): 回測模擬 Preset bar 移到最頂端
         self._add_preset_bar(bt_left, "backtest")
