@@ -1,0 +1,14 @@
+# StockTool.py 依賴套件清單
+# 安裝：pip install -r requirements.txt
+
+# 核心資料處理
+pandas>=2.0,<3.0
+numpy>=1.24,<3.0
+openpyxl>=3.1
+
+# 網路
+requests>=2.31
+
+# GoodInfo .xls 解析（HTML 偽裝 .xls、需要 lxml 才能 read_html）
+# 【v1.1.1+ William 22:35 反映】缺這個會導致 GoodInfo 12QEPSRate 0 檔、EPSYoY 全 NaN
+lxml>=4.9

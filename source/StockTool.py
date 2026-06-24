@@ -1,11 +1,11 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v1.1 (2026-06-24 22:32)       ║
+║               台灣股市量化選股系統 v1.1 (2026-06-24 22:42)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-24 22:33 (Asia/Taipei)
+最後更新: 2026-06-24 22:43 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -296,6 +296,47 @@ Python 版本: 3.8+
   · 全 NaN 強制重抓（舊行為）
   · 60% NaN 強制重抓（新行為）
   · 30% NaN 不重抓（合理）
+
+【沒動】VERSION / App title / User-Agent 仍是 v1.1
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【v1.1.1 HOTFIX #8】2026-06-24 22:42 (William 22:35 反映、EPSYoY 仍全 --)
+════════════════════════════════════════════════════════════════════════════════
+【背景】HOTFIX #7 修了 cache 驗證、但 App 起來 EPSYoY 仍全 --。
+console log 顯示「⚠️ 讀取 ...12QEPSRate.xls 失敗: `Import lxml` failed」
+。GoodInfo 1589 檔需要 lxml 才能讀。
+
+【根因】(V0.9.5-tab-split-phase3-C Fix10) _load_goodinfo_12q_epsrate 用 pd.read_html
+讀 GoodInfo 偽裝 xls 的 HTML 檔。pd.read_html 需要 lxml。
+- 沒裝 lxml → 每個檔案 raise ImportError
+- _load_goodinfo_12q_epsrate() 返回 0 檔
+- 整套 GoodInfo 覆蓋机制幹掉
+- 所有 EPSYoY = NaN、EPSYoY 顯示為 --
+
+【修法】
+1. 新增 requirements.txt （之前竟沒這個檔）
+   - 加上 lxml>=4.9
+   - 加註解說明 GoodInfo .xls 需要 lxml 才能 read_html
+2. _load_goodinfo_12q_epsrate() 開頭先 import lxml 檢查
+   - 缺 lxml → 印 friendly error message（告知 pip install -r requirements.txt）
+   - 早退 return {}
+3. 順手重抓一次 cache、寫入正確資料 （1583/1968 檔有 YoY）
+
+【測試】+2 個（451 → 453）
+- tests/test_load_goodinfo_lxml_check.py
+  · test_沒裝lxml_早退且不crash（mock ImportError 驗證早退）
+  · test_有裝lxml_正常載入（有檔案時 ≥1 檔）
+
+【為什麼 HOTFIX #4-#7 沒抓到這個】
+- fix #4 修 fetch_eps_latest Q1 fallback、但需 GoodInfo 才能覆盖
+- fix #5/#6 修 App 啟動 crash
+- fix #7 修 cache 驗證、但 cache 本來就是NaN (被重寫過) → 顯示仍是 NaN
+- 所有都在拼「讓 GoodInfo 覆蓋」這個主路、
+  但從未查證 GoodInfo 是否真的能載入
+
+【手動重抓】已重寫 source/cache/eps.xlsx (1583/1968 筆有 YoY)、
+下次 App 啟動會直接用這個 cache。
 
 【沒動】VERSION / App title / User-Agent 仍是 v1.1
 

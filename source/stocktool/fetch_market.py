@@ -121,6 +121,10 @@ def _load_goodinfo_12q_epsrate(goodinfo_dir=None):
 
     quarter_str 格式: "26Q1"
     yoy_pct 是 GoodInfo 直接算好的同季 YoY 成長率 (百分比)
+
+    【v1.1.1+ William 2026-06-24 22:35 反映】
+    pd.read_html 需要 lxml。如果系統沒裝 lxml → 0 檔 → EPSYoY 全 NaN。
+    現在加 friendly error message + fallback 提示使用 html5lib。
     """
     import os as _os
     import re as _re
@@ -129,6 +133,16 @@ def _load_goodinfo_12q_epsrate(goodinfo_dir=None):
             "~/.openclaw/workspace/股神/.tmp/goodinfo_export/eps"
         )
     if not _os.path.isdir(goodinfo_dir):
+        return {}
+
+    # 預先檢查 lxml（pd.read_html 需要這個）
+    try:
+        import lxml  # noqa: F401
+    except ImportError:
+        print("⚠️ GoodInfo 12QEPSRate 需要 lxml 才能讀取 .xls 檔（pd.read_html 依賴）")
+        print("   請執行：pip install lxml")
+        print("   或裝：pip install -r requirements.txt")
+        print("   （沒有 lxml → GoodInfo 覆蓋會跳過、EPSYoY 全 NaN）")
         return {}
 
     out = {}
