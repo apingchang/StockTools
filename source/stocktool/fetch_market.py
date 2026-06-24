@@ -1173,15 +1173,24 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
         if prev.empty:
             # Fix9: 從 GoodInfo 歷史庫找「去年 Q4 全年 EPS」當 fallback
             # （GoodInfo P20U/P20-50/P20L EPSRate12Y.xls 都有 12 年完整資料）
-            prev_q4 = _query_eps_history(cfg.eps_history_db, prev_year, 4)
-            if not prev_q4.empty and (prev_q4["source"] == "goodinfo").any():
-                prev = prev_q4.rename(columns={"eps": "EPS去年", "stock_id": "股票代號"})[
-                    ["股票代號", "EPS去年"]
-                ]
-                prev["股票代號"] = prev["股票代號"].astype(str).str.strip()
-                print(f"   GoodInfo Q4 全年 EPS fallback: {len(prev)} 檔有 {prev_year}Q4 EPS")
+            #
+            # 【v1.1.1+ William 2026-06-24 21:48 反映】
+            # 3490 EPSYoY 算成 4040%（實際應為 476%）：因為本期是 Q1、去比去年 Q4 全年 EPS=0.05、
+            # (2.07-0.05)/0.05=40.4=4040%。Q1 vs 全年 是有意義的理語義但使用者只关心「同季 YoY」。
+            # 修法：Q1/Q2/Q3 不適用 Q4 fallback、只有 Q4（本身就是全年）才適用。
+            if latest_q == 4:
+                prev_q4 = _query_eps_history(cfg.eps_history_db, prev_year, 4)
+                if not prev_q4.empty and (prev_q4["source"] == "goodinfo").any():
+                    prev = prev_q4.rename(columns={"eps": "EPS去年", "stock_id": "股票代號"})[
+                        ["股票代號", "EPS去年"]
+                    ]
+                    prev["股票代號"] = prev["股票代號"].astype(str).str.strip()
+                    print(f"   GoodInfo Q4 全年 EPS fallback: {len(prev)} 檔有 {prev_year}Q4 EPS")
+                else:
+                    print(f"⚠️ 去年同期 {prev_year}Q{latest_q} 沒有資料（CSV 無、歷史庫也無）→ YoY 將全 NA")
             else:
-                print(f"⚠️ 去年同期 {prev_year}Q{latest_q} 沒有資料（CSV 無、歷史庫也無）→ YoY 將全 NA")
+                # Q1/Q2/Q3 不適用 Q4 全年 fallback → 不算 YoY、等 GoodInfo 覆蓋
+                print(f"⚠️ 去年同期 {prev_year}Q{latest_q} 沒有資料、不适用 Q4 全年 fallback（避免 Q1 vs 全年 误算）→ YoY 留空等 GoodInfo 覆蓋")
 
     out = cur.merge(prev, on="股票代號", how="left")
 

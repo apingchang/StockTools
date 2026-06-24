@@ -1,11 +1,11 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v1.1 (2026-06-24 21:36)       ║
+║               台灣股市量化選股系統 v1.1 (2026-06-24 21:55)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-24 21:46 (Asia/Taipei)
+最後更新: 2026-06-24 22:09 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -184,6 +184,41 @@ Python 版本: 3.8+
 【沒動】
 - VERSION / App title / User-Agent 仍是 v1.1
 - 使用手冊不需更新（純 UI 重排）
+
+【v1.1.1 HOTFIX #4】2026-06-24 21:55 (William 21:48 反映、系統選股殖利率與 EPSYoY 兩個 bug)
+════════════════════════════════════════════════════════════════════════════════
+【背景 1】William 21:48 反映 3490 殖利率顯示 0.04%、應該 1.54%
+【背景 2】William 21:48 反映 3490 EPSYoY 顯示 4040%、應該 476%
+
+【Bug 1】系統選股殖利率 只用「殖利率(估)」=(EPS×0.7/股價)、不是實際現金殖利率
+- 預期：fetch_dividend DB 合併 FinMind 股利資料、殖利率優先用 GoodInfo 實際殖利率
+- 舊：run_pipeline 完全不 fetch 股利資料、殖利率欄始終是估算值
+- 新：run_pipeline 跟 manual 一樣呼叫 _fetch_finmind_dividend(skip_remote=True)、
+      並把今年現金殖利率_goodinfo（單位 %）÷100 變成小數、覆寫「殖利率(估)」
+- 結果：3490 殖利率 0.0446 → 0.0154（1.54%）
+
+【Bug 2】3490 EPSYoY 快取值 4040% 是計算陷阱
+- 根因：本期 Q1（2026Q1）、但 DB 沒有 2025Q1
+       → fallback 用 2025Q4 全年 EPS = 0.05
+       → (2.07 - 0.05) / 0.05 = 40.4 = 4040%
+       Q1 vs 全年 是錯的比較、數字爆炸
+- 舊：fetch_eps_latest Q1/Q2/Q3 也適用 Q4 fallback
+- 新：只有本期 Q4 才適用 Q4 全年 fallback；Q1/Q2/Q3 → 留空等 GoodInfo 覆蓋
+- 額外防兌：cache 驗證加入「YoY>500% 或 <-99%」檢查、強制重抓讓 GoodInfo 覆蓋
+
+【修法檔案】
+- source/stocktool/pipeline.py：合併 FinMind 股利 + 殖利率優先 GoodInfo
+- source/stocktool/cache.py：快取加入可疑 YoY 檢查
+- source/stocktool/fetch_market.py：Q1/Q2/Q3 不適用 Q4 fallback
+- source/cache/eps.xlsx：刪除（舊快取 4040% 不會自動消失、強制重抓）
+
+【測試】+7 個（437 → 444）
+- tests/test_eps_yoy_q4_fallback_bug.py (5)：Q1 不適用 Q4 fallback、cache 可疑值重抓
+- tests/test_pipeline_dividend_merge.py (2)：殖利率優先 GoodInfo、沒資料走估算
+
+【沒動】
+- VERSION / App title / User-Agent 仍是 v1.1
+- 使用手冊不需更新
 
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1 正式版】2026-06-24 08:50 (William 08:47 決定、趁 v1.0 穩定後推進)

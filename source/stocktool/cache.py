@@ -187,10 +187,28 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
     if last_update == today:
         if name == "eps":
             yoy_col = "EPSYoY_顯示(%)"
+            # 【v1.1.1+ William 2026-06-24 21:48 反映】
+            # 3490 EPSYoY 快取為 4040%、實際 GoodInfo 是 476%。
+            # 根因：fetch_eps_latest 找不到去年同期 Q1 時 fallback 到去年 Q4 全年 EPS = 0.05
+            #      (2.07 - 0.05) / 0.05 = 40.4 = 4040%，這是計算錯。
+            # 修法：快取若檢測到「可疑 YoY」（>500% 或 <-99%）、強制重抓一次讓 GoodInfo 覆蓋。
+            needs_refresh = False
+            reason = ""
             if yoy_col not in df.columns or df[yoy_col].isna().all() or (df[yoy_col] == 0).all():
-                logger.log(
-                    f"♻️ [{name}] cache 缺 EPSYoY 資料或全為 0、強制重抓一次 → Fix10 GoodInfo 12QEPSRate 覆蓋"
-                )
+                needs_refresh = True
+                reason = "缺 EPSYoY 資料或全為 0"
+            else:
+                # 過濾合法數值、檢查是否超過合理範圍
+                valid_yoy = df[yoy_col].dropna()
+                valid_yoy = valid_yoy[valid_yoy != 0]
+                if not valid_yoy.empty:
+                    too_high = (valid_yoy > 500).sum()
+                    too_low = (valid_yoy < -99).sum()
+                    if too_high > 0 or too_low > 0:
+                        needs_refresh = True
+                        reason = f"有 {too_high} 檔 YoY>500%、{too_low} 檔 YoY<-99%（可能是去年 EPS 太小造成的除零陷阱、強制讓 GoodInfo 覆蓋）"
+            if needs_refresh:
+                logger.log(f"♻️ [{name}] cache {reason}、強制重抓一次")
                 df = fetch_func()
                 save_cache(file_path, df)
                 return df
