@@ -175,6 +175,7 @@ def test_apply_fetched_prices_fallback也更新():
     mock_self = SimpleNamespace()
     mock_self.logger = MagicMock()
     mock_self._current_prices = {}
+    mock_self._current_names = {}
     mock_self._refresh_portfolio_view = MagicMock()
     mock_self._backfill_stock_name = MagicMock()
 

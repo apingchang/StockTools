@@ -5,7 +5,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-24 11:21 (Asia/Taipei)
+最後更新: 2026-06-24 11:39 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -1949,6 +1949,8 @@ class StrategyGUI(tk.Tk):
                                     broker_discount=self.cfg.broker_discount)
         # 記憶體中現價（stock_id → price）
         self._current_prices: Dict[str, float] = {}
+        # 記憶體中股票名稱（stock_id → name，fetch 回來時順便快取）
+        self._current_names: Dict[str, str] = {}
 
         self._build_ui()
         self._poll_log_queue()
@@ -2872,8 +2874,9 @@ class StrategyGUI(tk.Tk):
         for sid, info in results.items():
             if info.get("ok") and info.get("price", 0) > 0:
                 self._current_prices[sid] = info["price"]
-                # 同時補上股票名稱（如果 DB 沒有的話）
+                # 同步快取股票名稱（fetch 回來時順便存）
                 if info.get("name"):
+                    self._current_names[sid] = info["name"]
                     self._backfill_stock_name(sid, info["name"])
                 # 【V0.9.5+ Phase 9】fallback 提示：若 price 是用 mid 估算的、log 提示使用者
                 if info.get("price_fallback") == "mid":
@@ -4997,7 +5000,9 @@ class StrategyGUI(tk.Tk):
         if not stock_txs:
             return
 
-        stock_name = stock_txs[0].stock_name or stock_id
+        # 顯示名稱：優先用 fetch 到的最新名稱，其次用 DB 儲存的名稱
+        stored_name = stock_txs[0].stock_name or ""
+        stock_name = self._current_names.get(stock_id, stored_name) or stored_name or stock_id
         buys = [t for t in stock_txs if t.action == "BUY"]
         sells = [t for t in stock_txs if t.action == "SELL"]
 
@@ -5162,8 +5167,10 @@ class StrategyGUI(tk.Tk):
             for item in self._positions_tree.get_children():
                 self._positions_tree.delete(item)
             for p in positions:
+                # 顯示名稱：優先用 fetch 到的最新名稱，其次用 DB 儲存的名稱
+                display_name = self._current_names.get(p.stock_id, p.stock_name) or p.stock_name
                 self._positions_tree.insert("", "end", values=(
-                    p.stock_id, p.stock_name,
+                    p.stock_id, display_name,
                     # 【V0.9.5-locale-comma-fix】Treeview cell 不用千分位
                     # 【V0.9.5-shares-int】股數顯示整數、避免 float 的 .0
                     str(int(p.shares)),
