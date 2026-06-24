@@ -37,7 +37,7 @@ import StockTool as st  # noqa: E402
 def _make_mock_self(current_tab: int = 1):
     """建一個 mock self 給 portfolio refresh method 用
 
-    current_tab: 模擬目前選中的 tab index（0=策略, 1=買賣記錄, 2=手動選股）
+    current_tab: 模擬目前選中的 tab index（0=策略, 1=ETF, 2=手動選股, 3=買賣記錄）
     """
     mock = SimpleNamespace()
     mock.logger = MagicMock()
@@ -79,7 +79,7 @@ def _make_mock_self(current_tab: int = 1):
 
 def test_盤中_排程下一次refresh():
     """【核心守護】盤中時 _schedule_portfolio_refresh 應排程 30 秒後的 job"""
-    mock = _make_mock_self(current_tab=1)
+    mock = _make_mock_self(current_tab=3)
     with patch.object(st, "_is_market_hours", return_value=True):
         st.StrategyGUI._schedule_portfolio_refresh(mock)
 
@@ -99,7 +99,7 @@ def test_盤中_排程下一次refresh():
 
 def test_盤後_不排程():
     """盤後時 _schedule_portfolio_refresh 不應排程（但要 log 訊息）"""
-    mock = _make_mock_self(current_tab=1)
+    mock = _make_mock_self(current_tab=3)
     with patch.object(st, "_is_market_hours", return_value=False):
         st.StrategyGUI._schedule_portfolio_refresh(mock)
 
@@ -121,7 +121,7 @@ def test_盤後_不排程():
 def test_重複排程_取消上次的():
     """【守護】_schedule_portfolio_refresh 內部會先 cancel 上次的
     避免重複排程導致多個 job 同時跑"""
-    mock = _make_mock_self(current_tab=1)
+    mock = _make_mock_self(current_tab=3)
     with patch.object(st, "_is_market_hours", return_value=True):
         # 第一次
         st.StrategyGUI._schedule_portfolio_refresh(mock)
@@ -144,7 +144,7 @@ def test_重複排程_取消上次的():
 
 def test_盤中_refresh_loop_刷新並排程下一次():
     """【核心】refresh loop 本體：刷新一次後、應再排程下一次"""
-    mock = _make_mock_self(current_tab=1)
+    mock = _make_mock_self(current_tab=3)
     with patch.object(st, "_is_market_hours", return_value=True):
         st.StrategyGUI._portfolio_refresh_loop(mock)
 
@@ -177,7 +177,7 @@ def test_refresh_loop_已切離Tab_停止loop():
 
 def test_cancel_有job時呼叫after_cancel():
     """有 job_id 時 _cancel_portfolio_refresh 應呼叫 after_cancel"""
-    mock = _make_mock_self(current_tab=1)
+    mock = _make_mock_self(current_tab=3)
     mock._portfolio_refresh_job_id = "test_job_123"
     after_cancel_calls = []
     mock.after_cancel = lambda jid: after_cancel_calls.append(jid)
@@ -191,7 +191,7 @@ def test_cancel_有job時呼叫after_cancel():
 
 def test_cancel_沒job時不做事():
     """沒 job_id 時 _cancel_portfolio_refresh 應 silently 跳過、不報錯"""
-    mock = _make_mock_self(current_tab=1)
+    mock = _make_mock_self(current_tab=3)
     mock._portfolio_refresh_job_id = None
     after_cancel_calls = []
     mock.after_cancel = lambda jid: after_cancel_calls.append(jid)
@@ -211,7 +211,7 @@ def test_refresh_loop_盤中排程後_排程時已是盤後_就停():
     """【實戰】13:29 啟動 loop → 13:30:00 觸發 → 排程下一次 → 此時 13:30:30 已收盤 → 停
     模擬：排程時 _is_market_hours 回傳 True（盤中）、
     下一次排程時 _is_market_hours 回傳 False（盤後）"""
-    mock = _make_mock_self(current_tab=1)
+    mock = _make_mock_self(current_tab=3)
     # 第一次：盤中
     with patch.object(st, "_is_market_hours", return_value=True):
         st.StrategyGUI._portfolio_refresh_loop(mock)
@@ -230,7 +230,7 @@ def test_refresh_loop_盤中排程後_排程時已是盤後_就停():
 
 def test_on_tab_changed_切到買賣記錄_啟動refresh():
     """切到買賣記錄 Tab → 啟動 refresh loop"""
-    mock = _make_mock_self(current_tab=1)
+    mock = _make_mock_self(current_tab=3)
     # 補上 _refresh_portfolio_view、_on_tab_changed 需要的方法
     mock._refresh_portfolio_view = MagicMock()
     mock.event = SimpleNamespace()

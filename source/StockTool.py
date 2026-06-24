@@ -1,11 +1,11 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v1.1 (2026-06-24 08:50)       ║
+║               台灣股市量化選股系統 v1.1 (2026-06-24 09:15)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-24 08:55 (Asia/Taipei)
+最後更新: 2026-06-24 09:29 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -90,6 +90,52 @@ Python 版本: 3.8+
 - VERSION 還是 v1.0、App title 還是 v1.0-GUI、User-Agent 還是 v1.0-GUI
 - StockTool.py 本體沒改（只動 fileheader）、完全 hotfix 性質
 - 使用手冊不需要更新（v1.0 行為不變）
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【v1.1.1 HOTFIX】2026-06-24 09:15 (William 09:12 反映、買賣記錄 refresh 位置錯)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 09:12 反映：
+- 開 App 進「買賣記錄 Tab」沒有 refresh 資料
+- 要先去「主動式 ETF Tab」才有資料
+- trigger refresh 的動作應該放錯位置
+
+【根因】v0.9.5-tab-split 重排 Tab 順序時、`_on_tab_changed` 的 index 沒跟著改
+- 原本 Tab 順序：策略(0) / 買賣記錄(1) / 手動選股(2) → refresh index = 1 正確
+- 現今 Tab 順序：系統選股(0) / ETF(1) / 手動選股(2) / 買賣記錄(3) / 回測(4)
+- refresh index 仍是 1、但 index 1 現在是 ETF Tab
+- 結果：切 ETF Tab 才會 trigger 買賣記錄 refresh
+
+【意外發現】_portfolio_refresh_loop 也有同樣 bug（line 2751 的 `if current != 1`）
+- 同樣要改成 `current != 3`
+
+【修法】3 個改動
+- StockTool.py line 2705: `if current == 1` → `if current == 3`（_on_tab_changed）
+- StockTool.py line 2751: `if current != 1` → `if current != 3`（_portfolio_refresh_loop）
+- tests/test_portfolio_refresh_loop.py: 所有 `current_tab=1` 改成 `current_tab=3`
+
+【寫新 test】tests/test_notebook_portfolio_tab_consistency.py（新、7 個）
+- TestNotebookTabOrder: 結構性 lint、用 AST 掃 notebook.add() 順序與 _on_tab_changed index 一致
+  - test_portfolio_tab_is_index_3
+  - test_etf_tab_is_index_1
+  - test_on_tab_changed_index_matches_portfolio_tab
+- TestOnTabChangedBehavior: mock notebook 測 4 個不同 tab 的 refresh 行為
+  - test_切到買賣記錄_tab_觸發_refresh（進買賣記錄應 refresh）
+  - test_切到_etf_tab_不觸發_refresh（進 ETF **不應** refresh 買賣記錄、防本次 bug 重現）
+  - test_切到系統選股_tab_不觸發_refresh
+  - test_切到回測模擬_tab_不觸發_refresh
+- 全部 437 passed (430 既有 + 7 新）、0 failed
+
+【評估】
+- 一個字（1 → 3）修一個 bug、零風險
+- 原本測試为何沒抓到：test 的 mock 用 `current_tab=1` 模擬買賣記錄、跟實際 notebook 結構對不上
+  → test 世界觀跟 code 世界觀不一致、雙方都通過但實際行為壞
+- 新增的 consistency test 守住：「notebook 結構」跟「trigger index」是連動關係
+  → 未來 Tab 重排時、如果忘記同步 trigger index、pytest 立刻抓出來
+
+【沒動】
+- VERSION 仍是 v1.1、App title 仍是 v1.1、User-Agent 仍是 v1.1
+- 使用手冊 v1.1.docx 不需更新（UX 行為不變）
 
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1 正式版】2026-06-24 08:50 (William 08:47 決定、趁 v1.0 穩定後推進)
@@ -2702,7 +2748,7 @@ class StrategyGUI(tk.Tk):
         """Tab 切換時自動 refresh 買賣記錄 + 抓持倉現價"""
         try:
             current = self.notebook.index(self.notebook.select())
-            if current == 1:  # Tab 2 = 買賣記錄
+            if current == 3:  # Tab 4 = 買賣記錄
                 self._refresh_portfolio_view()
                 # 背景執行抓現價（不 blocking GUI）
                 self.after(100, self._auto_fetch_positions_prices)
@@ -2748,7 +2794,7 @@ class StrategyGUI(tk.Tk):
         """
         try:
             current = self.notebook.index(self.notebook.select())
-            if current != 1:
+            if current != 3:
                 # 已切離買賣記錄 Tab、停止 loop
                 self.logger.log("⏸️ 已切離買賣記錄 Tab、停止持倉現價自動 refresh")
                 return
