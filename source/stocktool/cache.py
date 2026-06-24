@@ -191,7 +191,7 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
             # 3490 EPSYoY 快取為 4040%、實際 GoodInfo 是 476%。
             # 根因：fetch_eps_latest 找不到去年同期 Q1 時 fallback 到去年 Q4 全年 EPS = 0.05
             #      (2.07 - 0.05) / 0.05 = 40.4 = 4040%，這是計算錯。
-            # 修法：快取若檢測到「可疑 YoY」（>500% 或 <-99%）、強制重抓一次讓 GoodInfo 覆蓋。
+            # 修法：快取若檢測到「可疑 YoY」（>500% 或 <-99%）或「大部分都是 NaN」、強制重抓一次讓 GoodInfo 覆蓋。
             needs_refresh = False
             reason = ""
             if yoy_col not in df.columns or df[yoy_col].isna().all() or (df[yoy_col] == 0).all():
@@ -204,9 +204,14 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
                 if not valid_yoy.empty:
                     too_high = (valid_yoy > 500).sum()
                     too_low = (valid_yoy < -99).sum()
+                    nan_pct = df[yoy_col].isna().mean() * 100
                     if too_high > 0 or too_low > 0:
                         needs_refresh = True
                         reason = f"有 {too_high} 檔 YoY>500%、{too_low} 檔 YoY<-99%（可能是去年 EPS 太小造成的除零陷阱、強制讓 GoodInfo 覆蓋）"
+                    elif nan_pct > 50:
+                        # 越過一半股票沒 YoY 資料 → 判斷上次抓取失敗、強制重抓
+                        needs_refresh = True
+                        reason = f"有 {nan_pct:.0f}% 股票 YoY 是 NaN（>50%、可能是 GoodInfo 覆蓋沒跑到、強制重抓）"
             if needs_refresh:
                 logger.log(f"♻️ [{name}] cache {reason}、強制重抓一次")
                 df = fetch_func()
