@@ -227,8 +227,12 @@ def import_dividend(dry: bool = False):
                 if yr is None:
                     continue
                 val = row.get(ycol)
-                if pd.isna(val) or val == 0:
+                if pd.isna(val):
                     continue
+                # V0.9.5-goodinfo6+：val=0 不跳過、要寫入 0（該年無配息）
+                # 證據：6219 2026 cash=0 不寫 → import_yield_rate 查不到 row 跳過
+                #       → cash_yield_pct 沒寫入 → 手動選股漲利率顯示 None
+                # 修法：cash=0 stock=0 都要寫入（標記「查過、無配息」）
                 key = (sid, yr)
                 agg[key] += float(val)
 
@@ -255,6 +259,23 @@ def import_dividend(dry: bool = False):
         (sid, yr, round(vals["cash"], 6), round(vals["stock"], 6), "goodinfo", None, None)
         for (sid, yr), vals in all_agg.items()
     ]
+
+    # 【V0.9.5-goodinfo6+ 修 Bug】6219 2024 finmind 補抓 (0.7, 0.5) 變 goodinfo 0.0 被覆蓋
+    # 證據：goodinfo 內 6219 2024 = 0 (漏抓)、FinMind 113年 (0.7, 0.5) 才對
+    # 根因：原 INSERT OR REPLACE 不區分 source、finmind 補的會被 goodinfo 蓋掉
+    # 修法：過濾出 finmind source 已有的 (sid, yr)、不寫入 goodinfo
+    _init_div_db(str(DB_DIV))
+    conn = sqlite3.connect(str(DB_DIV))
+    cur = conn.cursor()
+    finmind_keys = set()
+    cur.execute("SELECT stock_id, year FROM dividend_history WHERE source='finmind'")
+    for sid, yr in cur.fetchall():
+        finmind_keys.add((str(sid), int(yr)))
+    conn.close()
+    rows = [r for r in rows if (r[0], r[1]) not in finmind_keys]
+    if len(finmind_keys) > 0:
+        print(f"  跳過 finmind 已有的 {len(finmind_keys)} 個 (sid, yr)、不覆寫")
+
     _upsert_div_history(str(DB_DIV), rows)
 
     # 統計

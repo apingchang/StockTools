@@ -1,11 +1,11 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v1.1 (2026-06-26 11:30)       ║
+║               台灣股市量化選股系統 v1.1 (2026-06-26 12:35)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-26 11:37 (Asia/Taipei)
+最後更新: 2026-06-26 12:38 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -40,7 +40,7 @@ Python 版本: 3.8+
   - yield: share_yield_pct 2961 筆 (vs 舊 15363 筆！大幅下降、因為跳過 2 個 bug 檔)
   - 2026exdate: UPDATE ex_date 1670 筆
 
-【test】tests/test_import_goodinfo_v0_9_5g6.py（新、7 個）
+【test】tests/test_import_goodinfo_v0_9_5g6.py（新、12 個）
   - test_FILE_PREFIX_MAP_P55U_uses_Dividend10Y：P55U 用 Dividend10Y
   - test_FILE_PREFIX_MAP_P20_55_uses_Divided10Y：P20-55/P20L 用 Divided10Y
   - test_old_P50U_and_P20_50_should_not_be_in_map：舊前綴拿掉
@@ -48,7 +48,42 @@ Python 版本: 3.8+
   - test_BAD_SHARE_RATE_GROUPS_包含_P55U_跟_P20_55：跳過清單正確
   - test_import_yield_rate跳過P55U_P20_55_ShareRate：實際 import 跳過 bug 檔
   - test_2442_2025_cash_0_079_stock_0_158：DB 內資料正確
-  - 全部 460 passed (453 既有 + 7 新)、0 failed
+  - test_zero_cash_dividend_still_inserted（V0.9.5-goodinfo6+）：val=0 不跳過、6219 2026
+  - test_finmind_keys_filtered_from_goodinfo_rows（V0.9.5-goodinfo6+）：6219 2024 finmind 保留
+  - test_1808_2026_yield_is_4_83（end-to-end）：1808 殖利率 4.83%
+  - test_6219_2026_yield_is_zero（end-to-end）：6219 殖利率 0%
+  - test_6219_2024_finmind_preserved（end-to-end）：finmind (0.7, 0.5) 保留
+  - 全部 465 passed (453 既有 + 12 新)、0 failed
+
+
+════════════════════════════════════════════════════════════════════════════════
+【V0.9.5-goodinfo6+】2026-06-26 12:35 (修手動選股殖利率 bug)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-26 12:00 反映：
+  - 「6219 漲利率 0.04%（應為 0%）」
+  - 「1808 漲利率 0.05%（應為 4.83%）」
+
+【根因 1：val=0 跳過 INSERT】
+  - scripts/import_goodinfo_history.py 原本 `if pd.isna(val) or val == 0: continue`
+  - 6219 2026 cash=0, stock=0 → 該年 row 不 INSERT
+  - 後期 import_yield_rate 查不到 2026 row → cash_yield_pct 沒寫入
+  - 手動選股「今年現金殖利率(%)」= None → 顯示 0.00（不是 0%）
+
+【根因 2：finmind 補的會被 goodinfo 覆蓋】
+  - 6219 2024 finmind 補 (0.7, 0.5) 是對的
+  - 但 goodinfo 2024 是 0.0（漏抓）
+  - 原 INSERT OR REPLACE 不分 source → goodinfo 覆寫 finmind
+  - 結果：6219 2024 變成 (0, 0)、現金股利 1.4 元金額資料誤失
+
+【修法】
+  1. import_dividend：`val=0` 不跳過、也要 INSERT（標記「該年無配息」）
+  2. import_dividend：finmind 已存在的 (sid, yr) 從 goodinfo rows 中過濾、不覆寫
+  3. import_yield_rate：不變、會把 0.0% 寫進 cash_yield_pct
+
+【驗證】end-to-end 跑 _run_manual_selection
+  - 1808 潤隆：今年現金殖利率 4.83% ✓
+  - 6219 富旺：今年現金殖利率 0.0% ✓
+  - 6219 2024：保留 finmind (0.7, 0.5) ✓
 
 【沒動】VERSION / App title / User-Agent 仍是 v1.1（只是 scripts/ 改、主程式沒動）
 

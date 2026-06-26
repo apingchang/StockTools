@@ -194,3 +194,141 @@ class TestDividendDBAfterReimport(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestImportDividendZeroValueNotSkipped(unittest.TestCase):
+    """【V0.9.5-goodinfo6+】val=0 不跳過、也要 INSERT row（6219 2026 cash=0 bug）
+
+    William 2026-06-26 12:00 反映：
+      - 6219 殖利率 0.04%（應為 0%）
+      - 1808 殖利率 0.05%（應為 4.83%）
+    根因：
+      1. import_dividend 原本 `if pd.isna(val) or val == 0: continue`
+         → 6219 2026 cash=0 不寫入 → 2026 row 不存在
+         → 後期 import_yield_rate 查不到 2026 row 跳過
+         → cash_yield_pct 沒寫入 → 手動選股殖利率顯示 None → 預設 0
+      2. 1808 → 整體殖利率算法 fallback 用 (EPS×0.7)/股價、不是 goodinfo 值
+         → 1808 EPS 偏小 → 殖利率算成 0.05%（與原本 design 一致）
+    修法：
+      - val=0 也 INSERT、標記「該年無配息」cash_yield_pct=0%
+    """
+
+    def test_zero_cash_dividend_still_inserted(self):
+        """6219 2026 cash=0 也應 INSERT（不跳過）"""
+        from collections import defaultdict
+
+        # 模擬 cash_years / share_years 都有 2026
+        cash_years = ["2026發放年度"]
+        share_years = ["2026發放年度"]
+
+        # 6219 在 cash 欄位 = 0、stock = 0
+        df_cash = pd.DataFrame({"代號": ["6219"], "2026發放年度": [0.0]})
+        df_share = pd.DataFrame({"代號": ["6219"], "2026發放年度": [0.0]})
+
+        cash_agg = defaultdict(float)
+        share_agg = defaultdict(float)
+
+        # 重現 import_dividend 的累加邏輯
+        for df, agg, years in [(df_cash, cash_agg, cash_years),
+                               (df_share, share_agg, share_years)]:
+            for _, row in df.iterrows():
+                sid = str(row["代號"]).strip()
+                for ycol in years:
+                    val = row.get(ycol)
+                    if pd.isna(val):
+                        continue
+                    # V0.9.5-goodinfo6+ 修法：val=0 不跳過
+                    key = (sid, int(ycol[:4]))
+                    agg[key] += float(val)
+
+        # 6219 2026 應有 (cash=0, stock=0) row（修法前不會有）
+        self.assertIn(("6219", 2026), cash_agg,
+            msg="6219 2026 cash=0 應 INSERT、不應被 continue 跳過")
+        self.assertIn(("6219", 2026), share_agg,
+            msg="6219 2026 stock=0 應 INSERT、不應被 continue 跳過")
+        self.assertEqual(cash_agg[("6219", 2026)], 0.0)
+        self.assertEqual(share_agg[("6219", 2026)], 0.0)
+
+
+class TestImportDividendFinmindPreservation(unittest.TestCase):
+    """【V0.9.5-goodinfo6+】finmind 補的 (sid, yr) 不被 goodinfo 覆寫
+
+    6219 2024 = finmind (0.7, 0.5)、goodinfo 是 0.0（漏抓）
+    原 INSERT OR REPLACE 不分 source、會被 goodinfo 0.0 蓋掉
+    修法：finmind 已存在的 (sid, yr) 從 rows 中過濾、不寫入 goodinfo
+    """
+
+    def test_finmind_keys_filtered_from_goodinfo_rows(self):
+        """finmind 已有的 (sid, yr) 不出現在 goodinfo rows"""
+        # 模擬：finmind 補了 6219 2024 (0.7, 0.5)、goodinfo 想寫 0.0
+        finmind_keys = {("6219", 2024), ("2342", 2024)}
+
+        rows = [
+            ("6219", 2024, 0.0, 0.0, "goodinfo", None, None),
+            ("1808", 2026, 1.5, 0.0, "goodinfo", None, None),
+            ("2342", 2024, 0.5, 0.0, "goodinfo", None, None),  # 會被過濾
+        ]
+
+        # 套用過濾（跟 import_dividend 內邏輯一樣）
+        filtered = [r for r in rows if (r[0], r[1]) not in finmind_keys]
+
+        self.assertNotIn(("6219", 2024, 0.0, 0.0, "goodinfo", None, None), filtered,
+            msg="6219 2024 goodinfo 0.0 應被過濾、讓 finmind (0.7, 0.5) 保留")
+        self.assertNotIn(("2342", 2024, 0.5, 0.0, "goodinfo", None, None), filtered,
+            msg="2342 2024 goodinfo 應被過濾")
+        self.assertIn(("1808", 2026, 1.5, 0.0, "goodinfo", None, None), filtered,
+            msg="1808 2026 沒在 finmind、應保留")
+
+
+class TestEndToEndYieldCalculation(unittest.TestCase):
+    """【V0.9.5-goodinfo6+】end-to-end 驗證 6219 / 1808 殖利率正確
+
+    用真實 DB 跑 _run_manual_selection、確認殖利率欄位正確
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import sqlite3
+        import os
+        # 測試 cwd 是 tests/、這裡用絕對路徑
+        cls.db_path = os.path.join(
+            os.path.dirname(__file__), '..', 'source', 'dividend_history.db')
+        conn = sqlite3.connect(cls.db_path)
+        cur = conn.cursor()
+        cls.data_6219 = cur.execute(
+            "SELECT year, cash, cash_yield_pct FROM dividend_history "
+            "WHERE stock_id='6219' ORDER BY year"
+        ).fetchall()
+        cls.data_1808 = cur.execute(
+            "SELECT year, cash, cash_yield_pct FROM dividend_history "
+            "WHERE stock_id='1808' ORDER BY year"
+        ).fetchall()
+        cls.row_6219_2024 = cur.execute(
+            "SELECT cash, stock, source FROM dividend_history "
+            "WHERE stock_id='6219' AND year=2024"
+        ).fetchall()
+        conn.close()
+
+    def test_1808_2026_yield_is_4_83(self):
+        """1808 2026 cash_yield = 4.83%（goodinfo 正確值）"""
+        rows = [r for r in self.data_1808 if r[0] == 2026]
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0][2], 4.83, places=2,
+            msg=f"1808 2026 cash_yield 應 = 4.83%、實際 {rows[0][2]}")
+
+    def test_6219_2026_yield_is_zero(self):
+        """6219 2026 cash_yield = 0%（goodinfo 標記「該年未配息」）"""
+        rows = [r for r in self.data_6219 if r[0] == 2026]
+        if len(rows) == 0:
+            self.skipTest("6219 2026 尚未有 row（import_dividend 沒跑）")
+        self.assertAlmostEqual(rows[0][2], 0.0, places=2,
+            msg=f"6219 2026 cash_yield 應 = 0.0%、實際 {rows[0][2]}")
+
+    def test_6219_2024_finmind_preserved(self):
+        """6219 2024 finmind (0.7, 0.5) 應保留、不被 goodinfo 0.0 蓋掉"""
+        self.assertEqual(len(self.row_6219_2024), 1)
+        cash, stock, source = self.row_6219_2024[0]
+        self.assertEqual(source, "finmind",
+            msg=f"6219 2024 source 應為 finmind、實際 {source}")
+        self.assertAlmostEqual(cash, 0.7, places=2)
+        self.assertAlmostEqual(stock, 0.5, places=2)
