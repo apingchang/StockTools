@@ -1,13 +1,56 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v1.1 (2026-06-24 22:42)       ║
+║               台灣股市量化選股系統 v1.1 (2026-06-26 11:30)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-24 22:43 (Asia/Taipei)
+最後更新: 2026-06-26 11:37 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【V0.9.5-goodinfo6】2026-06-26 11:30 (William 11:22 重新抓 goodinfo 股利/殖利率檔)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-26 11:22 反映重新抓了 goodinfo 股利/殖利率檔、放：
+  ~/.openclaw/workspace/股神/.tmp/goodinfo_export/dividend/
+
+【新版 vs 舊版 4 個差異】
+  1. 價位帶擴大：P50U → P55U (923 檔)、P20-50 → P20-55 (836 檔)
+     → 涵蓋更多中價股（高價股從 ~700 檔變 923 檔）
+  2. 檔名怪：P55U 用 Dividend10Y、P20-55/P20L 用 Divided10Y（e 跟 i 顛倒）
+     → GoodInfo 網頁 URL 在中低價股頁面拼字顛倒、無解、要寫程式兼容
+  3. Divided10Y 已經是「純現金股利」（不是合計）、cash 直接拿
+     → 舊版要用「cash = 10Y_div - 10Y_share」扣股票才得現金
+     → 新版直接拿 cash = Divided10Y、簡化算法、避免負值 corner case
+  4. P55U/P20-55 的 ShareRate 內容跟 DividendRate 一模一樣（GoodInfo bug）
+     → 寫入 share_yield_pct 會把 stock_yield 覆蓋成 cash_yield
+     → 跳過這兩個檔、只用 P20L_ShareRate 寫入 share_yield_pct
+
+【實作】scripts/import_goodinfo_history.py
+  - FILE_PREFIX_MAP 改為新前綴 (P55U / P20-55) + 新 Divided10Y 拼字
+  - import_dividend 改用「cash = Divided10Y 直接拿」(不再扣 stock)
+  - import_yield_rate 加 BAD_SHARE_RATE_GROUPS = {"P55U", "P20-55"} 跳過 bug 檔
+  - 兩個常數提到 module 層讓 test 可以 import 驗證
+
+【結果】
+  - div: 15268 列 / 2043 檔 / 10 年 (vs 舊 15253 列)
+  - yield: cash_yield_pct 15408 筆 / 2212 檔 (vs 舊 15393 筆)
+  - yield: share_yield_pct 2961 筆 (vs 舊 15363 筆！大幅下降、因為跳過 2 個 bug 檔)
+  - 2026exdate: UPDATE ex_date 1670 筆
+
+【test】tests/test_import_goodinfo_v0_9_5g6.py（新、7 個）
+  - test_FILE_PREFIX_MAP_P55U_uses_Dividend10Y：P55U 用 Dividend10Y
+  - test_FILE_PREFIX_MAP_P20_55_uses_Divided10Y：P20-55/P20L 用 Divided10Y
+  - test_old_P50U_and_P20_50_should_not_be_in_map：舊前綴拿掉
+  - test_dividend_cash_equals_divided10y_directly：2442 2025 cash=0.08 純現金
+  - test_BAD_SHARE_RATE_GROUPS_包含_P55U_跟_P20_55：跳過清單正確
+  - test_import_yield_rate跳過P55U_P20_55_ShareRate：實際 import 跳過 bug 檔
+  - test_2442_2025_cash_0_079_stock_0_158：DB 內資料正確
+  - 全部 460 passed (453 既有 + 7 新)、0 failed
+
+【沒動】VERSION / App title / User-Agent 仍是 v1.1（只是 scripts/ 改、主程式沒動）
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════

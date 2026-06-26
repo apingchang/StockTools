@@ -2,6 +2,18 @@
 """
 import_goodinfo_history.py
 ============================
+【V0.9.5-goodinfo6 修】 2026-06-26 11:25
+  * 改用 2026/06/26 重新抓的 goodinfo 檔案：
+    - 價位帶擴大：P50U → P55U (923 檔)、P20-50 → P20-55 (836 檔)
+    - 檔名怪：P55U 用 Dividend10Y、P20-55/P20L 用 Divided10Y（注意 e 跟 i 顛倒）
+    - Divided10Y 已經是「純現金股利」（不是合計）、cash 直接拿、不用扣股票
+    - P55U/P20-55 的 ShareRate 內容跟 DividendRate 一模一樣（GoodInfo bug）
+      → 跳過、不寫入 share_yield_pct（否則會被現金殖利率覆蓋）
+    - 只用 P20L_ShareRate 寫入 share_yield_pct
+【V0.9.5-goodinfo5 修】 2026-06-18 17:56
+  * cash = 10Y_div - 10Y_share（10Y_div 是合計、扣 stock 才得 cash）
+【V0.9.5-goodinfo4+5 修 Bug】 2026-06-18 17:56
+  * 拿掉 import_2026_dividend()、改用 import_dividend() 一條邏輯處理全部 2017-2026
 【V0.9.5-goodinfo3 修】 2026-06-17 12:03
   * 修 import_dividend 合併 bug：
     - 原本：{**cash_agg, **share_agg} 用 dict unpack、後者覆蓋前者
@@ -13,19 +25,22 @@ import_goodinfo_history.py
   * --only yield 選項
 一次性把 goodinfo 匯出的 xls 歷史資料寫入 StockTools DB。
 
-【來源檔案】放在 .tmp/goodinfo_export/ 下：
-  dividend/  P50UpDividend10Y.xls  → 現金股利（高價股，2017~2026）
-            P20-50Dividend10Y.xls  → 現金股利（中價股）
-            P20LDividend10Y.xls    → 現金股利（低價股）
-            P50UShare10Y.xls       → 股票股利（高價股）
-            P20-50Share10Y.xls     → 股票股利（中價股）
-            P20LShare10Y.xls       → 股票股利（低價股）
-            P50U_DividendRate.xls  → 現金殖利率（高價股，2017~2026, V0.9.5-goodinfo）
-            P20-50_DividendRate.xls → 現金殖利率（中價股）
-            P20L_DividendRate.xls  → 現金殖利率（低價股）
-            P50U_ShareRate.xls     → 股票殖利率（高價股，2017~2026）
-            P20-50_ShareRate.xls   → 股票殖利率（中價股）
-            P20L_ShareRate.xls     → 股票殖利率（低價股）
+【來源檔案】放在 .tmp/goodinfo_export/ 下（V0.9.5-goodinfo6 新版 2026/06/26）：
+  dividend/  P55U_Dividend10Y.xls   → 現金股利（高價股, 923 檔, 2017~2026）
+            P20-55_Divided10Y.xls   → 現金股利（中價股, 836 檔, 注意 Divided 拼字）
+            P20L_Divided10Y.xls     → 現金股利（低價股, 545 檔）
+            P55U_Share10Y.xls       → 股票股利（高價股）
+            P20-55_Share10Y.xls     → 股票股利（中價股）
+            P20L_Share10Y.xls       → 股票股利（低價股）
+            P55U_DividendRate.xls   → 現金殖利率（高價股, 2017~2026）
+            P20-55_DividendRate.xls → 現金殖利率（中價股）
+            P20L_DividendRate.xls   → 現金殖利率（低價股）
+            P55U_ShareRate.xls      → ⚠️ 內容跟 DividendRate 重複（GoodInfo bug）跳過
+            P20-55_ShareRate.xls    → ⚠️ 內容跟 DividendRate 重複（GoodInfo bug）跳過
+            P20L_ShareRate.xls      → 股票殖利率（低價股, 唯一正確的 share_yield_pct 來源）
+            P55U_2026股利股息.xls   → 2026 含除息日（高價股）
+            P20-55_2026股利股息.xls → 2026 含除息日（中價股）
+            P20L_2026股利股息.xls   → 2026 含除息日（低價股）
   eps/       P50UEPS12Y.xls       → EPS（高價股，2014~2025）
             P20-50EPS12Y.xls      → EPS（中價股）
             P20LEPS12Y.xls        → EPS（低價股）
@@ -97,26 +112,45 @@ except ImportError:
     sys.exit(1)
 
 
+# 【V0.9.5-goodinfo6】提為 module 層常數（讓 test 可以 import 驗證）
+FILE_PREFIX_MAP = {
+    # V0.9.5-goodinfo6 修：P55U 用 Dividend10Y（無 p）、P20-55/P20L 用 Divided10Y
+    ("dividend", "P55U",   "Dividend10Y"):  "P55U",     # 高價股用 Dividend10Y
+    ("dividend", "P20-55", "Divided10Y"):   "P20-55",   # 中價股用 Divided10Y（注意拼字）
+    ("dividend", "P20L",   "Divided10Y"):   "P20L",     # 低價股用 Divided10Y
+    ("dividend", "P55U",   "Share10Y"):     "P55U",
+    ("dividend", "P20-55", "Share10Y"):     "P20-55",
+    ("dividend", "P20L",   "Share10Y"):     "P20L",
+    # 殖利率檔（沿用新前綴）
+    ("dividend", "P55U",   "DividendRate"): "P55U",
+    ("dividend", "P20-55", "DividendRate"): "P20-55",
+    ("dividend", "P20L",   "DividendRate"): "P20L",
+    ("dividend", "P55U",   "ShareRate"):    "P55U",
+    ("dividend", "P20-55", "ShareRate"):    "P20-55",
+    ("dividend", "P20L",   "ShareRate"):    "P20L",
+    # 2026 加強版
+    ("dividend", "P55U",   "2026"):         "P55U",
+    ("dividend", "P20-55", "2026"):         "P20-55",
+    ("dividend", "P20L",   "2026"):         "P20L",
+    # 舊版 revenue 仍叫 P20~50（P20-55 尚未重抓 revenue）
+    ("revenue",  "P20-55"):                 "P20~50",
+}
+PRICE_SUFFIX = {"P55U": "Average12Y", "P20-55": "AverageY12", "P20L": "AverageY12"}
+
+
 def load_goodinfo(folder: str, suffix_map: dict) -> pd.DataFrame:
     """
     載入某資料夾下的三個 goodinfo 檔案，合併成 DataFrame。
-    suffix_map: {"P50U": "Dividend10Y", "P20-50": "Dividend10Y", "P20L": "Dividend10Y"}
-    特殊規則：
-      - dividend/ 的 P50U 其實叫 P50Up
-      - revenue/  的 P20-50 其實叫 P20~50
-      - price/    的 P20-50/P20L 其實後綴是 AverageY12 (Y 在前)
-    """
-    FILE_PREFIX_MAP = {
-        ("dividend", "P50U", "Dividend10Y"): "P50Up",
-        ("dividend", "P50U", "Share10Y"):    "P50U",
-        ("dividend", "P20-50", "Dividend10Y"): "P20-50",
-        ("dividend", "P20-50", "Share10Y"):   "P20-50",
-        ("dividend", "P20L", "Dividend10Y"):  "P20L",
-        ("dividend", "P20L", "Share10Y"):     "P20L",
-        ("revenue",  "P20-50"): "P20~50",
-    }
-    PRICE_SUFFIX = {"P50U": "Average12Y", "P20-50": "AverageY12", "P20L": "AverageY12"}
+    suffix_map: {"P55U": "Dividend10Y", "P20-55": "Divided10Y", "P20L": "Divided10Y"}
 
+    【V0.9.5-goodinfo6 修】 2026/06/26 重新抓的檔案：
+      - 價位帶：P50U → P55U、P20-50 → P20-55、P20L 不變
+      - 檔名：P55U 用 Dividend10Y（正確拼字），P20-55/P20L 用 Divided10Y（e 跟 i 顛倒）
+      - Divided10Y 已經是「純現金股利」、cash 直接拿
+    特殊規則：
+      - revenue/  的 P20-55 其實叫 P20~55（注意 ~ 跟 -）
+      - price/    的 P20-55/P20L 其實後綴是 AverageY12 (Y 在前)
+    """
     frames = []
     for gkey, suffix in suffix_map.items():
         prefix_key = (folder, gkey, suffix)
@@ -145,22 +179,24 @@ def load_goodinfo(folder: str, suffix_map: dict) -> pd.DataFrame:
 def import_dividend(dry: bool = False):
     """把 goodinfo 現金股利 + 股票股利年度加總寫入 dividend_history.db
 
-    【V0.9.5-goodinfo4+5 修 Bug】goodinfo 10Y_div 欄位是「合計股利」（cash+stock）
-    - William 2026-06-18 17:56 反映：「dividend10Y 的股利是股票＋現金股利所以要減掉 Share10Y 的股票股利」
-    - 證據：2442 2025 10Y_div=0.237, 10Y_share=0.158, 公開 cash=0.079（0.237-0.158=0.079 ✓）
-    - 2017-2025 也都吃這個 bug、不只是 2026（之前我以為只有 2026 開始才改格式、其實是十年都是合計）
-    - 正確算法：cash = 10Y_div - 10Y_share（扣掉 stock 才得 cash）
-    - 2017-2025 cash=0 9 成是 stock 也是 0、所以看起來 cash=10Y_div 沒錯、是錯覺
+    【V0.9.5-goodinfo6 修】 2026-06-26 新版檔案：
+      - Divided10Y (P20-55/P20L) 跟 Dividend10Y (P55U) 已經是「純現金股利」
+      - cash 直接拿 Divided10Y/Dividend10Y 即可、不用扣 stock
+      - 證據：2442 2025 Divided10Y=0.079 (跟舊版 0.237-0.158 一致)
+
+    【V0.9.5-goodinfo4+5 修 Bug】goodinfo 舊版 10Y_div 欄位是「合計股利」（cash+stock）
+      - 舊算法：cash = 10Y_div - 10Y_share
+      - 新版 Divided10Y = 純現金、直接拿
     """
     print("\n" + "="*70)
     print("【1/3】匯入股利資料 → dividend_history.db")
     print("="*70)
 
-    # 載入
+    # 載入（V0.9.5-goodinfo6 新版檔名：P55U 用 Dividend10Y、P20-55/P20L 用 Divided10Y）
     div_cash = load_goodinfo("dividend", {
-        "P50U": "Dividend10Y", "P20-50": "Dividend10Y", "P20L": "Dividend10Y"})
+        "P55U": "_Dividend10Y", "P20-55": "_Divided10Y", "P20L": "_Divided10Y"})
     div_share = load_goodinfo("dividend", {
-        "P50U": "Share10Y", "P20-50": "Share10Y", "P20L": "Share10Y"})
+        "P55U": "_Share10Y", "P20-55": "_Share10Y", "P20L": "_Share10Y"})
 
     # 股利年度欄位
     cash_years = [c for c in div_cash.columns if "發放年度" in c]  # ['2017發放年度', ...]
@@ -175,12 +211,12 @@ def import_dividend(dry: bool = False):
     share_year_nums = sorted(set(year_num(c) for c in share_years if year_num(c)))
     print(f"  現金股利年份: {cash_year_nums}")
     print(f"  股票股利年份: {share_year_nums}")
-    print(f"  【V0.9.5-goodinfo4+5】cash = 10Y_div - 10Y_share（扣 stock 才得 cash）")
+    print(f"  【V0.9.5-goodinfo6】cash = Divided10Y（純現金、直接拿）")
 
     # 按 stock_id + year 分組加總
     # 規則：同一 stock_id + year，三個價位帶的加總（理論上不重複，但保險起見）
-    cash_agg: dict = defaultdict(lambda: {"div": 0.0, "stock": 0.0})
-    share_agg: dict = defaultdict(lambda: {"div": 0.0, "stock": 0.0})
+    cash_agg: dict = defaultdict(float)   # V0.9.5-goodinfo6：Divided10Y 已是純 cash
+    share_agg: dict = defaultdict(float)  # 10Y_share = 股票股利
 
     for df, agg in [(div_cash, cash_agg), (div_share, share_agg)]:
         years = cash_years if df is div_cash else share_years
@@ -194,28 +230,16 @@ def import_dividend(dry: bool = False):
                 if pd.isna(val) or val == 0:
                     continue
                 key = (sid, yr)
-                if df is div_cash:
-                    agg[key]["div"] += float(val)  # 10Y_div = 合計 (cash+stock)
-                else:
-                    agg[key]["stock"] += float(val)  # 10Y_share = 股票股利
+                agg[key] += float(val)
 
-    # 【V0.9.5-goodinfo4+5 修 Bug】cash = 10Y_div - 10Y_share
-    # 原本：cash = 10Y_div（誤以為是現金、其實是合計）
-    # 修正：cash = 10Y_div - 10Y_share（10Y_div 是合計、扣 stock 才得 cash）
+    # 【V0.9.5-goodinfo6 修】cash = Divided10Y (純現金，直接拿)
+    # 不再用「合計 - 股票」算法（Divided10Y 已經是純現金）
     all_agg: dict = {}
     all_keys = set(cash_agg.keys()) | set(share_agg.keys())
     for (sid, yr) in all_keys:
-        # 10Y_div (合計) 和 10Y_share (股票) 都有可能缺資料
-        div_total = cash_agg.get((sid, yr), {}).get("div", 0.0)  # 合計
-        stock_val = share_agg.get((sid, yr), {}).get("stock", 0.0)  # 股票
-        # 現金 = 合計 - 股票（10Y_div 是 cash+stock 合計）
-        cash = div_total - stock_val
-        # 安全：cash 不可能負（10Y_share 應該 <= 10Y_div）、負值設 0
-        if cash < 0:
-            print(f"  ⚠️  {sid} {yr}: 10Y_div={div_total}, 10Y_share={stock_val}, "
-                  f"cash={cash} < 0！設定為 0（可能 goodinfo 資料異常）")
-            cash = 0.0
-        all_agg[(sid, yr)] = {"cash": cash, "stock": stock_val}
+        cash = cash_agg.get((sid, yr), 0.0)  # 純現金
+        stock = share_agg.get((sid, yr), 0.0)  # 股票股利
+        all_agg[(sid, yr)] = {"cash": cash, "stock": stock}
 
     print(f"  合計 {len(all_agg)} 筆 (stock_id, year) 組合")
 
@@ -423,6 +447,13 @@ def _upsert_eps_history(db_path: str, rows: list):
 # ─────────────────────────────────────────
 # 2.5 寫入殖利率（V0.9.5-goodinfo：6 個殖利率檔一次匯入）
 # ─────────────────────────────────────────
+# 哪些 ShareRate 是 GoodInfo bug（內容跟 DividendRate 重複、要跳過）
+# V0.9.5-goodinfo6：P55U_ShareRate / P20-55_ShareRate 抓回來的內容跟 DividendRate 一模一樣
+# → 寫入 share_yield_pct 會把 stock_yield 覆蓋成 cash_yield、必須跳過
+# → 只用 P20L_ShareRate 寫入 share_yield_pct
+BAD_SHARE_RATE_GROUPS = {"P55U", "P20-55"}
+
+
 def import_yield_rate(dry: bool = False):
     """把 goodinfo 6 個殖利率檔（3 個現金 + 3 個股票）寫入 dividend_history.db
 
@@ -449,18 +480,23 @@ def import_yield_rate(dry: bool = False):
     print("="*70)
 
     # 載入 6 個檔
-    # 跟股利檔不同的是、殖利率檔前綴是 P50U/P20-50/P20L、不是 P50Up/P20~50
+    # V0.9.5-goodinfo6 修：前綴改成 P55U/P20-55
+    # 重要：P55U_ShareRate / P20-55_ShareRate 內容跟 DividendRate 重複（GoodInfo bug）
+    #       → 只用 P20L_ShareRate 寫入 share_yield_pct
     YIELD_FILES = [
-        ("dividend", "P50U",   "DividendRate", "_DividendRate"),  # 現金殖利率
-        ("dividend", "P20-50", "DividendRate", "_DividendRate"),
+        ("dividend", "P55U",   "DividendRate", "_DividendRate"),  # 現金殖利率（3 檔都好）
+        ("dividend", "P20-55", "DividendRate", "_DividendRate"),
         ("dividend", "P20L",   "DividendRate", "_DividendRate"),
-        ("dividend", "P50U",   "ShareRate",    "_ShareRate"),     # 股票殖利率
-        ("dividend", "P20-50", "ShareRate",    "_ShareRate"),
-        ("dividend", "P20L",   "ShareRate",    "_ShareRate"),
+        ("dividend", "P55U",   "ShareRate",    "_ShareRate"),     # 股票殖利率（高/中 bug 跳過）
+        ("dividend", "P20-55", "ShareRate",    "_ShareRate"),
+        ("dividend", "P20L",   "ShareRate",    "_ShareRate"),     # 唯一正確的 share_yield_pct
     ]
+    # 哪些 ShareRate 是 GoodInfo bug（內容跟 DividendRate 重複、要跳過）
+    # （BAD_SHARE_RATE_GROUPS 定義在 module 層）
 
     cash_frames = []
     share_frames = []
+    bad_share_count = 0
     for folder, gkey, kind, suffix in YIELD_FILES:
         fpath = EXPORT_DIR / folder / f"{gkey}{suffix}.xls"
         if not fpath.exists():
@@ -471,16 +507,25 @@ def import_yield_rate(dry: bool = False):
         if kind == "DividendRate":
             cash_frames.append(df)
         else:
+            # V0.9.5-goodinfo6 修：跳過高/中價股 bug ShareRate
+            if gkey in BAD_SHARE_RATE_GROUPS:
+                bad_share_count += 1
+                print(f"  ⚠️  跳過 {fpath.name}（GoodInfo bug、內容跟 DividendRate 重複）")
+                continue
             share_frames.append(df)
 
-    if not cash_frames or not share_frames:
-        print("  ❌ 殖利率檔不完整（現金/股票需都有）")
+    if not cash_frames:
+        print("  ❌ 現金殖利率檔找不到、無法繼續")
         return
+    if not share_frames:
+        print("  ⚠️  所有 ShareRate 都是 bug、share_yield_pct 不會更新")
 
     cash_all = pd.concat(cash_frames, ignore_index=True)
-    share_all = pd.concat(share_frames, ignore_index=True)
+    share_all = pd.concat(share_frames, ignore_index=True) if share_frames else None
     print(f"  現金殖利率檔合計: {len(cash_all)} 列 / {cash_all['代號'].nunique()} 檔")
-    print(f"  股票殖利率檔合計: {len(share_all)} 列 / {share_all['代號'].nunique()} 檔")
+    if share_all is not None:
+        print(f"  股票殖利率檔合計: {len(share_all)} 列 / {share_all['代號'].nunique()} 檔（已跳過 {bad_share_count} bug 檔）")
+    print(f"  跳過的 ShareRate bug 檔: {bad_share_count} 個")
 
     # 解析年度欄位
     def year_num(col: str) -> int:
@@ -488,7 +533,14 @@ def import_yield_rate(dry: bool = False):
         return int(m.group(1)) if m else None
 
     cash_years = [c for c in cash_all.columns if "現金殖利率" in c]
-    share_years = [c for c in share_all.columns if "股票殖利率" in c]
+    if share_all is not None:
+        # V0.9.5-goodinfo6：P20L ShareRate 欄位叫「股票殖利率」、其他 ShareRate bug 檔叫「現金殖利率」
+        share_years = [c for c in share_all.columns if "股票殖利率" in c]
+        if not share_years:
+            # 保險：若欄位都叫「現金殖利率」就用那個
+            share_years = [c for c in share_all.columns if "殖利率" in c]
+    else:
+        share_years = []
     print(f"  現金殖利率年份: {sorted(set(year_num(c) for c in cash_years if year_num(c)))}")
     print(f"  股票殖利率年份: {sorted(set(year_num(c) for c in share_years if year_num(c)))}")
 
@@ -732,10 +784,10 @@ def import_dividend_2026_exdate(dry: bool = False):
     print("【4/4】補入 2026 股利除息日 → UPDATE dividend_history.db")
     print("="*70)
 
-    # 3 個檔案路徑
+    # 3 個檔案路徑（V0.9.5-goodinfo6 修：P55U / P20-55）
     files_2026 = [
-        ("P50U",   EXPORT_DIR / "dividend" / "P50U_2026股利股息.xls"),
-        ("P20-50", EXPORT_DIR / "dividend" / "P20-50_2026股利股息.xls"),
+        ("P55U",   EXPORT_DIR / "dividend" / "P55U_2026股利股息.xls"),
+        ("P20-55", EXPORT_DIR / "dividend" / "P20-55_2026股利股息.xls"),
         ("P20L",   EXPORT_DIR / "dividend" / "P20L_2026股利股息.xls"),
     ]
 
