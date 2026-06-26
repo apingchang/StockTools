@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║               台灣股市量化選股系統 v1.1 (2026-06-26 21:00)       ║
+║               台灣股市量化選股系統 v1.1 (2026-06-27 00:35)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-26 20:55 (Asia/Taipei)
+最後更新: 2026-06-27 00:36 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -247,6 +247,56 @@ Python 版本: 3.8+
   - 舊：data_date 從 STOCK_DAY_ALL Date 欄位讀
   - 新：data_date 一律 = today (不管 API 給什麼)
   - 全部 464 passed / 0 failed (含重寫的 7 個 test)
+
+
+════════════════════════════════════════════════════════════════════════════════
+【V0.9.5-info3】2026-06-27 00:35 (股價與 data_date 是同一個時點的真實狀態)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-27 00:17 反映：
+  - V0.9.5-info2 的「data_date 一律 = today」有問題
+  - 「手動選股資料日期要最後收盤日期及收盤價格才對」
+  - info2 導致「日期統一、價格是昨日」的混亂狀態 (TWSE STOCK_DAY_ALL 沒 flush)
+
+【舊版問題】
+  - V0.9.5-info2: data_date = today、但股價是昨日收盤 → 混亂
+  - V0.9.5-cache-info: data_date = 個股最後成交日 (沒統一)、使用者混淆
+
+【V0.9.5-info3 新版】
+  - 優先用 TWSE MIS 即時 API: 拿「當下真實市場狀態」
+    - 收盤後: pz = 今日收盤價、d = 今日 (TWSE 會在 ~16:00 開始提供)
+    - 盤中: pz = 當下成交價、d = 今日
+    - 個股今日沒成交 (z="-"): fallback 到 o (開盤) 或 y (昨收)
+  - 興櫃股 / MIS 失敗 → fallback 到 STOCK_DAY_ALL + TPEx
+  - data_date 完整來源:
+    - MIS 有回: 個股對應成交日 (MIS API d 欄位、西元格式)
+    - MIS 沒回: STOCK_DAY_ALL Date (民國格式) = 個股最後成交日
+    - 都沒有: today (邀底)
+  - 股價、漲跌、成交量全部一致: 同一個時點的真實狀態
+  - 漲跌 MIS 沒給、要自己算: pz - y (現價 - 昨收)
+
+【改動】4 個檔
+  1. stocktool/fetch_market.py:
+     - _TWSE_REALTIME_BATCH_SIZE: 10 → 50 (fetch_prices 要一次拿全部)
+     - _fetch_twse_realtime_batch: rows 加 漲跌 (pz - y) 與 data_date_raw (d 欄位)
+     - fetch_prices 重寫: MIS 即時 → fallback STOCK_DAY_ALL/TPEx
+  2. source/StockTool.py fileheader 更新
+  3. tests/test_data_date_column.py: 重寫 7 個 test 反映 V0.9.5-info3 新邏輯
+  4. tests/test_twse_realtime.py: 更新 2 個 test (batch size 50、欄位加漲跌/date)
+
+【驗證】end-to-end fetch_prices (2026-06-27 00:25 抓的)
+  - 全部 2379 筆 data_date = 2026-06-26 ✓
+  - 2330 台積電: 股價=2340, 漲跌=-50, data_date=2026-06-26, 量=39059 ✓
+  - 1438 三地:   股價=22.8, 漲跌=-1.1, data_date=2026-06-26, 量=205 ✓
+  - 3081 聯亞:   股價=2035, 漲跌=-85, data_date=2026-06-26, 量=2366 ✓
+  - 6669 緯穎:   股價=4280, 漲跌=-265, data_date=2026-06-26, 量=1417 ✓
+  - 9946 三發:   股價=19.55, 漲跌=-0.3, data_date=2026-06-26, 量=579 ✓
+  - 5275 (興櫃): MIS 沒覆蓋、fallback STOCK_DAY_ALL → ✓
+
+【性能】fetch_prices 約 30~50 秒
+  - 50 檔/批 × 48 批 × (request 1s + sleep 0.5s) = 70s 預期
+  - 實測 47s (包含一些 retry、但仍完成)
+
+【test】全部 464 passed / 0 failed
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════

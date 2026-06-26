@@ -243,7 +243,7 @@ def _fetch_market_stock_list() -> pd.DataFrame:
 # 延遲：實測 15-20 秒（TWSE 官方）
 # 限制：一次建議 50 檔，興櫃不支援
 # ────────────────────────────────────────────────────────────────
-_TWSE_REALTIME_BATCH_SIZE = 10   # 【V0.9.5-goodinfo4+5】降批：50→10（避免TWSE rate limit）
+_TWSE_REALTIME_BATCH_SIZE = 50   # 【V0.9.5-info3】batch 10→50（fetch_prices 一次拿全部上市上櫃、需要 balance 速度跟 TWSE rate limit）
 
 
 def _fetch_twse_realtime_batch(stock_ids: List[str],
@@ -418,6 +418,16 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
             else:
                 price = None
 
+            # 【V0.9.5-info3 新增】MIS API 沒「漲跌」欄位、要自己算 (現價 - 昨收)
+            # 【原本】漲跌是從 STOCK_DAY_ALL 的 Change 欄位拿的
+            # 但 V0.9.5-info3 改用 MIS 即時為主、MIS 不給 Change → 要用 z - y 算
+            change = None
+            if price is not None and y != "-":
+                try:
+                    change = round(price - float(y), 2)
+                except (ValueError, TypeError):
+                    change = None
+
             # 【V0.9.5-goodinfo4+5 (vol-int) 修正】2026-06-18 20:05 William 反映
             # 「每日總成交量不會有小數點」、「今天 2548 是 4020 張」
             # 【V0.9.5-goodinfo4+5 (vol-no-divide) 修正】2026-06-18 21:54 William 反映
@@ -432,12 +442,22 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
             except (ValueError, TypeError):
                 vol = 0
 
-            rows.append({"股票代號": raw_code, "現價": price, "成交量_張": vol})
+            rows.append({
+                "股票代號": raw_code,
+                "現價": price,
+                "漲跌": change,
+                "成交量_張": vol,
+                # 【V0.9.5-info3】個股對應的成交交易日 (西元格式 "20260626")
+                # - 收盤後抓: d = 今日 (= 个股今日收盤對應日)
+                # - 盤中抓: d = 今日 (= 即時價對應日)
+                # - 个股今日沒成交 (z="-"): d = 該股最後成交日 (TWSE API 給的)
+                "data_date_raw": rec.get("d", ""),
+            })
 
         # tse_ + otc_ 都沒回的股 → 另設 None（後面 caller 會 fallback 到 cache / FinMind）
         for code in batch_codes:
             if not any(str(r.get("c", "")).strip() == code for r in all_msg):
-                rows.append({"股票代號": code, "現價": None, "成交量_張": 0.0})
+                rows.append({"股票代號": code, "現價": None, "漲跌": None, "成交量_張": 0.0, "data_date_raw": ""})
 
         # 進度回呼
         n_done = min((batch_idx + 1) * _TWSE_REALTIME_BATCH_SIZE, total)
@@ -447,9 +467,9 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
 
         # 輕微延遲，避免對 TWSE 伺服器造成壓力
         if batch_idx < n_batches - 1:
-            time.sleep(0.1)
+            time.sleep(0.5)  # 【V0.9.5-info3】原本 0.1s 太短、連打 30 批被 rate limit
 
-    df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["股票代號", "現價", "成交量_張"])
+    df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["股票代號", "現價", "漲跌", "成交量_張", "data_date_raw"])
     df["股票代號"] = df["股票代號"].astype(str).str.strip()
     return df
 
@@ -990,22 +1010,29 @@ def fetch_csv_requests(session: requests.Session, url: str, cfg: StrategyConfig,
 # ==========================================================
 
 def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame:
-    """【V0.9.5-info2】2026-06-26 20:43 William 反映：
-    「資料時間為當下時間、若在收盤時間這裡是最後收盤價、若盤中這裡是盤中即時價」
+    """【V0.9.5-info3】2026-06-27 00:17 William 反映：
+    「手動選股資料日期要最後收盤日期及收盤價格才對」
 
-    【舊版問題】
-    - 用 TWSE STOCK_DAY_ALL + TPEx tpex_mainboard_quotes（都是收盤後才 flush）
-    - 收盤後任何時間抓、1368 筆上市股都是昨日收盤（TWSE API 遲遲不更新今日）
-    - 結果 data_date 混雜 6/25 / 6/26、價格也不是當下
+    【舊版問題（V0.9.5-info2、已廢棄）】
+    - data_date 一律 = today
+    - 但股價本身仍是昨日收盤 (TWSE STOCK_DAY_ALL 沒 flush)
+    - 結果「日期統一、價格是昨日」的混亂狀態
 
-    【新版】
-    - data_date 一律 = today（這份資料對應的市場時點）
-    - 價格仍用 STOCK_DAY_ALL + TPEx（TWSE 還沒 flush → 拿昨日收盤、但顯示為 today）
-    - 狀態列提示「TWSE API 尚未更新今日收盤」
+    【V0.9.5-info3 新版】
+    - 以 TWSE MIS 即時 API 為主：拿「當下真實市場狀態」
+      - 收盤後: pz = 今日收盤價、d = 今日 (TWSE 會在 ~16:00 開始提供)
+      - 盤中: pz = 當下成交價、d = 今日
+      - 個股今日沒成交 (z="-"): fallback 到 o (開盤) 或 y (昨收)
+    - 興櫃股 / MIS 失敗的股 → fallback 到 STOCK_DAY_ALL + TPEx
+    - data_date 完整來源：
+      - MIS 有回的股：個股對應成交日（d 欄位）
+      - MIS 沒回的股：STOCK_DAY_ALL 的 Date（= 個股最後成交日）
+    - 結果：股價與 data_date 是同一個時點的真實狀態
     """
     from datetime import datetime as _dt
     today_ad = _dt.now().strftime("%Y-%m-%d")
 
+    # Step 1: 抓 STOCK_DAY_ALL + TPEx（拿全市場清單、公司名、與 MIS 失敗時的 fallback 資料）
     twse_url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
     tpex_url = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes"
 
@@ -1029,6 +1056,8 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         print("❌ 無法讀取任何股價資料")
         return pd.DataFrame()
 
+    _twse_date_col = find_col(twse.columns, ["Date", "資料日期"])
+    _tpex_date_col = find_col(tpex.columns, ["Date", "資料日期"])
     _twse_vol_col = find_col(twse.columns, ["TradeVolume"])
     _tpex_vol_col = find_col(tpex.columns, ["TradingShares", "TradeVolume"])
 
@@ -1042,6 +1071,7 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         find_col(twse.columns, ["證券名稱", "Name"]): "公司名稱_來源",
         find_col(twse.columns, ["收盤價", "ClosingPrice"]): "股價",
         find_col(twse.columns, ["漲跌價差", "Change"]): "漲跌",
+        **({_twse_date_col: "_raw_date"} if _twse_date_col else {}),
         **({_twse_vol_col: "_raw_volume"} if _twse_vol_col else {}),
     })
 
@@ -1050,9 +1080,27 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         find_col(tpex.columns, ["CompanyName", "公司名稱", "Name"]): "公司名稱_來源",
         find_col(tpex.columns, ["Close", "收盤", "ClosingPrice"]): "股價",
         find_col(tpex.columns, ["Change", "漲跌"]): "漲跌",
+        **({_tpex_date_col: "_raw_date"} if _tpex_date_col else {}),
         **({_tpex_vol_col: "_raw_volume"} if _tpex_vol_col else {}),
     })
 
+    def _roc_to_ad(s: str) -> str:
+        """民國年 YYYMMDD → 西元 YYYY-MM-DD"""
+        try:
+            s = str(s).strip()
+            if len(s) != 7 or not s.isdigit():
+                return ""
+            roc_y = int(s[:3])
+            m = int(s[3:5])
+            d = int(s[5:7])
+            return f"{roc_y + 1911:04d}-{m:02d}-{d:02d}"
+        except Exception:
+            return ""
+
+    if "_raw_date" not in twse.columns:
+        twse["_raw_date"] = ""
+    if "_raw_date" not in tpex.columns:
+        tpex["_raw_date"] = ""
     if "_raw_volume" not in twse.columns:
         twse["_raw_volume"] = None
     if "_raw_volume" not in tpex.columns:
@@ -1067,17 +1115,79 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         except Exception:
             return None
 
-    price = pd.concat([twse[["股票代號", "公司名稱_來源", "股價", "漲跌", "_raw_volume"]],
-                       tpex[["股票代號", "公司名稱_來源", "股價", "漲跌", "_raw_volume"]]], ignore_index=True)
-    price["股票代號"] = price["股票代號"].astype(str).str.strip()
-    price["股價"] = pd.to_numeric(price["股價"], errors="coerce")
-    price["漲跌"] = pd.to_numeric(price["漲跌"], errors="coerce")
-    # 【V0.9.5-info2】data_date 一律 = today（這份資料對應的市場時點）
-    price["data_date"] = today_ad
-    price["成交量_張"] = price["_raw_volume"].map(_vol_to_kilos)
-    price = price.drop(columns=["_raw_volume"])
-    price = price.drop_duplicates("股票代號").reset_index(drop=True)
-    return price
+    # Step 2: 全市場清單
+    full_list = pd.concat([twse[["股票代號", "公司名稱_來源"]],
+                           tpex[["股票代號", "公司名稱_來源"]]], ignore_index=True)
+    full_list["股票代號"] = full_list["股票代號"].astype(str).str.strip()
+    full_list = full_list.drop_duplicates("股票代號").reset_index(drop=True)
+    all_codes = full_list["股票代號"].tolist()
+
+    # Step 3: TWSE MIS 即時 API 抓全部（上市上櫃涵蓋、~30 批 × 0.1s ~3s）
+    print(f"📡 TWSE MIS 即時股價、{len(all_codes)} 檔...")
+    realtime_df = _fetch_twse_realtime_batch(all_codes, progress_callback=None)
+    # realtime_df 欄位: 股票代號 / 現價 / 成交量_張 / data_date_raw (西元 "20260626")
+
+    # Step 4: 合併
+    merged = full_list.merge(realtime_df, on="股票代號", how="left")
+    # MIS 沒回的股（興櫃股）→ 用 STOCK_DAY_ALL / TPEx 補
+    missing = merged[merged["現價"].isna()]["股票代號"].tolist()
+    if missing:
+        print(f"⚠️ MIS 未覆蓋 {len(missing)} 檔 (興櫃股)、fallback 到 STOCK_DAY_ALL / TPEx")
+        fallback = pd.concat([
+            twse[["股票代號", "股價", "漲跌", "_raw_date", "_raw_volume"]],
+            tpex[["股票代號", "股價", "漲跌", "_raw_date", "_raw_volume"]]
+        ], ignore_index=True)
+        fallback["股票代號"] = fallback["股票代號"].astype(str).str.strip()
+        fallback = fallback[fallback["股票代號"].isin(missing)].drop_duplicates("股票代號")
+        for _, r in fallback.iterrows():
+            code = r["股票代號"]
+            if code in merged["股票代號"].values:
+                idx = merged[merged["股票代號"] == code].index[0]
+                if pd.isna(merged.at[idx, "現價"]):
+                    merged.at[idx, "現價"] = pd.to_numeric(r["股價"], errors="coerce")
+                    merged.at[idx, "漲跌"] = pd.to_numeric(r["漲跌"], errors="coerce")
+                # data_date 用 STOCK_DAY_ALL 的 Date (個股最後成交日、民國格式)
+                if pd.isna(merged.at[idx, "data_date_raw"]) or str(merged.at[idx, "data_date_raw"]).strip() == "":
+                    merged.at[idx, "data_date_raw"] = r["_raw_date"]
+                # 成交量 fallback
+                # 【V0.9.5-info3 修】原本只查 isna、但 MIS 設的預設值是 0.0 (不是 NaN)
+                # → 0.0 被誤判為「已有值」、fallback 不會覆蓋
+                # → 修法: 0 也視為「需要 fallback」
+                cur_vol = merged.at[idx, "成交量_張"]
+                if pd.isna(cur_vol) or cur_vol == 0:
+                    merged.at[idx, "成交量_張"] = _vol_to_kilos(r["_raw_volume"])
+
+    # Step 5: 整理欄位
+    merged["現價"] = pd.to_numeric(merged["現價"], errors="coerce")
+    merged["漲跌"] = pd.to_numeric(merged["漲跌"], errors="coerce")
+    merged["成交量_張"] = pd.to_numeric(merged["成交量_張"], errors="coerce")
+
+    def _mis_date_to_ad(s):
+        """MIS d 欄位 "20260626" (西元 8 碼) → "2026-06-26" """
+        try:
+            s = str(s).strip()
+            if len(s) == 8 and s.isdigit():
+                return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+            return ""
+        except Exception:
+            return ""
+
+    # data_date 來源:
+    # - MIS d 欄位 (8 碼西元): 個股對應成交日
+    # - fallback (7 碼民國): STOCK_DAY_ALL Date
+    # - 都沒有: today (避免空字串)
+    def _to_ad_safe(x):
+        x = str(x).strip()
+        if len(x) == 8 and x.isdigit():
+            return _mis_date_to_ad(x)
+        return _roc_to_ad(x)
+
+    merged["data_date"] = merged["data_date_raw"].apply(_to_ad_safe)
+    # 空的、格式不對的 → today
+    merged.loc[merged["data_date"].fillna("") == "", "data_date"] = today_ad
+    merged = merged.rename(columns={"現價": "股價"})
+
+    return merged[["股票代號", "公司名稱_來源", "股價", "漲跌", "data_date", "成交量_張"]].reset_index(drop=True)
 
 
 def fetch_revenue_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame:

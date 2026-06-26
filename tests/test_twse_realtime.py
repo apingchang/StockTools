@@ -42,7 +42,8 @@ def test_基本API格式_live():
     """【Live smoke test】確認 API 打得通且格式正確"""
     result = st._fetch_twse_realtime_batch(["2330", "0050"])
     assert not result.empty
-    assert list(result.columns) == ["股票代號", "現價", "成交量_張"]
+    # 【V0.9.5-info3】加了 漲跌 跟 data_date_raw 兩個欄位
+    assert list(result.columns) == ["股票代號", "現價", "漲跌", "成交量_張", "data_date_raw"]
     assert set(result["股票代號"].tolist()) == {"2330", "0050"}
 
 
@@ -194,8 +195,13 @@ def test_成交量單位是張():
 
 
 def test_TWSE_batch_size常數():
-    """【架構守護】_TWSE_REALTIME_BATCH_SIZE = 10"""
-    assert st_fetch_market._TWSE_REALTIME_BATCH_SIZE == 10
+    """【架構守護】_TWSE_REALTIME_BATCH_SIZE = 50
+
+    【V0.9.5-info3】batch 從 10 升為 50
+    原本只批幾檔、選股 UI 即時抓
+    fetch_prices 要一次拿全部上市上櫃 2379 檔、batch=50 ~48 批 × 0.5s = 24s + request 5s ≈ 30s
+    """
+    assert st_fetch_market._TWSE_REALTIME_BATCH_SIZE == 50
 
 
 if __name__ == "__main__":
