@@ -628,10 +628,35 @@ def _fmt_float(v, decimals: int = 2) -> str:
 
 
 def _fetch_finmind_dividend(stock_ids: List[str],
-                             db_path: str = "dividend_history.db",
+                             db_path: str = None,
                              progress_callback=None,
                              skip_remote: bool = False,
                              cache_max_age_days: int = 30) -> pd.DataFrame:
+    """
+    取得近 3 年股利（先查 DB，沒有的、或過期的才即時抓 FinMind 並寫回 DB）。
+    - skip_remote=True: DB 沒有的回 None，不抓 FinMind（避免 rate limit）
+    - cache_max_age_days：DB 資料超過 N 天視為過期（預設 30 天）→ 重抓 FinMind
+      （避免 DB 過期→使用者誤以為沒額度問題是 DB 缺漏）
+    - 第一次跑：會 FinMind 抓一批 + 寫 DB
+    - 之後跑：只查 DB，不打網路
+
+    【V0.9.5-goodinfo6++ 修】William 2026-06-26 13:56 反映：
+      系統選股結果 9946 殖利率顯示 0.07 (應為 0)、
+                  4973 殖利率顯示 0.015 (應為 1.28)
+      根因：fetcher 預設 db_path = "dividend_history.db" 是相對路徑
+      → App 跑時 cwd 不同會抓到空 DB 或錯的 DB → 殖利率全 None → fallback 估算
+      → 9946 估算 (1.5×0.7/29) = 0.036 → 顯示 0.04 (但 William 說是 0.07、表示部分用 goodinfo 6.9%)
+      修法：db_path=None 時自動找 fetch_market.py 同目錄的 dividend_history.db
+            (絕對路徑、不受 cwd 影響)
+    """
+    # 【V0.9.5-goodinfo6++ 修】db_path=None 自動找正確路徑
+    # fetch_market.py 在 source/stocktool/、DB 在 source/
+    if db_path is None:
+        _module_dir = os.path.dirname(os.path.abspath(__file__))
+        _source_dir = os.path.dirname(_module_dir)  # source/
+        db_path = os.path.join(_source_dir, "dividend_history.db")
+    rows = []
+    current_year = datetime.now().year
     """
     取得近 3 年股利（先查 DB，沒有的、或過期的才即時抓 FinMind 並寫回 DB）。
     - skip_remote=True: DB 沒有的回 None，不抓 FinMind（避免 rate limit）
@@ -796,7 +821,7 @@ def _fetch_finmind_dividend(stock_ids: List[str],
                  f"{current_year - 1}現金殖利率_goodinfo", f"{current_year - 1}股票殖利率_goodinfo",
                  f"{current_year - 2}現金殖利率_goodinfo", f"{current_year - 2}股票殖利率_goodinfo"])
 
-def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = "dividend_history.db",
+def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = None,
                                   progress_callback=None, batch_size: Optional[int] = None) -> int:
     """
     背景抓取全市場股利寫入 DB（手動啟動用）。
@@ -820,6 +845,11 @@ def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = "dividen
         -1 = FinMind 402 額度錯誤
          0 = 沒缺漏、沒抓
     """
+    # 【V0.9.5-goodinfo6++】db_path=None 自動找正確路徑（source/dividend_history.db）
+    if db_path is None:
+        _module_dir = os.path.dirname(os.path.abspath(__file__))
+        _source_dir = os.path.dirname(_module_dir)  # source/
+        db_path = os.path.join(_source_dir, "dividend_history.db")
     _init_div_history_db(db_path)
     cached = _query_div_history(db_path, [str(c).strip() for c in stock_ids])
     to_fetch = [c for c in stock_ids if str(c).strip() not in cached]

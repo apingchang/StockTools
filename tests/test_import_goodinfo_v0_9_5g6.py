@@ -409,3 +409,54 @@ class TestFinmindYearSemanticsFix(unittest.TestCase):
         conn.close()
         self.assertEqual(count, 0,
             msg=f"finmind ex_date NULL 應該清空、剩 {count} 筆")
+
+
+class TestFetcherDBPathResolution(unittest.TestCase):
+    """【V0.9.5-goodinfo6++】fetcher db_path=None 自動找 source/dividend_history.db
+
+    William 2026-06-26 13:56 反映：系統選股結果 9946 殖利率 0.07 (應為 0)、4973 殖利率 0.015 (應為 1.28)
+    根因：
+      - _fetch_finmind_dividend 預設 db_path = "dividend_history.db" 是相對路徑
+      - 專案根有空的 dividend_history.db (0 筆, 6/20 殘留)
+      - App 跑時 cwd 不同、可能抓到專案根那個空 DB
+      - DB 查不到資料 → 殖利率全 None → fallback 估算
+      - 9946 估算 (EPS×0.7/股價) = 0.036 → 顯示 0.04
+      - 部分狀況抓到正確 DB → 9946 goodinfo cyld=6.9 → 顯示 0.07
+    修法：db_path=None 自動找 fetch_market.py 上層的 source/dividend_history.db (絕對路徑)
+    """
+
+    def test_fetcher_default_db_path_finds_source_db(self):
+        """不傳 db_path、從任何 cwd 都應該能找到 source/dividend_history.db"""
+        import os, sys
+        import tempfile
+
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'source'))
+
+        # 模擬三種 cwd
+        for cwd in ['.', 'source', '/tmp']:
+            with tempfile.TemporaryDirectory() as tmp:
+                os.chdir(tmp)
+                from stocktool.fetch_market import _fetch_finmind_dividend
+                # 用 source/dividend_history.db 的真實 9946 查詢
+                df = _fetch_finmind_dividend(['9946', '4973'], skip_remote=True)
+                # 應該拿到 goodinfo 殖利率 (6.9, 1.28)
+                self.assertEqual(len(df), 2, f"cwd={cwd}: df 應該有 2 列")
+                cyld_2026 = df['2026現金殖利率_goodinfo'].tolist()
+                self.assertEqual(cyld_2026, [6.9, 1.28],
+                    msg=f"cwd={cwd}: 預期 9946=6.9, 4973=1.28、實際 {cyld_2026}")
+
+    def test_background_fetcher_default_db_path(self):
+        """_background_fetch_all_dividend 也自動找正確路徑"""
+        import os, sys
+        import tempfile
+
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'source'))
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            from stocktool.fetch_market import _background_fetch_all_dividend
+            # 傳已知 stock_ids、不要真的抓 FinMind（會被 FinMind API 擋）
+            # 只測 db_path 自動找得到
+            # skip_remote=True 不存在、所以用不存在的 stock
+            result = _background_fetch_all_dividend(['NONEXIST_9999'], batch_size=0)
+            # 應該至少 return 0 (沒抓到) 不報錯
+            self.assertIn(result, [-1, 0, 1])

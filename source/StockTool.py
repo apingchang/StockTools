@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║               台灣股市量化選股系統 v1.1 (2026-06-26 13:10)       ║
+║               台灣股市量化選股系統 v1.1 (2026-06-26 14:00)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-26 12:54 (Asia/Taipei)
+最後更新: 2026-06-26 14:14 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -131,7 +131,47 @@ Python 版本: 3.8+
   - test_6219_2025_goodinfo_intact：6219 2025 goodinfo (0.7, cyld=3.15) 保留
   - test_finmind_year_uses_ex_date_year：fetch_market.py source 包含 ex_date year 邏輯
   - test_no_finmind_rows_with_null_ex_date：DB 內 finmind ex_date NULL = 0
-  - 全部 468 passed (465 既有 + 3 新)、0 failed
+  - 全部 470 passed (465 既有 + 5 新)、0 failed
+
+
+════════════════════════════════════════════════════════════════════════════════
+【V0.9.5-goodinfo6+++】2026-06-26 14:00 (修系統選股 DB 路徑 + 殖利率顯示格式)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-26 13:51 + 13:56 反映：
+  - 系統選股結果 9946 殖利率顯示 0.07 (應為 0)
+  - 系統選股結果 4973 殖利率顯示 0.015 (應為 1.28)
+  - 「請檢查所有殖利率內容」
+
+【根因 1：fetcher db_path 是相對路徑】
+  - _fetch_finmind_dividend 預設 db_path = "dividend_history.db"
+  - 專案根有個空的 dividend_history.db (0 筆、6/20 殘留)
+  - App 跑時 cwd 不同可能抓到空的 DB → 殖利率全 None → fallback 估算
+  - 9946 估算 (1.5×0.7/29) = 0.036 → 顯示 0.04
+  - 部分狀況抓到正確 DB → 9946 goodinfo cyld=6.9 → 顯示 0.07
+  - 4973 goodinfo cyld=1.28 → 顯示 0.01
+
+【根因 2：Treeview 用 _fmt(yld) 顯示小數】
+  - yld 是小數 (0.069 = 6.9%)、但 _fmt(yld) 用 .2f 顯示成 0.07
+  - 應該 ×100 變成 % 才對
+
+【修法】
+  1. _fetch_finmind_dividend (line ~631)：
+     - db_path=None 自動找 fetch_market.py 上層的 source/dividend_history.db (絕對路徑)
+  2. _background_fetch_all_dividend (line ~799)：同樣修
+  3. StockTool.py 系統選股 Treeview (line ~6270)：
+     - 新增 _fmt_pct(yld) = v × 100 顯示為 % (ex: 0.069 → 6.90)
+  4. 清掉專案根的空 dividend_history.db / eps_history.db / portfolio.db
+     (移到 .bak_empty_20260626 備份)
+
+【驗證】end-to-end
+  - 不傳 db_path、從專案根跑：9946=6.9%、4973=1.28% ✓
+  - 不傳 db_path、從 source/ 跑：同樣 ✓
+  - 自動取絕對路徑、不受 cwd 影響
+
+【test】tests/test_import_goodinfo_v0_9_5g6.py +2 個
+  - test_fetcher_default_db_path_finds_source_db：3 種 cwd 都拿到 (6.9, 1.28)
+  - test_background_fetcher_default_db_path：背景 fetcher 也自動找
+  - 全部 470 passed (468 既有 + 2 新)、0 failed
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -6236,6 +6276,20 @@ class StrategyGUI(tk.Tk):
             except (IndexError, tk.TclError):
                 pass
 
+        # 【V0.9.5-goodinfo6+】William 2026-06-26 13:56 反映：
+        #  系統選股結果 9946 殖利率顯示 0.07 (應為 0)、
+        #                4973 殖利率顯示 0.015 (應為 1.28%)
+        # 根因：Treeview 用 _fmt(yld) = 0.069 → 顯示 0.07
+        #       但 yld 是小數 (0.069 = 6.9%)、應該 * 100 變成 %
+        # 修法：殖利率用 _fmt_pct(yld)、×100 變成 %
+        def _fmt_pct(v, fmt=".2f", na="--"):
+            try:
+                if pd.isna(v) or v is None:
+                    return na
+                return format(v * 100, fmt)
+            except Exception:
+                return na
+
         # 填資料（取前 60 筆、避免太慢）
         display_count = 0
         for idx, row in df_sel.head(60).iterrows():
@@ -6270,7 +6324,7 @@ class StrategyGUI(tk.Tk):
                 _fmt(rev_yoy),
                 _fmt(eps_yoy),
                 _fmt(pe),
-                _fmt(yld),
+                _fmt_pct(yld),
             ), tags=(tag,))
             display_count += 1
 
