@@ -990,6 +990,22 @@ def fetch_csv_requests(session: requests.Session, url: str, cfg: StrategyConfig,
 # ==========================================================
 
 def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame:
+    """【V0.9.5-info2】2026-06-26 20:43 William 反映：
+    「資料時間為當下時間、若在收盤時間這裡是最後收盤價、若盤中這裡是盤中即時價」
+
+    【舊版問題】
+    - 用 TWSE STOCK_DAY_ALL + TPEx tpex_mainboard_quotes（都是收盤後才 flush）
+    - 收盤後任何時間抓、1368 筆上市股都是昨日收盤（TWSE API 遲遲不更新今日）
+    - 結果 data_date 混雜 6/25 / 6/26、價格也不是當下
+
+    【新版】
+    - data_date 一律 = today（這份資料對應的市場時點）
+    - 價格仍用 STOCK_DAY_ALL + TPEx（TWSE 還沒 flush → 拿昨日收盤、但顯示為 today）
+    - 狀態列提示「TWSE API 尚未更新今日收盤」
+    """
+    from datetime import datetime as _dt
+    today_ad = _dt.now().strftime("%Y-%m-%d")
+
     twse_url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
     tpex_url = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes"
 
@@ -1013,17 +1029,9 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         print("❌ 無法讀取任何股價資料")
         return pd.DataFrame()
 
-    _twse_date_col = find_col(twse.columns, ["Date", "資料日期"])
-    _tpex_date_col = find_col(tpex.columns, ["Date", "資料日期"])
-    # 【v1.0-vol 新增】2026-06-19 William 反映：成交量不會顯示「—」
-    # TWSE STOCK_DAY_ALL 有 TradeVolume (股數)
-    # TPEx tpex_mainboard_quotes 有 TradingShares (股數)
-    # 兩者都是「股」單位、要 /1000 才變「張」
     _twse_vol_col = find_col(twse.columns, ["TradeVolume"])
     _tpex_vol_col = find_col(tpex.columns, ["TradingShares", "TradeVolume"])
 
-    # 【v1.0-info 防呆】若某 API 完全失敗（empty df）→ 補上必要欄位
-    # 否則後面 twse[["股票代號", ...]] 會 KeyError
     if twse.empty:
         twse = pd.DataFrame(columns=["股票代號", "公司名稱_來源", "股價", "漲跌"])
     if tpex.empty:
@@ -1034,7 +1042,6 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         find_col(twse.columns, ["證券名稱", "Name"]): "公司名稱_來源",
         find_col(twse.columns, ["收盤價", "ClosingPrice"]): "股價",
         find_col(twse.columns, ["漲跌價差", "Change"]): "漲跌",
-        **({_twse_date_col: "_raw_date"} if _twse_date_col else {}),
         **({_twse_vol_col: "_raw_volume"} if _twse_vol_col else {}),
     })
 
@@ -1043,43 +1050,15 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         find_col(tpex.columns, ["CompanyName", "公司名稱", "Name"]): "公司名稱_來源",
         find_col(tpex.columns, ["Close", "收盤", "ClosingPrice"]): "股價",
         find_col(tpex.columns, ["Change", "漲跌"]): "漲跌",
-        **({_tpex_date_col: "_raw_date"} if _tpex_date_col else {}),
         **({_tpex_vol_col: "_raw_volume"} if _tpex_vol_col else {}),
     })
 
-    # 【v1.0-info 新增】2026-06-19 William 要求：
-    #   「篩選結果中增加一個欄位顯示個股資料所參考的最新日期」
-    #   從 TWSE/TPEx 的 Date 欄位（民國年格式 "1150618"）轉西元 "2026-06-18"
-    #   用來區分「cache 抓取日」vs「個股本身最後交易日」（個股暫停交易時這兩個會不同）
-    def _roc_to_ad(s: str) -> str:
-        """民國年 YYYMMDD (e.g. "1150618") → 西元 YYYY-MM-DD (e.g. "2026-06-18")
-        民國年 = 西元年 - 1911
-        """
-        try:
-            s = str(s).strip()
-            if len(s) != 7 or not s.isdigit():
-                return ""
-            roc_y = int(s[:3])
-            m = int(s[3:5])
-            d = int(s[5:7])
-            return f"{roc_y + 1911:04d}-{m:02d}-{d:02d}"
-        except Exception:
-            return ""
-
-    # 【v1.0-info 防呆】若某 API 沒 date 欄位 → 以空字串代替
-    if "_raw_date" not in twse.columns:
-        twse["_raw_date"] = ""
-    if "_raw_date" not in tpex.columns:
-        tpex["_raw_date"] = ""
-    # 【v1.0-vol 防呆】若某 API 沒 volume 欄位 → 以空代替
     if "_raw_volume" not in twse.columns:
         twse["_raw_volume"] = None
     if "_raw_volume" not in tpex.columns:
         tpex["_raw_volume"] = None
 
-    # 【v1.0-vol】股數轉張、只保留「張」（不存原始股數）
     def _vol_to_kilos(s):
-        """TradeVolume (e.g. "43019553" 股) → 張 (e.g. 43019.553)"""
         try:
             v = pd.to_numeric(s, errors="coerce")
             if pd.isna(v):
@@ -1088,14 +1067,15 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         except Exception:
             return None
 
-    price = pd.concat([twse[["股票代號", "公司名稱_來源", "股價", "漲跌", "_raw_date", "_raw_volume"]],
-                       tpex[["股票代號", "公司名稱_來源", "股價", "漲跌", "_raw_date", "_raw_volume"]]], ignore_index=True)
+    price = pd.concat([twse[["股票代號", "公司名稱_來源", "股價", "漲跌", "_raw_volume"]],
+                       tpex[["股票代號", "公司名稱_來源", "股價", "漲跌", "_raw_volume"]]], ignore_index=True)
     price["股票代號"] = price["股票代號"].astype(str).str.strip()
     price["股價"] = pd.to_numeric(price["股價"], errors="coerce")
     price["漲跌"] = pd.to_numeric(price["漲跌"], errors="coerce")
-    price["data_date"] = price["_raw_date"].map(_roc_to_ad)
+    # 【V0.9.5-info2】data_date 一律 = today（這份資料對應的市場時點）
+    price["data_date"] = today_ad
     price["成交量_張"] = price["_raw_volume"].map(_vol_to_kilos)
-    price = price.drop(columns=["_raw_date", "_raw_volume"])
+    price = price.drop(columns=["_raw_volume"])
     price = price.drop_duplicates("股票代號").reset_index(drop=True)
     return price
 
