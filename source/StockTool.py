@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║               台灣股市量化選股系統 v1.1 (2026-06-26 14:00)       ║
+║               台灣股市量化選股系統 v1.1 (2026-06-26 18:35)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-26 14:14 (Asia/Taipei)
+最後更新: 2026-06-26 18:35 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -172,6 +172,49 @@ Python 版本: 3.8+
   - test_fetcher_default_db_path_finds_source_db：3 種 cwd 都拿到 (6.9, 1.28)
   - test_background_fetcher_default_db_path：背景 fetcher 也自動找
   - 全部 470 passed (468 既有 + 2 新)、0 failed
+
+
+════════════════════════════════════════════════════════════════════════════════
+【V0.9.5-goodinfo6++++】2026-06-26 18:35 (今年現金殖利率 = cash / 現價)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-26 14:18 + 14:25 反映：
+  - 「2026 漲利率不能從 goodinfo 抓、要用現價去計算！」
+  - 「過去歷史漲利率的資料用 goodinfo 抓的」
+
+【根因】舊的演算法：
+  - 今年現金殖利率(%) = 100% 用 goodinfo 殖利率值（goodinfo 6.32%）
+  - 但 goodinfo 是用「除息基準日還原價」算的歷史值、不是現價算的即時殖利率
+  - 9946 樣本：goodinfo 6.9%（用 19.85 算）、但現價 29、cash 1.37 → 實際 4.72%
+  - 結果使用者看到的殖利率跟現價配股現金實際算出來的不一樣
+
+【新邏輯】（V0.9.5-goodinfo6++++）
+  - 今年現金殖利率(%) = 今年現金股利 / 現價 × 100
+    - cash=0 → 殖利率 = 0.0%（表示「該年未配息」、合理）
+    - cash=None 或現價 None → 殖利率 None
+  - 去年現金殖利率(%) = 直接用 goodinfo（已除息完成、用除息日還原價算的歷史值）
+  - 股票殖利率（今年/去年）= 直接用 goodinfo
+
+【改動】3 個 source
+  1. stocktool/scoring.py (line ~198) _run_manual_selection：
+     - 「今年現金殖利率(%)」演算法從 goodinfo 改為 cash/現價×100
+  2. stocktool/pipeline.py (line ~163) _run_selection_only：
+     - 「漲利率(估)」演算法從 goodinfo 改為 cash/現價
+  3. stocktool/pipeline.py (line ~246) _run_pipeline：
+     - 「漲利率(估)」演算法同步改為 cash/現價
+
+【驗證】end-to-end _run_manual_selection
+  - 9946 (三發地產)：cash=1.37、現價=29 → 漲利率 4.72%（不是 goodinfo 6.9）✓
+  - 4973 (廣穎)：cash=1.0、現價=78 → 漲利率 1.28%（巧合跟 goodinfo 同）✓
+  - 6219 (富旺)：cash=0、現價=13.25 → 漲利率 0.0%（該年未配息）✓
+  - 1808 (潤隆)：cash=1.5、現價=31 → 漲利率 4.84% ✓
+  - 2408 (南亞科)：cash=1.347、現價=340 → 漲利率 0.40% ✓
+
+【test】tests/ 調整 4 個檔、遾 6 個 test
+  - test_goodinfo_yield_rate.py 全部重寫反映新邏輯
+  - test_ms_display_div_columns.py test_股利為0時 → cash=0 改為 0.0%
+  - test_pipeline_dividend_merge.py test_合併股利 → cash/現價 為主
+  - test_dividend_year_mapping.py test_2408 → cash/現價 為主
+  - 全部 469 passed / 0 failed
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════

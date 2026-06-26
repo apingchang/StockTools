@@ -160,21 +160,27 @@ def _run_selection_only(cfg: StrategyConfig, logger: GuiLogger):
     except Exception as e:
         logger.log(f"   ⚠️ 讀取股利 DB 失敗：{e}（殖利率只能走估算）")
 
-    # 【v1.1.1+】殖利率(估) 優先序：
-    #   1. 今年現金殖利率_goodinfo  (實際除息後殖利率、最準、單位 %)
-    #   2. EPS × 0.7 / 股價  (粗估、70% 配發率)
-    # _fetch_finmind_dividend 回傳的欄位名是「{cy}現金殖利率_goodinfo」（例：2026現金殖利率_goodinfo）
+    # 【V0.9.5-goodinfo6+++】殖利率(估) 優先序改為 cash / 現價，不用 goodinfo
+    # 【William 2026-06-26 14:18 反映】「2026 漲利率不能從 goodinfo 抓、要用現價去計算！」
+    #   - goodinfo 殖利率是用「除息基準日還原價」算的、是歷史值
+    #   - 今年殖利率要反映「現價 × 今年現金股利」
+    #   - cash=0 也要算 → 結果 0.0%
+    # 過去歷史殖利率仍用 goodinfo（手動選股 scoring.py 那邊仍是）
     cy = datetime.now().year
-    goodinfo_yld_col = f"{cy}現金殖利率_goodinfo"
-    if goodinfo_yld_col in df_sel.columns:
-        goodinfo_yld_pct = df_sel[goodinfo_yld_col]
-        # GoodInfo 是 %（例：1.54 表示 1.54%）、要 ÷100 變成小數才能跟估算值（也是小數）對齊
-        goodinfo_yld_decimal = goodinfo_yld_pct / 100.0
-        df_sel["殖利率(估)"] = goodinfo_yld_decimal.where(goodinfo_yld_pct.notna(), df_sel["殖利率(估)"])
-        goodinfo_count = goodinfo_yld_pct.notna().sum()
-        logger.log(f"   殖利率：使用 GoodInfo 實際現金殖利率 {goodinfo_count} 筆")
+    cash_col = f"{cy}現金股利"
+    price_col = "股價"
+    if cash_col in df_sel.columns and price_col in df_sel.columns:
+        yld_mask = (
+            df_sel[cash_col].notna()
+            & df_sel[price_col].notna() & (df_sel[price_col] > 0)
+        )
+        # 殖利率是小數 (0.069 = 6.9%)
+        df_sel.loc[yld_mask, "殖利率(估)"] = (
+            df_sel.loc[yld_mask, cash_col] / df_sel.loc[yld_mask, price_col]
+        ).round(4)
+        logger.log(f"   殖利率：今年現金股利 / 現價（不用 GoodInfo）{yld_mask.sum()} 筆")
     else:
-        logger.log("   殖利率：無 GoodInfo 資料、走估算")
+        logger.log("   殖利率：無現金股利或股價、走 EPS×0.7/股價 估算")
 
     logger.log(f"5) 評分（{'多因子' if cfg.use_enhanced_score else '簡易'}）...")
     if cfg.use_enhanced_score:
@@ -241,14 +247,19 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         logger.log(f"   ⚠️ 讀取股利 DB 失敗：{e}（殖利率只能走估算）")
 
     cy = datetime.now().year
-    goodinfo_yld_col = f"{cy}現金殖利率_goodinfo"
-    if goodinfo_yld_col in df_sel.columns:
-        goodinfo_yld_pct = df_sel[goodinfo_yld_col]
-        goodinfo_yld_decimal = goodinfo_yld_pct / 100.0
-        df_sel["殖利率(估)"] = goodinfo_yld_decimal.where(goodinfo_yld_pct.notna(), df_sel["殖利率(估)"])
-        logger.log(f"   殖利率：使用 GoodInfo 實際現金殖利率 {goodinfo_yld_pct.notna().sum()} 筆")
+    cash_col = f"{cy}現金股利"
+    price_col = "股價"
+    if cash_col in df_sel.columns and price_col in df_sel.columns:
+        yld_mask = (
+            df_sel[cash_col].notna()
+            & df_sel[price_col].notna() & (df_sel[price_col] > 0)
+        )
+        df_sel.loc[yld_mask, "殖利率(估)"] = (
+            df_sel.loc[yld_mask, cash_col] / df_sel.loc[yld_mask, price_col]
+        ).round(4)
+        logger.log(f"   殖利率：今年現金股利 / 現價（不用 GoodInfo）{yld_mask.sum()} 筆")
     else:
-        logger.log("   殖利率：無 GoodInfo 資料、走估算")
+        logger.log("   殖利率：無現金股利或股價、走 EPS×0.7/股價 估算")
 
     # ==========================================================
     # v0.9.2：Top10 基本面回測模式

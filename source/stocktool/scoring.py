@@ -189,17 +189,23 @@ def _run_manual_selection(
     base["去年現金殖利率_goodinfo"] = base.get(f"{cy - 1}現金殖利率_goodinfo", None)
     base["去年股票殖利率_goodinfo"] = base.get(f"{cy - 1}股票殖利率_goodinfo", None)
 
-    # 8. 今年現金殖利率（V0.9.5-goodinfo3 改：100% 用 goodinfo，不 fallback）
-    # 【William 2026-06-17 12:03 反映】「殖利率應該不用任何計算直接用才對」
-    #   - goodinfo 已用除息基準日還原價算好殖利率、比任何 fallback 都準
-    #   - 拿掉 cash/現價 fallback（會被現價偏離誤導）
-    #   - cash=0 也要用 goodinfo 值（ex: 5386 2026 cash=0 但 goodinfo cash_yield=0.30%）
-    #   - goodinfo 殖利率 = 0 (該年未配息) → 殖利率 0%（合理、不是 None）
+    # 8. 今年現金殖利率（V0.9.5-goodinfo6+++ 改：cash / 現價 × 100，不用 goodinfo）
+    # 【William 2026-06-26 14:18 反映】「2026 漲利率不能從 goodinfo 抓、要用現價去計算！」
+    #   - goodinfo 殖利率是用「除息基準日還原價」算的、是歷史值
+    #   - 9946 樣本：goodinfo cyld=6.9% 但除息日未公布、現價 29 → cash 1.37 = 4.72%
+    #   - 過去歷史殖利率仍用 goodinfo（已除息完成、有歷史價）
+    #   - 今年殖利率要反映「現價 × 今年現金股利」、使用者看得到即時意義
+    #   - cash=0 也要算 → 結果 0.0%
     base["今年現金殖利率(%)"] = None
-    goodinfo_yld_mask = base["今年現金殖利率_goodinfo"].notna()
-    base.loc[goodinfo_yld_mask, "今年現金殖利率(%)"] = (
-        base.loc[goodinfo_yld_mask, "今年現金殖利率_goodinfo"].round(2)
+    if "現價" not in base.columns:
+        base["現價"] = None
+    yld_mask = (
+        base["現價"].notna() & (base["現價"] > 0)
+        & base["今年現金股利"].notna()
     )
+    base.loc[yld_mask, "今年現金殖利率(%)"] = (
+        (base.loc[yld_mask, "今年現金股利"] / base.loc[yld_mask, "現價"]) * 100
+    ).round(2)
 
     # 9. 去年現金殖利率（V0.9.5-goodinfo3：100% 用 goodinfo、不走 cash/現價 fallback）
     # 【原本】cash=0 → continue 跳過 → 殖利率 None（5386 去年現金殖利率 bug）

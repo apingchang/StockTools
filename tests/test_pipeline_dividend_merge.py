@@ -67,18 +67,28 @@ def _make_get_or_fetch_mock(price_df, rev_df, eps_df):
 class TestPipelineDividendMerge(unittest.TestCase):
     """【v1.1.1+】run_pipeline 合併 FinMind 股利資料"""
 
-    def test_合併股利_殖利率用goodinfo(self):
-        """run_pipeline 應該合併 FinMind 股利資料、殖利率優先用 GoodInfo"""
+    def test_合併股利_殖利率用現金股利除以現價(self):
+        """【V0.9.5-goodinfo6+++】run_pipeline 殖利率 = cash / 現價（不用 GoodInfo）
+
+        William 2026-06-26 14:18 反映：「2026 漲利率不能從 goodinfo 抓、要用現價去計算」
+        """
         cfg = StrategyConfig()
         cfg.use_enhanced_score = True
 
-        price_df = _price_df()
+        price_df = _price_df()  # 3490 現價 32.5
         rev_df = _rev_df()
         eps_df = _eps_df()
+        # 給現金股利 0.5 元、現價 32.5 → 殖利率 = 0.5/32.5 = 0.01538 = 1.538%
+        # 故意給 GoodInfo 1.54%（一樣但表示殖利率是用 cash/現價算）
+        cy = pd.Timestamp.now().year
         div_df = pd.DataFrame({
             '股票代號': ['3490'],
-            f'{pd.Timestamp.now().year}現金殖利率_goodinfo': [1.54],
-            f'{pd.Timestamp.now().year - 1}現金殖利率_goodinfo': [0.5],
+            f'{cy}現金股利': [0.5],
+            f'{cy}股票股利': [0.0],
+            f'{cy - 1}現金股利': [0.2],
+            f'{cy - 1}股票股利': [0.0],
+            f'{cy}現金殖利率_goodinfo': [1.54],   # goodinfo 給 1.54、但不採用
+            f'{cy - 1}現金殖利率_goodinfo': [0.5],
         })
 
         with patch.object(pipeline, 'get_or_fetch',
@@ -92,9 +102,9 @@ class TestPipelineDividendMerge(unittest.TestCase):
         row_3490 = result[result['股票代號'].astype(str) == '3490']
         self.assertFalse(row_3490.empty, "Should have 3490 row")
         yld = row_3490['殖利率(估)'].iloc[0]
-        # GoodInfo 1.54% = 0.0154（小數）
-        self.assertAlmostEqual(float(yld), 0.0154, places=4,
-            msg=f"3490 殖利率應該用 GoodInfo 1.54% = 0.0154，實際: {yld}")
+        # cash=0.5、現價 32.5 → 0.5/32.5 = 0.01538 = 1.538%（小數 0.0154）
+        self.assertAlmostEqual(float(yld), 0.01538, places=4,
+            msg=f"3490 殖利率應該 = cash/現價 = 0.5/32.5 = 0.01538，實際: {yld}")
 
     def test_沒股利資料_走估算(self):
         """FinMind DB 沒資料時、殖利率走估算（EPS × 0.7 / 股價）"""

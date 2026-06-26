@@ -151,11 +151,12 @@ def test_2408_南亞科_無DB資料時今年股利是None_不是用去年頂替(
         f"去年現金股利應為 1.347 (DB year=2025)，實際: {last_div}"
 
 
-def test_2408_南亞科_殖利率用goodinfo():
-    """2408 V0.9.5-goodinfo3：殖利率直接用 goodinfo 提供
+def test_2408_南亞科_殖利率用現金股利除以現價():
+    """2408 V0.9.5-goodinfo6+++：殖利率 = cash / 現價
 
-    修訂：原本測「殖利率 = cash/現價 = 0.4%」，V0.9.5-goodinfo3 改用 goodinfo
-    goodinfo 2408 2026 = 0.32%（不是 0.4%）
+    William 2026-06-26 14:18 反映：「2026 漲利率不能從 goodinfo 抓、要用現價去計算」
+    修訂：原本 V0.9.5-goodinfo3 測「殖利率 = goodinfo 0.32%」
+          V0.9.5-goodinfo6+++ 改 = cash/現價 = 1.347/340 = 0.396% (≈ 0.4%)
     """
     fake_div = pd.DataFrame({
         "股票代號": ["2408"],
@@ -163,7 +164,7 @@ def test_2408_南亞科_殖利率用goodinfo():
         "2025現金股利": [None], "2025股票股利": [None],
         "2024現金股利": [None], "2024股票股利": [None],
         "2023現金股利": [None], "2023股票股利": [None],
-        # V0.9.5-goodinfo3：殖利率 100% 用 goodinfo
+        # V0.9.5-goodinfo6++：殖利率 = cash/現價、goodinfo 不採用
         "2026現金殖利率_goodinfo": [0.32],
     })
     st_fetch_market._fetch_finmind_dividend = _mock_finmind(None, fake_div)
@@ -175,7 +176,9 @@ def test_2408_南亞科_殖利率用goodinfo():
     row = result.iloc[0]
 
     cy_yld = row["今年現金殖利率(%)"]
-    assert abs(cy_yld - 0.32) < 0.01, f"今年殖利率應用 goodinfo 0.32%，實際: {cy_yld}"
+    # 1.347 / 340 × 100 = 0.3961% ≈ 0.40（不是 goodinfo 0.32）
+    assert abs(cy_yld - 0.40) < 0.01, \
+        f"2408 今年殖利率應 = cash/現價 = 1.347/340 = 0.40%，實際: {cy_yld}"
 
 
 def test_6171_大城地產_前年現金股利指向cy3():
