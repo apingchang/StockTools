@@ -324,11 +324,88 @@ class TestEndToEndYieldCalculation(unittest.TestCase):
         self.assertAlmostEqual(rows[0][2], 0.0, places=2,
             msg=f"6219 2026 cash_yield 應 = 0.0%、實際 {rows[0][2]}")
 
-    def test_6219_2024_finmind_preserved(self):
-        """6219 2024 finmind (0.7, 0.5) 應保留、不被 goodinfo 0.0 蓋掉"""
-        self.assertEqual(len(self.row_6219_2024), 1)
-        cash, stock, source = self.row_6219_2024[0]
-        self.assertEqual(source, "finmind",
-            msg=f"6219 2024 source 應為 finmind、實際 {source}")
-        self.assertAlmostEqual(cash, 0.7, places=2)
-        self.assertAlmostEqual(stock, 0.5, places=2)
+    def test_6219_2024_finmind_removed_after_alignment(self):
+        """6219 2024 finmind row 該年被刪除、合併到 2025 goodinfo
+
+        【V0.9.5-goodinfo6+】2026-06-26 13:00 發現：
+          finmind year 是會計年度（113年=西元 2024）、對應 goodinfo 發放年度（2025 發放）
+          finmind (0.7, 0.5) 跟 goodinfo (0.7, 0.5) 是同一筆、不該重複
+          修法：finmind row 全部刪除、靠 goodinfo row 保留資料
+        """
+        # 6219 2024 應該完全沒有 finmind row
+        import sqlite3
+        import os
+        db_path = os.path.join(
+            os.path.dirname(__file__), '..', 'source', 'dividend_history.db')
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM dividend_history "
+            "WHERE stock_id='6219' AND year=2024 AND source='finmind'"
+        )
+        count = cur.fetchone()[0]
+        conn.close()
+        self.assertEqual(count, 0,
+            msg="6219 2024 finmind row 應該被刪除、靠 goodinfo 2025 保留")
+
+    def test_6219_2025_goodinfo_intact(self):
+        """6219 2025 goodinfo row 仍是 (0.7, 0.5, cyld=3.15, syld=2.43)"""
+        rows = [r for r in self.data_6219 if r[0] == 2025]
+        self.assertEqual(len(rows), 1, msg="6219 2025 應該有 1 筆 goodinfo row")
+        year, cash, cyld = rows[0]
+        self.assertAlmostEqual(cash, 0.7, places=2,
+            msg=f"6219 2025 cash 應 = 0.7、實際 {cash}")
+        self.assertAlmostEqual(cyld, 3.15, places=2,
+            msg=f"6219 2025 cyld 應 = 3.15、實際 {cyld}")
+
+
+class TestFinmindYearSemanticsFix(unittest.TestCase):
+    """【V0.9.5-goodinfo6+】finmind year 是會計年度、不是發放年度
+
+    William 2026-06-26 12:39 反映：6219 2024 finmind (0.7, 0.5) 其實是 2025 發放
+    證據：finmind 113年第4季 cash=0.7 CashExDividendTradingDate=2025-07-03
+          → 2025-07-03 除息 → 應歸到 goodinfo 2025 發放年度
+    證據：goodinfo 2025 發放年度 = 0.7、cash 完全相同
+
+    修法：
+      - _fetch_finmind_dividend: 優先用 CashExDividendTradingDate 年份
+      - _background_fetch_all_dividend: 同樣優先用 ex_date
+      - DB cleanup: 刪除 39 筆 finmind ex_date NULL 的孤兒 row
+      - 6219 2024 finmind row: 跟 goodinfo 2025 重複、刪除
+    """
+
+    def test_finmind_year_uses_ex_date_year(self):
+        """fetcher 邏輯：用 ex_date year、不是 finmind year+1911
+
+        這是 code review test、確認 fetch_market.py 已加 ex_date year 邏輯
+        """
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'source'))
+        # 讀 fetch_market.py source、確認有「ex_date year」相關邏輯
+        with open(os.path.join(os.path.dirname(__file__), '..', 'source',
+                               'stocktool', 'fetch_market.py')) as f:
+            source = f.read()
+
+        # 至少有 2 個 fetcher 都改了
+        self.assertIn("CashExDividendTradingDate", source,
+            msg="fetch_market.py 應該用 CashExDividendTradingDate 取得 ex_date")
+        self.assertIn("StockExDividendTradingDate", source,
+            msg="fetch_market.py 應該 fallback 到 StockExDividendTradingDate")
+        self.assertIn("ex_date_str and len(ex_date_str) >= 4", source,
+            msg="應該用 ex_date_str[:4] 拿到年份")
+
+    def test_no_finmind_rows_with_null_ex_date(self):
+        """DB 內不應有 finmind ex_date NULL 的 row（已被 cleanup 刪除）"""
+        import sqlite3, os
+        db_path = os.path.join(
+            os.path.dirname(__file__), '..', 'source', 'dividend_history.db')
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM dividend_history "
+            "WHERE source='finmind' AND (ex_date IS NULL OR ex_date='')"
+        )
+        count = cur.fetchone()[0]
+        conn.close()
+        self.assertEqual(count, 0,
+            msg=f"finmind ex_date NULL 應該清空、剩 {count} 筆")

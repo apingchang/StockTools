@@ -1,11 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                               StockTool.py                                   ║
-║               台灣股市量化選股系統 v1.1 (2026-06-26 12:35)       ║
+║               台灣股市量化選股系統 v1.1 (2026-06-26 13:10)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1
-最後更新: 2026-06-26 12:38 (Asia/Taipei)
+最後更新: 2026-06-26 12:54 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -86,6 +85,53 @@ Python 版本: 3.8+
   - 6219 2024：保留 finmind (0.7, 0.5) ✓
 
 【沒動】VERSION / App title / User-Agent 仍是 v1.1（只是 scripts/ 改、主程式沒動）
+
+
+════════════════════════════════════════════════════════════════════════════════
+【V0.9.5-goodinfo6++】2026-06-26 13:10 (修 finmind 年份語意 bug)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-26 12:39 反映：
+  - 「6219 2024 finmind (0.7, 0.5) 、goodinfo 抓的是發放年2024的 (0.7, 0.5) 是在 2025 發放！」
+
+【根因】finmind year = 會計年度（ex: 113年）、goodinfo 發放年度 = 除息日年份
+  - 113年 ≠ 2024 (西元)、ex: 113年第4季 cash=0.7 CashExDividendTradingDate=2025-07-03
+  - finmind 把這筆寫到 DB year=2024
+  - 但真正發放是 2025-07-03 → 應歸到 2025
+  - goodinfo 2025 發放年度也是 0.7 → 兩者同一筆
+
+【證據】5 個 finmind row 用 ex_date year 都跟 goodinfo +1 完全匹配：
+  - 1459 finmind yr=2025 (0.2) ex_date=2026-05-28 → goodinfo 2026 (0.2) ✓
+  - 2342 finmind yr=2024 (0.299) ex_date=2025-08-08 → goodinfo 2025 (0.3) ✓
+  - 2323 finmind yr=2023 (0.68) ex_date=2024-09-10 → goodinfo 2024 (0.68) ✓
+  - 2344 finmind yr=2025 (0.5) ex_date=2026-03-27 → goodinfo 2026 (0.5) ✓
+  - 7821 finmind yr=2025 (2.0) ex_date=2026-04-03 → goodinfo 2026 (2.0) ✓
+
+【修復】3 個動作
+  1. fetch_market.py _fetch_finmind_dividend (line ~700)：
+     - 優先用 CashExDividendTradingDate (現金除息日)
+     - fallback 到 StockExDividendTradingDate (股票除權日)
+     - fallback 到 rec.get('date') (公告日)
+     - 最後才退回 finmind year+1911 (會計年度)
+  2. fetch_market.py _background_fetch_all_dividend (line ~825)：
+     - 同樣優先用 CashExDividendTradingDate / StockExDividendTradingDate
+  3. DB cleanup (inline Python script)：
+     - 刪除 5 筆有 ex_date 但 yr 錯誤的 finmind row (已遷移到 ex_date yr)
+     - 刪除 39 筆 finmind ex_date NULL 的 row (yr 都是會計年度、無法還原)
+     - 刪除 6219 2024 finmind 孤兒 row (跟 goodinfo 2025 重複)
+
+【驗證】
+  - 6219 2025 goodinfo (0.7, 0.5, cyld=3.15, syld=2.43) ✓ 保留
+  - 6219 2024 finmind row 已刪除、不重複
+  - 39 筆 finmind ex_date NULL row 全清
+  - 5 筆 finmind ex_date 有值 row 遷移到 ex_date yr
+  - 1808 / 1459 / 2342 等殖利率正確
+
+【test】tests/test_import_goodinfo_v0_9_5g6.py +3 個
+  - test_6219_2024_finmind_removed_after_alignment：6219 2024 finmind 不存在
+  - test_6219_2025_goodinfo_intact：6219 2025 goodinfo (0.7, cyld=3.15) 保留
+  - test_finmind_year_uses_ex_date_year：fetch_market.py source 包含 ex_date year 邏輯
+  - test_no_finmind_rows_with_null_ex_date：DB 內 finmind ex_date NULL = 0
+  - 全部 468 passed (465 既有 + 3 新)、0 failed
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════

@@ -700,17 +700,34 @@ def _fetch_finmind_dividend(stock_ids: List[str],
                 m_y = _re_div.match(r"^(\d+)年$", year_str)  # 純年（無季/半年度）
                 is_max_logic = False  # 記 year 該年 是用 max 還是 sum 邏輯
                 if m_q:
-                    yr = int(m_q.group(1)) + 1911
+                    finmind_yr = int(m_q.group(1)) + 1911
                     is_max_logic = True
                 elif m_h1:
-                    yr = int(m_h1.group(1)) + 1911
+                    finmind_yr = int(m_h1.group(1)) + 1911
                 elif m_h2:
-                    yr = int(m_h2.group(1)) + 1911
+                    finmind_yr = int(m_h2.group(1)) + 1911
                 elif m_y:
-                    yr = int(m_y.group(1)) + 1911
+                    finmind_yr = int(m_y.group(1)) + 1911
                     is_max_logic = True
                 else:
                     continue
+                # 【V0.9.5-goodinfo6+ 修 Bug】FinMind year = 會計年度（ex: 113年）≠ 發放年度
+                # ex_date 除息日才是對應 goodinfo 發放年度
+                # 證據：6219 finmind 113年第4季 cash=0.7 ex_date=2025-07-03 → goodinfo 2025 發放=0.7
+                # 證據：2342 finmind yr=2024 cash=0.299 ex_date=2025-08-08 → goodinfo 2025 cash=0.3
+                # 修法：優先用 CashExDividendTradingDate（現金除息日）或 StockExDividendTradingDate（股票除權日）
+                #       都不存在才退回 date 欄位（公告日）或 finmind year+1911
+                cash_ex_date = rec.get("CashExDividendTradingDate", "") or ""
+                stock_ex_date = rec.get("StockExDividendTradingDate", "") or ""
+                if cash_ex_date and len(cash_ex_date) >= 4:
+                    ex_date = cash_ex_date
+                elif stock_ex_date and len(stock_ex_date) >= 4:
+                    ex_date = stock_ex_date
+                # ex_date 還是空才退回 finmind year+1911
+                if ex_date and len(ex_date) >= 4:
+                    yr = int(ex_date[:4])
+                else:
+                    yr = finmind_yr
                 yd = by_year.setdefault(yr, {"cash": 0.0, "stock": 0.0, "ex_date": ""})
                 if is_max_logic:
                     # max 邏輯：保留 cash 大的、ex_date 跟著更新到該筆
@@ -829,6 +846,13 @@ def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = "dividen
             yr = _parse_roc_year(rec.get("year", ""))
             if yr == 0:
                 continue
+            # 【V0.9.5-goodinfo6+ 修 Bug】FinMind year 是會計年度、不是發放年度
+            # 用 CashExDividendTradingDate / StockExDividendTradingDate 年份才是 goodinfo 發放年度
+            cash_ex_date = rec.get("CashExDividendTradingDate", "") or ""
+            stock_ex_date = rec.get("StockExDividendTradingDate", "") or ""
+            ex_date_str = cash_ex_date or stock_ex_date or rec.get("date", "") or ""
+            if ex_date_str and len(ex_date_str) >= 4:
+                yr = int(ex_date_str[:4])
             cash_raw = float(rec.get("CashEarningsDistribution") or 0)
             stock_raw = float(rec.get("StockEarningsDistribution") or 0)
             fetch_rows.append((code, yr, cash_raw, stock_raw, "finmind"))
