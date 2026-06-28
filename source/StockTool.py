@@ -1,12 +1,59 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-after-hour (2026-06-28 10:15)        ║
+║  台灣股市量化選股系統 v1.1-click-sort (2026-06-28 11:55)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-after-hour
-最後更新: 2026-06-28 10:05 (Asia/Taipei)
+Version: v1.1-click-sort
+最後更新: 2026-06-28 11:43 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【V0.9.5-click-sort】2026-06-28 11:55 (William 11:30 反映 click heading 切換排序)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-28 11:30 反映：
+  - 「幫我改成每個數字欄位在欄位名稱 click 一下則依此欄位數值大小排列」
+  - 「同一欄每按一下改變排列數序也就是由大到小或由小到大」
+  - 「如一般 file explorer 一樣！」
+  - 「etf 選股結果也是同樣作法！」
+
+【設計】
+- source/StockTool.py 加 3 個 helper:
+  - _parse_sort_value(v) → (sort_key, is_missing)
+    - 數字欄自動 parse (千分位、單位「股/張/%」、「—」/空)
+    - 文字欄當字串排（代號/名稱/日期）
+  - _sort_treeview_by_column(tree, col, sort_state)
+    - 第一次 click → desc（由大到小）
+    - 再 click 一次 → asc（由小到大）
+    - missing（—/空）一律排最後
+    - heading 箭頭: 該欄加 ↑/↓、其他欄清掉
+  - _make_treeview_click_sort(tree, cols, skip_col)
+    - 套用到 tree、回傳 sort_state
+    - skip_col 是「勾選」（click 是 toggle 不是 sort）
+
+【套用位置】
+- _ms_tree（手動選股 15 欄）: self._ms_sort_state = _make_treeview_click_sort(...)
+- _etf_tree（ETF 選股 6 欄）: self._etf_sort_state = _make_treeview_click_sort(...)
+- 兩個都 skip「勾選」欄
+
+【測試】tests/test_click_sort.py（新、18 個）
+- _parse_sort_value 8 個: 純數字/千分位/單位/missing/中文/代號/日期/小數負號
+- _sort_treeview_by_column 8 個: desc/asc/切換欄位 arrow/代號當數字/名稱當字串/
+  現價千分位/資料日期字串序/全部 missing 不爆
+- _make_treeview_click_sort 1 個: skip_col 不設 handler
+- 整合 1 個: 手動選股 + ETF 都有套用
+- 全部 503 passed (485 既有 + 18 新)、0 failed
+
+【version 同步】
+- VERSION = "v1.1-after-hour" → "v1.1-click-sort" (stocktool/config.py)
+- App title / 啟動 log 自動改
+
+【實作細節】
+- 用 ttk.Treeview.heading(command=...) 設 click handler
+- sort_state 存到 self（跨多次顯示保留 user 排序意圖）
+- Treeview.move(iid, "", idx) 重排、保留 tags 跟設定
+- heading text 加 ↑/↓、其他欄自動清掉
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -2514,6 +2561,114 @@ from stocktool.gui.calendar import _CalendarDialog
 
 
 
+
+
+# ==========================================================
+# 【V0.9.5-click-sort】Treeview clickable sort helper
+# ==========================================================
+# 像 Windows file explorer 一樣:click heading 切換升降冪
+# - 第一次 click → 降冪 (large → small, 由大到小)
+# - 再 click 一次 → 升冪 (small → large, 由小到大)
+# - 顯示「—」/空字串的 row → 一律排最後（不管升降冪）
+# - 數字欄自動 parse (處理千分位、單位「股/張/%」)
+# - 文字欄當字串排（代號/名稱/日期）
+
+def _parse_sort_value(v):
+    """【V0.9.5-click-sort】Treeview 顯示字串 → 可排序值
+
+    Returns:
+        (sort_key, is_missing)
+        - sort_key: float（數字欄）或 str（文字/日期欄）
+        - is_missing: True 表示「—」/空字串、要排最後
+    """
+    s = str(v).strip()
+    if s == "" or s == "—" or s == "-":
+        return (float("inf"), True)
+    # 數字解析:去掉千分位逗號、常見單位
+    s_clean = s.replace(",", "").replace(" 股", "").replace(" 張", "").replace("%", "").strip()
+    try:
+        return (float(s_clean), False)
+    except (ValueError, TypeError):
+        # 文字欄（代號/名稱/日期）→ 當字串排
+        return (s, False)
+
+
+def _sort_treeview_by_column(tree, col, sort_state):
+    """【V0.9.5-click-sort】依指定欄位排序 Treeview
+
+    Args:
+        tree: ttk.Treeview
+        col: 要排序的欄位名
+        sort_state: dict, {col: 'asc'|'desc'} 跨多次 click 追蹤狀態
+    """
+    cur = sort_state.get(col, None)
+    new_dir = "asc" if cur == "desc" else "desc"  # 預設第一次 desc、之後反轉
+
+    # 解析每個 row 此欄的顯示值
+    items = []
+    for iid in tree.get_children(""):
+        v = tree.set(iid, col)
+        sort_key, is_missing = _parse_sort_value(v)
+        items.append((sort_key, is_missing, iid))
+
+    # 判斷此欄是數字欄還是文字欄
+    all_num = all(isinstance(k, (int, float)) for k, _, _ in items)
+
+    # 分離 missing、missing 永遠排最後
+    main_items = [(k, iid) for k, missing, iid in items if not missing]
+    missing_items = [iid for _, missing, iid in items if missing]
+
+    # 排序 main_items
+    main_items.sort(key=lambda x: x[0], reverse=(new_dir == "desc"))
+
+    # 重新插入 (move 保留 tags 跟所有設定)
+    final_order = [iid for _, iid in main_items] + missing_items
+    for idx_v, iid in enumerate(final_order):
+        tree.move(iid, "", idx_v)
+
+    # 更新 heading 箭頭
+    for c in tree["columns"]:
+        if c == col:
+            arrow = " ↑" if new_dir == "asc" else " ↓"
+            tree.heading(c, text=c + arrow)
+        else:
+            # 移除其他欄的箭頭（用 heading() GET 形式回傳 dict-like、取 "text" 欄位）
+            try:
+                cur_info = tree.heading(c)
+                cur_text = cur_info.get("text", c) if isinstance(cur_info, dict) else c
+            except Exception:
+                cur_text = c
+            for arrow_ch in [" ↑", " ↓"]:
+                if cur_text.endswith(arrow_ch):
+                    tree.heading(c, text=cur_text[:-len(arrow_ch)])
+                    break
+
+    sort_state[col] = new_dir
+
+
+def _make_treeview_click_sort(tree, cols, skip_col=None):
+    """【V0.9.5-click-sort】把 Treeview 的 heading 設成 clickable sort
+
+    Args:
+        tree: ttk.Treeview
+        cols: tuple of column names
+        skip_col: 不設 click handler 的欄位（通常是「勾選」）
+
+    Returns:
+        sort_state dict（給 caller 存起來、跨多次顯示保留狀態）
+    """
+    sort_state = {}  # {col: 'asc'|'desc'}
+
+    for col in cols:
+        if col == skip_col:
+            continue
+        tree.heading(
+            col,
+            command=lambda c=col: _sort_treeview_by_column(tree, c, sort_state),
+        )
+    return sort_state
+
+
 class StrategyGUI(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -3718,6 +3873,12 @@ class StrategyGUI(tk.Tk):
         for col, w in zip(cols, col_widths):
             self._etf_tree.heading(col, text=col)
             self._etf_tree.column(col, width=w, anchor="center")
+        # 【V0.9.5-click-sort】click heading 切換升降冪（像 file explorer）
+        # skip「勾選」欄（click 是 toggle 不是 sort）
+        self._etf_sort_state = _make_treeview_click_sort(
+            self._etf_tree, cols, skip_col="勾選"
+        )
+
 
         # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐（看起來像個 checkbox）
         try:
@@ -3957,6 +4118,12 @@ class StrategyGUI(tk.Tk):
         for col, w in zip(cols, col_widths):
             self._ms_tree.heading(col, text=col)
             self._ms_tree.column(col, width=w, anchor="center")
+        # 【V0.9.5-click-sort】click heading 切換升降冪（像 file explorer）
+        # skip「勾選」欄（click 是 toggle 不是 sort）
+        self._ms_sort_state = _make_treeview_click_sort(
+            self._ms_tree, cols, skip_col="勾選"
+        )
+
 
         # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐（看起來像個 checkbox）
         try:
