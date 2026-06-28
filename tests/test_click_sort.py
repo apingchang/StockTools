@@ -113,6 +113,26 @@ def test_parse_sort_value_missing():
     print("PASS: test_parse_sort_value_missing")
 
 
+def test_parse_sort_value_正負號():
+    """【V0.9.5-click-sort-etf】正負號字串「+12.5」/「-3.2」→ float
+
+    【William 19:01 反映】
+    「今日異動」要可排序。_etf_display_results 顯示格式:
+      - 沒異動: "--"
+      - 有異動: f"{change_lots:+.1f}" → "+12.5" / "-3.2" / "+1234.5"
+    _parse_sort_value 要能 parse 「+12.5」這種字串、並判斷「--」是 missing
+    """
+    # 正負號字串、float() 直接支援
+    assert st._parse_sort_value("+12.5") == (12.5, False)
+    assert st._parse_sort_value("-3.2") == (-3.2, False)
+    assert st._parse_sort_value("+1234.5") == (1234.5, False)
+    assert st._parse_sort_value("-0.5") == (-0.5, False)
+
+    # 「--」是 missing（_etf_display_results 無異動的標示）
+    assert st._parse_sort_value("--")[1] is True
+    print("PASS: test_parse_sort_value_正負號")
+
+
 def test_parse_sort_value_中文():
     """【V0.9.5-click-sort】中文（公司名稱）→ 當字串排"""
     key, missing = st._parse_sort_value("台積電")
@@ -434,6 +454,72 @@ def test_select_tree_也_有_套用_click_sort():
     print("PASS: test_select_tree_也_有_套用_click_sort")
 
 
+def test_etf_今日異動_可排序():
+    """【V0.9.5-click-sort-etf】「今日異動」要可排序
+
+    【William 19:01 反映】etf 選股結果的「今日異動」排序功能沒動作
+    【根因】原本 _etf_tree 的 skip_cols = {"勾選", "名稱", "今日異動"}
+            「今日異動」被 skip、點下去沒反應
+    【修法】_etf_tree 的 skip_cols 改 {"勾選", "名稱"}
+            + _parse_sort_value 支援 + - prefix、-- 當 missing
+    """
+    import inspect
+    src = inspect.getsource(st)
+
+    # 確認 _etf_tree 的 skip_cols 沒包「今日異動」
+    # 在 ETF tree 那段 (lines 3950-3965) 檢查
+    etf_section_start = src.find('self._etf_tree = ttk.Treeview')
+    etf_section = src[etf_section_start:etf_section_start+800]
+    assert 'self._etf_sort_state = _make_treeview_click_sort(' in etf_section
+    # 跳過換行、用 DOTALL 抓 skip_cols 區塊
+    import re
+    m = re.search(
+        r'self\._etf_sort_state\s*=\s*_make_treeview_click_sort\((.*?)\)',
+        etf_section, re.DOTALL,
+    )
+    assert m, "沒找到 _make_treeview_click_sort(...) 設定"
+    call_args = m.group(1)
+    # 從 call_args 中找 skip_cols={...} 區塊
+    sm = re.search(r'skip_cols\s*=\s*\{([^}]+)\}', call_args)
+    assert sm, f"沒找到 skip_cols 設定、call_args: {call_args!r}"
+    skip_str = sm.group(1)
+    assert "今日異動" not in skip_str, f"「今日異動」不應被 skip、實際: {skip_str}"
+
+    # 驗證排序行為
+    cols = ("勾選", "代號", "名稱", "收盤價", "ETF數", "今日異動")
+    tree = MockTreeview(cols)
+    test_data = [
+        ("1101", {"勾選": "☐", "代號": "1101", "名稱": "台泥", "收盤價": "24.15",
+                  "ETF數": "12", "今日異動": "+12.5"}),
+        ("2330", {"勾選": "☐", "代號": "2330", "名稱": "台積電", "收盤價": "2340.00",
+                  "ETF數": "30", "今日異動": "--"}),
+        ("0050", {"勾選": "☐", "代號": "0050", "名稱": "元大台灣50", "收盤價": "55.20",
+                  "ETF數": "5", "今日異動": "+1234.5"}),
+        ("1102", {"勾選": "☐", "代號": "1102", "名稱": "亞泥", "收盤價": "35.75",
+                  "ETF數": "3", "今日異動": "-3.2"}),
+    ]
+    tree.children = list(test_data)
+
+    state = st._make_treeview_click_sort(tree, cols, skip_cols={"勾選", "名稱"})
+
+    # 點 今日異動 desc
+    st._sort_treeview_by_column(tree, "今日異動", state)
+    order = [tree.set(iid, "今日異動") for iid in tree.get_children()]
+    # 預期 desc: +1234.5 → +12.5 → -3.2 → --
+    assert order == ["+1234.5", "+12.5", "-3.2", "--"], (
+        f"今日異動 desc 應 = +1234.5 > +12.5 > -3.2 > --、實際: {order}"
+    )
+
+    # 再點 asc
+    st._sort_treeview_by_column(tree, "今日異動", state)
+    order = [tree.set(iid, "今日異動") for iid in tree.get_children()]
+    # 預期 asc: -3.2 → +12.5 → +1234.5 → --
+    assert order == ["-3.2", "+12.5", "+1234.5", "--"], (
+        f"今日異動 asc 應 = -3.2 < +12.5 < +1234.5 < --、實際: {order}"
+    )
+    print(f"PASS: test_etf_今日異動_可排序 (desc + missing 排最後)")
+
+
 if __name__ == "__main__":
     test_parse_sort_value_純數字()
     test_parse_sort_value_千分位逗號()
@@ -457,4 +543,6 @@ if __name__ == "__main__":
     test_make_click_sort_skip_cols_複數()
     test_make_click_sort_skip_col_舊_API_向後相容()
     test_select_tree_也_有_套用_click_sort()
+    test_parse_sort_value_正負號()
+    test_etf_今日異動_可排序()
     print("\nAll V0.9.5-click-sort tests passed!")

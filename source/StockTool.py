@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-click-sort-fix (2026-06-28 14:30)        ║
+║  台灣股市量化選股系統 v1.1-click-sort-etf (2026-06-28 19:01)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-click-sort-fix
-最後更新: 2026-06-28 14:36 (Asia/Taipei)
+Version: v1.1-click-sort-etf
+最後更新: 2026-06-28 19:06 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -93,6 +93,43 @@ Python 版本: 3.8+
 - skip_cols 內部用 set 處理、避免重複
 - select_tree 欄位是動態設定（首次 display 時才 configure）、所以 click-sort 也只能在這時套
 - skip_col / skip_cols 兩個 API 並存、向後相容
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【V0.9.5-click-sort-etf】2026-06-28 19:01 (William 19:01 反映 ETF 今日異動排序沒動作)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-28 19:01 反映：etf 選股結果的「今日異動」排序功能沒動作
+
+【根因】
+- V0.9.5-click-sort-fix 14:30 誤把「今日異動」加進 _etf_tree 的 skip_cols
+  （以為是混雜字串、排起來沒意義）
+- 實際 _etf_display_results 顯示格式為：
+  - 無異動: "--"
+  - 有異動: f"{change_lots:+.1f}" → "+12.5" / "-3.2" / "+1234.5"
+- "+12.5" / "-3.2" → float() 支援、可以 parse
+- "--" 原本 _parse_sort_value 沒認、是混雜字串
+
+【修法】
+- _parse_sort_value: 加 "--" 到 missing 集合
+  (原本只認 ""、"—"、"-"、現在加 "--")
+- _etf_tree 改用 skip_cols={"勾選", "名稱"} (拿掉 "今日異動")
+- 「+12.5」/「-3.2」/「--」/「-0.5」/「+1234.5」全部正確 parse
+
+【測試】tests/test_click_sort.py（24 個、原 22 + 新 2）
+- test_parse_sort_value_正負號: +12.5/-3.2/+1234.5 → float, -- → missing
+- test_etf_今日異動_可排序: 完整測 desc/asc 排序
+  - desc: +1234.5 → +12.5 → -3.2 → -- (missing 排最後)
+  - asc: -3.2 → +12.5 → +1234.5 → -- (missing 排最後)
+- 全部 509 passed (507 既有 + 2 新)、0 failed
+
+【version 同步】
+- VERSION = "v1.1-click-sort-fix" → "v1.1-click-sort-etf" (stocktool/config.py)
+- App title / 啟動 log 自動改
+
+【實作細節】
+- float("+12.5") Python 3 本來就支援、正負號 prefix
+- _parse_sort_value 沒改多少、加一行 missing 判斷
+- skip_cols 拿掉一個元素、其餘不動
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -2621,7 +2658,7 @@ def _parse_sort_value(v):
         - is_missing: True 表示「—」/空字串、要排最後
     """
     s = str(v).strip()
-    if s == "" or s == "—" or s == "-":
+    if s == "" or s == "—" or s == "-" or s == "--":
         return (float("inf"), True)
     # 數字解析:去掉千分位逗號、常見單位
     s_clean = s.replace(",", "").replace(" 股", "").replace(" 張", "").replace("%", "").strip()
@@ -3954,9 +3991,11 @@ class StrategyGUI(tk.Tk):
             self._etf_tree.column(col, width=w, anchor="center")
         # 【V0.9.5-click-sort】click heading 切換升降冪（像 file explorer）
         # skip「勾選」、「名稱」欄（William 2026-06-28 14:30 反映：
-        #  「勾選」是 toggle checkbox、「名稱」中文排序沒意義、「今日異動」是混雜字串排起來沒意義）
+        #  「勾選」是 toggle checkbox、「名稱」中文排序沒意義）
+        # 「今日異動」可排序（V0.9.5-click-sort-etf）：顯示 "+12.5" / "-3.2" / "--"
+        #   → _parse_sort_value 自動處理 + - prefix + missing 判斷
         self._etf_sort_state = _make_treeview_click_sort(
-            self._etf_tree, cols, skip_cols={"勾選", "名稱", "今日異動"}
+            self._etf_tree, cols, skip_cols={"勾選", "名稱"}
         )
 
 
