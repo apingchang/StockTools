@@ -1,12 +1,66 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║     台灣股市量化選股系統 v1.1-etf-weekend (2026-06-28 09:10)    ║
+║  台灣股市量化選股系統 v1.1-after-hour (2026-06-28 10:15)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-etf-weekend
-最後更新: 2026-06-28 09:32 (Asia/Taipei)
+Version: v1.1-after-hour
+最後更新: 2026-06-28 10:05 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【V0.9.5-after-hour】2026-06-28 10:15 (William 09:44 反映盤後交易數量)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-28 09:44 反映：
+  - 「手動選股節過中成交量和實際不一樣,少了盤後交易的數量！」
+  - 「你可以增加依欄盤後交易的數值資料嗎？」
+
+【根因】
+  - 現有「成交量(張)」來自 TWSE STOCK_DAY_ALL 的 TradeVolume
+  - TradeVolume 是「盤中收盤後累計」、不含 13:40~14:30 的「盤後定價交易」
+  - 所以有盤後成交的個股 (高價股/低價股)，StockTool 顯示的量比實際少
+
+【修法】
+  - source/stocktool/fetch_market.py
+    - 新增 fetch_after_hour_volumes()：抓 TWSE BFT41U API
+      (https://www.twse.com.tw/exchangeReport/BFT41U)
+      fields: 證券代號, 證券名稱, 成交數量, 成交筆數, ...
+    - 回傳 DataFrame [股票代號, 盤後量_股]；API 失敗回空
+    - 整合進 fetch_prices：Step 6 加「盤後量_股」、merge 後 fillna(0)
+  - source/stocktool/scoring.py
+    - price_cols 加「盤後量_股」
+    - cache 沒資料時補 None (「—」)
+    - out_cols 加「盤後量_股」→ final_cols → rename 成「盤後量(張)」
+  - source/StockTool.py
+    - 手動選股 Treeview cols 加「盤後量(張)」(14 欄 → 15 欄)
+    - _ms_display_results 顯示「盤後量(張)」:
+      - 有資料：f"{int(vol):,} 股" (例 "134 股")
+      - 0 / None：顯示 "—" (避免誤導)
+
+【限制】TPEx 上檔無公開 API
+  - 抓不到盤後定價的個股 → 「盤後量(張)」顯示 "—"
+  - 目前無解、TPEx 為 JS 動態載入、沒有 JSON API
+  - 未來 TPEx 有公開 API 再補
+
+【測試】tests/test_after_hour_volume.py (新、9 個)
+  - fetch_after_hour_volumes 4 邊界: 正常/stat=FAIL/raise/千分位逗號
+  - fetch_prices 整合 2 個: 有欄位 / merge 正確
+  - _run_manual_selection 2 個: 帶到 result / 沒資料不爆
+  - cache 向後相容 1 個: 舊 cache 沒欄位 get_or_fetch 不爆
+  - 全部 485 passed (476 既有 + 9 新)、0 failed
+
+【version 同步】
+  - VERSION = "v1.1-etf-weekend" → "v1.1-after-hour" (stocktool/config.py)
+  - App title / 啟動 log 自動改
+  - User-Agent: 保留 v1.1-etf-weekend (本次没動 etf 相關)
+
+【實測】真實 TWSE BFT41U API 拿到的 (2026-06-28 09:48、API date=20260626 週五)
+  - 1101 台泥     134 股 (上週五有盤後定價成交)
+  - 1102 亞泥       6 股
+  - 2330 台積電     0 股 (上週五沒盤後)
+  - 其他         0 股 / 不在 API 內
+  - TWSE 回 9 筆、有成交 3 筆
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -3890,13 +3944,15 @@ class StrategyGUI(tk.Tk):
         cols = ("勾選","代號","名稱","現價","累計YoY%",
                 "今股票","今現金","今現金殖%",
                 "PE","成交量(張)",
+                "盤後量(張)",  # 【V0.9.5-after-hour】TWSE BFT41U 盤後定價交易量；TPEx 無公開 API → 顯示「—」
                 "去年股票","去年現金","去年現金殖%",
                 "資料日期")
         self._ms_tree = ttk.Treeview(tree_frame, columns=cols, show="headings",
                                      selectmode="none", height=25)
-        # 14 欄（拿掉 2 個股票殖利率 + 加 1 個資料日期）：原本 15 欄 - 2 + 1 = 14
+        # 15 欄（V0.9.5-after-hour 加「盤後量(張)」）：原本 14 欄 + 1 = 15
         col_widths = (40, 60, 100, 70, 70, 60, 60, 80,
-                      50, 80, 60, 60, 80,
+                      50, 80, 80,
+                      60, 60, 80,
                       90)
         for col, w in zip(cols, col_widths):
             self._ms_tree.heading(col, text=col)
@@ -4554,6 +4610,21 @@ class StrategyGUI(tk.Tk):
                     vol_str = str(int(vol))
             except (TypeError, ValueError):
                 vol_str = "—"
+            # 【V0.9.5-after-hour】2026-06-28 William 反映：
+            # 「成交量少了盤後交易數量」→ 加「盤後量(張)」欄位
+            # - TWSE 上市：BFT41U API 抓「盤後定價交易」(13:40~14:30 第二節)
+            # - TPEx 上櫃：無公開 API → 顯示「—」
+            # - API 失敗 / cache 沒資料 → 顯示「—」
+            # - 單位是「股」、股數較少顯示為「股」未轉「張」(例：134 股 → "134 股")
+            # - 但 0 股不上算成交 → 顯示「—」(避免看起來「有成交但 0 股」的誤導)
+            after_hour_vol = row.get("盤後量(張)")
+            try:
+                if pd.isna(after_hour_vol) or (isinstance(after_hour_vol, (int, float)) and after_hour_vol == 0):
+                    after_hour_vol_str = "—"
+                else:
+                    after_hour_vol_str = f"{int(after_hour_vol):,} 股"
+            except (TypeError, ValueError):
+                after_hour_vol_str = "—"
             last_stock_str = _fmt_float(row.get("去年股票股利(元)"), decimals=3)
             # 【V0.9.5+ Phase 8 新增】去年現金股利金額
             # 【V0.9.5-goodinfo4+5】改 3 位小數
@@ -4576,6 +4647,7 @@ class StrategyGUI(tk.Tk):
                 code, name, price_str, rev_str,
                 stock_str, cash_div_str, cash_str,
                 pe_str, vol_str,
+                after_hour_vol_str,  # 【V0.9.5-after-hour】盤後定價交易量
                 last_stock_str, last_cash_div_str, last_cash_str,
                 data_date_str
             ), tags=(tag,))

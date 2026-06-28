@@ -75,7 +75,8 @@ def _run_manual_selection(
             price_cols.append(name_col)
         # 如果 cache 也有「股價」或「現價」也一起拉進來
         # 【v1.0-info】data_date 也要帶進來（Treeview 「資料日期」欄位用）
-        for cc in ["股價", "現價", "成交量", "成交量_張", "漲跌", "data_date"]:
+        # 【V0.9.5-after-hour】盤後量_股：Treeview 加「盤後量(張)」欄位
+        for cc in ["股價", "現價", "成交量", "成交量_張", "盤後量_股", "漲跌", "data_date"]:
             if cc in price_df.columns and cc not in price_cols:
                 price_cols.append(cc)
         base = price_df[price_cols].drop_duplicates("股票代號").copy()
@@ -94,6 +95,9 @@ def _run_manual_selection(
         # cache 不一定有成交量，若沒有則先移除「成交量」條件
         if "成交量_張" not in base.columns:
             base["成交量_張"] = None  # None 表示 cache 沒資料
+        # 【V0.9.5-after-hour】cache 沒有「盤後量_股」時補 None（Treeview 顯示「—」）
+        if "盤後量_股" not in base.columns:
+            base["盤後量_股"] = None
         # 「漲跌」欄位只在 cache 才有，移到後面
     else:
         all_codes = base["股票代號"].tolist()
@@ -356,6 +360,7 @@ def _run_manual_selection(
                 f"{cy}現金股利", f"{cy - 1}現金股利", f"{cy - 2}現金股利",
                 # V0.9.5-goodinfo3：殖利率加強欄位（10Y 平均殖利率已拿掉，William 不需要）
                 "今年股票殖利率(%)", "去年股票殖利率(%)",
+                "盤後量_股",  # 【V0.9.5-after-hour】TWSE BFT41U 抓的盤後定價交易量（股）；TPEx 無公開 API 顯示「—」
                 "data_date"]  # 【v1.0-info】Treeview 「資料日期」欄位用
     out_cols = [c for c in out_cols if c in result.columns]
     # 整理重複的現金股利（保留乾淨的今年/去年/前年）
@@ -377,6 +382,7 @@ def _run_manual_selection(
                   "去年股票股利", "去年現金股利", "去年現金殖利率(%)",
                   "今年股票殖利率(%)", "去年股票殖利率(%)",
                   "PE", "成交量(張)", "EPS本期",
+                  "盤後量_股",  # 【V0.9.5-after-hour】底層欄位名、rename 成「盤後量(張)」
                   "data_date"]  # 【v1.0-info】Treeview 「資料日期」欄位用
     final_cols = [c for c in final_cols if c in result.columns]
     return result[final_cols].rename(columns={
@@ -387,6 +393,7 @@ def _run_manual_selection(
         "去年現金股利_原始": "去年現金股利(元)",
         "今年股票股利": "今年股票股利(元)",
         "去年股票股利": "去年股票股利(元)",
+        "盤後量_股": "盤後量(張)",
     })
 
 

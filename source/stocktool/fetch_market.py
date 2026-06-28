@@ -1006,6 +1006,60 @@ def fetch_csv_requests(session: requests.Session, url: str, cfg: StrategyConfig,
 
 
 # ==========================================================
+# 【V0.9.5-after-hour】盤後定價交易量 (TWSE BFT41U)
+# ==========================================================
+
+def fetch_after_hour_volumes(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame:
+    """【V0.9.5-after-hour】2026-06-28 William 反映
+    「手動選股成交量少了盤後交易數量」
+
+    抓 TWSE 個股盤後定價交易（13:40~14:30 之後的第二節交易）。
+    URL: https://www.twse.com.tw/exchangeReport/BFT41U?response=json
+
+    回傳 DataFrame [股票代號, 盤後量_股]：
+    - 只含 TWSE 上市個股、TPEx 上櫃沒公開 API
+    - 沒成交的個股不會出現 (volume = 0)
+    - 週末/假日 → 回傳最近一個盤後交易日的資料（API 自動適用）
+    - API 失敗 → 回空 DataFrame（caller 填 0）
+
+    【TWSE 上市】 BFT41U 回傳 fields:
+      證券代號, 證券名稱, 成交數量 (股), 成交筆數, 成交金額, 成交價, 最後揭示買量, 最後揭示賣量
+
+    【TPEx 上櫃】目前無公開 JSON API、暫不支援
+    - TPEx 個股不會出現在回傳 → 盤後量_股 = 0
+    - 未來 TPEx 有公開 API 再補
+    """
+    url = "https://www.twse.com.tw/exchangeReport/BFT41U?response=json"
+    try:
+        r = session.get(url, timeout=cfg.timeout, verify=cfg.verify_ssl)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        print(f"⚠️ 抓取 TWSE 盤後定價交易失敗：{e}")
+        return pd.DataFrame(columns=["股票代號", "盤後量_股"])
+
+    if not isinstance(data, dict) or data.get("stat") != "OK":
+        # 假日且無資料 / API 維護中 → 回傳空 df（caller 會填 0）
+        print(f"⚠️ TWSE BFT41U stat={data.get('stat') if isinstance(data, dict) else 'N/A'}、回傳空")
+        return pd.DataFrame(columns=["股票代號", "盤後量_股"])
+
+    rows = []
+    for row in data.get("data", []):
+        if not row or len(row) < 3:
+            continue
+        stock_code = str(row[0]).strip()
+        # 成交數量欄位（第 3 欄、index 2）：可能是 "134" 或 "1,234" 字串
+        try:
+            volume = int(str(row[2]).replace(",", ""))
+        except (ValueError, TypeError):
+            volume = 0
+        if stock_code and volume >= 0:
+            rows.append({"股票代號": stock_code, "盤後量_股": volume})
+
+    return pd.DataFrame(rows)
+
+
+# ==========================================================
 # Data fetchers
 # ==========================================================
 
@@ -1187,7 +1241,19 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
     merged.loc[merged["data_date"].fillna("") == "", "data_date"] = today_ad
     merged = merged.rename(columns={"現價": "股價"})
 
-    return merged[["股票代號", "公司名稱_來源", "股價", "漲跌", "data_date", "成交量_張"]].reset_index(drop=True)
+    # Step 6: 盤後定價交易量（V0.9.5-after-hour）
+    # - TWSE BFT41U API：只含上市個股、有成交才出現
+    # - TPEx 上櫃：無公開 API → 盤後量_股 = 0
+    # - API 失敗 → 盤後量_股 = 0（不影響主流程）
+    try:
+        after_hour_df = fetch_after_hour_volumes(session, cfg)
+        merged = merged.merge(after_hour_df, on="股票代號", how="left")
+        merged["盤後量_股"] = merged["盤後量_股"].fillna(0).astype(int)
+    except Exception as e:
+        print(f"⚠️ 抓取盤後量例外：{e}")
+        merged["盤後量_股"] = 0
+
+    return merged[["股票代號", "公司名稱_來源", "股價", "漲跌", "data_date", "成交量_張", "盤後量_股"]].reset_index(drop=True)
 
 
 def fetch_revenue_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame:
