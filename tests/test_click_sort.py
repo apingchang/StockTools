@@ -346,6 +346,94 @@ def test_handson_strategy_跟_etf_treeview_都有套用():
     print("PASS: test_handson_strategy_跟_etf_treeview_都有套用")
 
 
+# ==========================================================
+# 【V0.9.5-click-sort fix】混雜 str+float 不 crash、skip_cols 複數
+# ==========================================================
+
+def test_sort_混雜_str_跟_float_不爆():
+    """【V0.9.5-click-sort fix】William 14:30 反映 click heading crash:
+    當欄位中混著 number 跟 str 時 sort 會 TypeError: '<' not supported between str and float
+    修法：統一當 str 排
+    """
+    tree, cols = _make_test_tree()
+    # 在「名稱」欄加一個 number、混雜
+    for iid, row in tree.children:
+        if iid == "1101":
+            row["名稱"] = "123"  # 數字型字串
+    state = st._make_treeview_click_sort(tree, cols, skip_cols={"勾選", "名稱"})
+
+    # 點 勾選 不該 crash、但因 skip 不設 handler
+    # 改測試點「代號」、有 handler
+    # 加一個混雜的 PE 測試
+    tree2, cols2 = _make_test_tree()
+    # PE 欄混 1 個 str（中文）
+    for iid, row in tree2.children:
+        if iid == "1101":
+            row["PE"] = "12.5"
+        elif iid == "2330":
+            row["PE"] = "本益比高估"  # str
+    state = st._make_treeview_click_sort(tree2, cols2, skip_cols={"勾選", "名稱", "資料日期"})
+
+    # 應不 crash、且依字串排
+    st._sort_treeview_by_column(tree2, "PE", state)  # desc
+
+    order = [tree2.set(iid, "PE") for iid in tree2.get_children()]
+    # 全部轉 str 排、text 比較
+    # "15.3" vs "本益比高估" vs "—" vs "12.5" vs "10.2" desc
+    print(f"  混雜 PE 排序: {order}")
+    # 驗證有排序（跟原始順序不同）
+    original = ["12.5", "15.3", "—", "10.2"]
+    assert order != original, f"混雜應有排序、實際 {order} == 原始 {original}"
+    print("PASS: test_sort_混雜_str_跟_float_不爆")
+
+
+def test_make_click_sort_skip_cols_複數():
+    """【V0.9.5-click-sort fix】skip_cols 支援多個欄位"""
+    tree, cols = _make_test_tree()
+    state = st._make_treeview_click_sort(
+        tree, cols, skip_cols={"勾選", "名稱", "資料日期"}
+    )
+
+    # 被 skip 的不應有 command
+    for skip in ("勾選", "名稱", "資料日期"):
+        assert tree.headings[skip]["command"] is None, f"{skip} 應被 skip"
+
+    # 其他欄應有 command
+    for col in cols:
+        if col in {"勾選", "名稱", "資料日期"}:
+            continue
+        assert tree.headings[col]["command"] is not None, f"{col} 應有 click handler"
+
+    print(f"PASS: test_make_click_sort_skip_cols_複數 ({len(cols)-3} 欄有 handler)")
+
+
+def test_make_click_sort_skip_col_舊_API_向後相容():
+    """【V0.9.5-click-sort fix】skip_col 單數舊 API 仍可使用"""
+    tree, cols = _make_test_tree()
+    state = st._make_treeview_click_sort(tree, cols, skip_col="勾選")
+
+    # 勾選應被 skip
+    assert tree.headings["勾選"]["command"] is None
+
+    # 其他欄應有
+    for col in cols:
+        if col == "勾選":
+            continue
+        assert tree.headings[col]["command"] is not None
+    print("PASS: test_make_click_sort_skip_col_舊_API_向後相容")
+
+
+def test_select_tree_也_有_套用_click_sort():
+    """【V0.9.5-click-sort fix】系統選股 select_tree 也應套用 click-sort
+    （William 14:30 反映系統選股點 heading 沒反應）"""
+    import inspect
+    src = inspect.getsource(st)
+    assert "self._select_sort_state = _make_treeview_click_sort(" in src, (
+        "系統選股 select_tree 應套用 click-sort"
+    )
+    print("PASS: test_select_tree_也_有_套用_click_sort")
+
+
 if __name__ == "__main__":
     test_parse_sort_value_純數字()
     test_parse_sort_value_千分位逗號()
@@ -365,4 +453,8 @@ if __name__ == "__main__":
     test_sort_全部_missing_不爆()
     test_make_click_sort_skip_col()
     test_handson_strategy_跟_etf_treeview_都有套用()
+    test_sort_混雜_str_跟_float_不爆()
+    test_make_click_sort_skip_cols_複數()
+    test_make_click_sort_skip_col_舊_API_向後相容()
+    test_select_tree_也_有_套用_click_sort()
     print("\nAll V0.9.5-click-sort tests passed!")

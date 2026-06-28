@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-click-sort (2026-06-28 11:55)        ║
+║  台灣股市量化選股系統 v1.1-click-sort-fix (2026-06-28 14:30)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-click-sort
-最後更新: 2026-06-28 11:43 (Asia/Taipei)
+Version: v1.1-click-sort-fix
+最後更新: 2026-06-28 14:36 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -54,6 +54,45 @@ Python 版本: 3.8+
 - sort_state 存到 self（跨多次顯示保留 user 排序意圖）
 - Treeview.move(iid, "", idx) 重排、保留 tags 跟設定
 - heading text 加 ↑/↓、其他欄自動清掉
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【V0.9.5-click-sort-fix】2026-06-28 14:30 (William 14:30 反映 click crash + 系統選股沒動作)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-28 14:30 反映 4 個問題：
+  1. 系統選股點 heading 沒動作（沒套 click-sort）
+  2. ETF 選股「名稱」可以不用、「今日異動」沒有排序功能（混雜字串）
+  3. 手動選股「名稱」、「資料日期」可以不用排序功能
+  4. 點 heading 後 TypeError: '<' not supported between str and float
+     （混雜字串/數字欄會 crash）
+
+【修法】
+- _sort_treeview_by_column: 加「型別判斷」邏輯
+  - 全部 number → 數字排
+  - 全部 str → 文字排
+  - 混雜 → 統一轉 str 排（避免 TypeError）
+- _make_treeview_click_sort: 加 skip_cols 複數 API、skip_col 單數舊版仍可用
+- select_tree (系統選股) 補套 click-sort、self._select_sort_state
+  - 欄位動態設定、在 _display_select_results 設定欄位時才套
+- _ms_tree 改用 skip_cols={"勾選", "名稱", "資料日期"}
+- _etf_tree 改用 skip_cols={"勾選", "名稱", "今日異動"}
+
+【測試】tests/test_click_sort.py（22 個、原 18 + 新 4）
+- test_sort_混雜_str_跟_float_不爆 (PE 欄混 1 個 str)
+- test_make_click_sort_skip_cols_複數
+- test_make_click_sort_skip_col_舊_API_向後相容
+- test_select_tree_也_有_套用_click_sort
+- 全部 507 passed (503 既有 + 4 新)、0 failed
+
+【version 同步】
+- VERSION = "v1.1-click-sort" → "v1.1-click-sort-fix" (stocktool/config.py)
+- App title / 啟動 log 自動改
+
+【實作細節】
+- 「型別判斷」用 type_counts 統計 num/str 各幾個、依此決定 sort_type
+- skip_cols 內部用 set 處理、避免重複
+- select_tree 欄位是動態設定（首次 display 時才 configure）、所以 click-sort 也只能在這時套
+- skip_col / skip_cols 兩個 API 並存、向後相容
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -2611,12 +2650,40 @@ def _sort_treeview_by_column(tree, col, sort_state):
         sort_key, is_missing = _parse_sort_value(v)
         items.append((sort_key, is_missing, iid))
 
-    # 判斷此欄是數字欄還是文字欄
-    all_num = all(isinstance(k, (int, float)) for k, _, _ in items)
+    # 判斷此欄型別：以「此欄大多數都是 number」為基準、防止混雜 str+float 從爆
+    # 規則：
+    #   1. 全部都 parse 成 number → 數字排
+    #   2. 有 number 也有非 number → 統一當 str 排（避免 TypeError）
+    #   3. 全部都是 str → 文字排
+    type_counts = {"num": 0, "str": 0}
+    for k, missing, _ in items:
+        if missing:
+            continue
+        if isinstance(k, (int, float)):
+            type_counts["num"] += 1
+        elif isinstance(k, str):
+            type_counts["str"] += 1
+    if type_counts["str"] == 0:
+        # 全部都是 number → 數字排
+        sort_type = "num"
+    elif type_counts["num"] == 0:
+        # 全部都是 str → 文字排
+        sort_type = "str"
+    else:
+        # 混雜：統一當 str 排（防止 < TypeError）
+        sort_type = "str_mixed"
 
     # 分離 missing、missing 永遠排最後
-    main_items = [(k, iid) for k, missing, iid in items if not missing]
-    missing_items = [iid for _, missing, iid in items if missing]
+    main_items = []
+    missing_items = []
+    for k, missing, iid in items:
+        if missing:
+            missing_items.append(iid)
+        else:
+            # 混雜模式時、一律轉 str
+            if sort_type == "str_mixed":
+                k = str(k)
+            main_items.append((k, iid))
 
     # 排序 main_items
     main_items.sort(key=lambda x: x[0], reverse=(new_dir == "desc"))
@@ -2646,21 +2713,33 @@ def _sort_treeview_by_column(tree, col, sort_state):
     sort_state[col] = new_dir
 
 
-def _make_treeview_click_sort(tree, cols, skip_col=None):
+def _make_treeview_click_sort(tree, cols, skip_col=None, skip_cols=None):
     """【V0.9.5-click-sort】把 Treeview 的 heading 設成 clickable sort
 
     Args:
         tree: ttk.Treeview
         cols: tuple of column names
-        skip_col: 不設 click handler 的欄位（通常是「勾選」）
+        skip_col: 不設 click handler 的欄位（舊版 API、單一欄位、例如「勾選」）
+        skip_cols: 不設 click handler 的欄位集合（新版 API、可多個、例如「勾選」、「名稱」）
 
     Returns:
         sort_state dict（給 caller 存起來、跨多次顯示保留狀態）
     """
     sort_state = {}  # {col: 'asc'|'desc'}
 
+    # 統一一個 set處理
+    if skip_cols is None and skip_col is not None:
+        skip_cols = {skip_col}
+    elif skip_cols is None:
+        skip_cols = set()
+    else:
+        skip_cols = set(skip_cols)
+        # 舊 API 跳一欄
+        if skip_col is not None:
+            skip_cols.add(skip_col)
+
     for col in cols:
-        if col == skip_col:
+        if col in skip_cols:
             continue
         tree.heading(
             col,
@@ -3874,9 +3953,10 @@ class StrategyGUI(tk.Tk):
             self._etf_tree.heading(col, text=col)
             self._etf_tree.column(col, width=w, anchor="center")
         # 【V0.9.5-click-sort】click heading 切換升降冪（像 file explorer）
-        # skip「勾選」欄（click 是 toggle 不是 sort）
+        # skip「勾選」、「名稱」欄（William 2026-06-28 14:30 反映：
+        #  「勾選」是 toggle checkbox、「名稱」中文排序沒意義、「今日異動」是混雜字串排起來沒意義）
         self._etf_sort_state = _make_treeview_click_sort(
-            self._etf_tree, cols, skip_col="勾選"
+            self._etf_tree, cols, skip_cols={"勾選", "名稱", "今日異動"}
         )
 
 
@@ -4119,9 +4199,10 @@ class StrategyGUI(tk.Tk):
             self._ms_tree.heading(col, text=col)
             self._ms_tree.column(col, width=w, anchor="center")
         # 【V0.9.5-click-sort】click heading 切換升降冪（像 file explorer）
-        # skip「勾選」欄（click 是 toggle 不是 sort）
+        # skip「勾選」、「名稱」、「資料日期」欄（William 2026-06-28 14:30 反映：
+        #  「勾選」是 toggle checkbox、「名稱」中文排序沒意義、「資料日期」是合併日期字串排序不準）
         self._ms_sort_state = _make_treeview_click_sort(
-            self._ms_tree, cols, skip_col="勾選"
+            self._ms_tree, cols, skip_cols={"勾選", "名稱", "資料日期"}
         )
 
 
@@ -6697,6 +6778,12 @@ class StrategyGUI(tk.Tk):
                 self.select_tree.heading(cols[0], text="☐")
             except (IndexError, tk.TclError):
                 pass
+            # 【V0.9.5-click-sort】click heading 切換升降冪
+            # skip「☑」、「名稱」（William 2026-06-28 14:30 反映：
+            #  「☑」是 toggle checkbox、「名稱」中文排序沒意義）
+            self._select_sort_state = _make_treeview_click_sort(
+                self.select_tree, cols, skip_cols={"☑", "名稱"}
+            )
 
         # 【V0.9.5-goodinfo6+】William 2026-06-26 13:56 反映：
         #  系統選股結果 9946 殖利率顯示 0.07 (應為 0)、
