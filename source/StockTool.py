@@ -1,12 +1,64 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║               台灣股市量化選股系統 v1.1 (2026-06-27 00:35)       ║
+║     台灣股市量化選股系統 v1.1-etf-weekend (2026-06-28 09:10)    ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1
-最後更新: 2026-06-27 00:36 (Asia/Taipei)
+Version: v1.1-etf-weekend
+最後更新: 2026-06-28 09:01 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【V0.9.5-etf-weekend-fix】2026-06-28 09:10 (William 08:42 反映 ETF 今日異動全 "--")
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-28 08:42 反映主動式 ETF 分頁、「今日異動」欄全 "--"
+  - 今天是 2026-06-28 週日、沒開盤
+  - 但 DB 內 dates = [6/28, 6/27, 6/26, 6/25, ...]
+  - 原本 _compute_etf_changes 用 dates[0] (6/28 週日) 當 today、dates[1] (6/27 週六) 當 yesterday
+  - App 週日早上抓 ETF 持股網頁、shares_lots 跟 6/27 完全一樣（網頁週末沒更新、stale duplicate）
+  - 6/28 vs 6/27 → diff 全 0 → 全部被過濾掉 → 空 DataFrame → 全顯示 "--"
+
+【修法】stocktool/database.py
+  - 加 _etf_dates_have_changes(db_path, date_a, date_b)
+    - 合併兩天 shares_lots 比對、任一 row 不同就回 True
+  - 加 _find_latest_changed_etf_pair(db_path, all_dates)
+    - 從 all_dates (DESC) 找「最後一個有實質變動的對」、跳過 stale dates
+  - 改 _compute_etf_changes
+    - 多取 10 個 dates（原本 2 個、不夠跳 stale）
+    - dates[0] vs dates[1] 若完全相同 → 往前找有變動的對
+    - caller 指定的 today_str 不在 DB 內 → 也走同樣 fallback
+  - 新行為：週六/週日打開 App、會看到上一個有實質交易日的異動結果
+
+【測試】tests/test_etf_weekend_fallback.py（新、12 個）
+  - test_weekend_fallback_取最後有變動的交易日：4 天、前 2 天 stale → 結果 = 週五 vs 週四
+  - test_weekday_no_fallback_保留原本行為：平日 6/23 vs 6/22 = +0.5 張（向後相容）
+  - test_helper_dates_have_changes_兩天完全一樣：完全一樣 → False
+  - test_helper_dates_have_changes_shares不同：shares 不同 → True
+  - test_helper_dates_have_changes_一邊全空：清倉 / 全新建倉 → True
+  - test_helper_dates_have_changes_新增股票：A 有 B 沒 → True
+  - test_helper_find_latest_changed_pair_跳過stale：跳過 stale 找到有變動的
+  - test_helper_find_latest_changed_pair_找不到：全 stale → None
+  - test_today_str不在DB_且DB只有1天資料：空 DataFrame
+  - test_today_str不在DB_且DB全stale：空 DataFrame
+  - test_today_str不在DB_取最後有變動的對：取 DB 內最後變動對
+  - test_real_db_2026_06_28_周日：在真實 etf_history.db 跑、2330 應 = +249 張
+  - 全部 476 passed (464 既有 + 12 新)、0 failed
+
+【version 同步】
+  - VERSION = "v1.1" → "v1.1-etf-weekend"（stocktool/config.py）
+  - App title 自動改 v1.1-etf-weekend
+  - 啟動 log 自動改 v1.1-etf-weekend
+  - User-Agent: StockTool/AdvisorStyle-v1.1 → v1.1-etf-weekend（stocktool/etf.py 兩處）
+
+【本版本套用實際效果】（在 production etf_history.db 跑）
+  - 原本 _compute_etf_changes(today_str="2026-06-28") → 0 rows
+  - 修法後 → 23 rows、有實質異動
+  - 2308 台達電 -5480.0 張（週五 vs 週四異動）
+  - 2330 台積電 +249.0 張
+  - 2344 華邦電 +870.0 張
+  - 4958 臻鼎-KY -646.0 張
+  - ...
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -2312,6 +2364,8 @@ from stocktool.database import (
     _query_etf_holdings_by_date,
     _query_latest_two_dates,
     _compute_etf_changes,
+    _etf_dates_have_changes,
+    _find_latest_changed_etf_pair,
     _upsert_div_history,
     _query_div_history,
     _query_div_history_with_fetched,

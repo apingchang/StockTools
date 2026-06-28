@@ -164,6 +164,54 @@ def _query_latest_two_dates(db_path: str) -> Tuple[Optional[str], Optional[str]]
     return (today, yesterday)
 
 
+def _etf_dates_have_changes(db_path: str, date_a: str, date_b: str) -> bool:
+    """【V0.9.5-etf-weekend-fix】判斷兩個日期的 (etf_code, stock_code, shares_lots) 是否有差異
+
+    用途：判斷 date_a 是否為「週末/假日抓的 stale duplicate」
+    - App 在週末抓 ETF 持股網頁、shares_lots 跟上一個交易日完全一樣
+    - 這時 date_a 沒實質變動、應跳過、往前找
+    - 任一 row 有差異就回 True（包含 A 有 B 沒 / B 有 A 沒 / shares 不同）
+    """
+    with sqlite3.connect(db_path) as conn:
+        df_a = pd.read_sql_query(
+            "SELECT etf_code, stock_code, shares_lots FROM etf_holding_history WHERE date = ?",
+            conn, params=(date_a,),
+        )
+        df_b = pd.read_sql_query(
+            "SELECT etf_code, stock_code, shares_lots FROM etf_holding_history WHERE date = ?",
+            conn, params=(date_b,),
+        )
+
+    if df_a.empty and df_b.empty:
+        return False
+    if df_a.empty or df_b.empty:
+        return True  # 一邊全空 = 大變動（全清倉 / 全新建倉）
+
+    merged = df_a.merge(
+        df_b,
+        on=["etf_code", "stock_code"],
+        how="outer",
+        suffixes=("_a", "_b"),
+    )
+    merged["a"] = merged["shares_lots_a"].fillna(-1)  # -1 = 不存在
+    merged["b"] = merged["shares_lots_b"].fillna(-1)
+    return bool((merged["a"] != merged["b"]).any())
+
+
+def _find_latest_changed_etf_pair(db_path: str, all_dates: list) -> tuple:
+    """【V0.9.5-etf-weekend-fix】從 all_dates (DESC) 找「最後一個有實質變動的 (today, yesterday) 對」
+
+    - 跳過「跟下一個日期完全一樣」的 stale date（週末/假日抓的）
+    - 回傳 (today_str, yesterday_str) 或 None（找不到）
+    """
+    for i in range(len(all_dates) - 1):
+        d_today = all_dates[i]
+        d_yesterday = all_dates[i + 1]
+        if _etf_dates_have_changes(db_path, d_today, d_yesterday):
+            return (d_today, d_yesterday)
+    return None
+
+
 def _compute_etf_changes(db_path: str, today_str: str = None, yesterday_str: str = None) -> pd.DataFrame:
     """【V0.9.5-etf-history】計算個股的「今日 ETF 異動張數總和」
 
@@ -173,21 +221,52 @@ def _compute_etf_changes(db_path: str, today_str: str = None, yesterday_str: str
     - 若某個 ETF 今天新增（昨日無資料）→ 算 +today_shares_lots（全部增持）
     - 若某個 ETF 今天刪除（今日無資料）→ 算 -yesterday_shares_lots（全部減持）
     - 沒有 yesterday 資料的個股 → 該個股無變化（不列入結果）
+
+    【V0.9.5-etf-weekend-fix】沒開盤的日子 fallback
+    - App 在週末/假日抓 ETF 持股網頁、shares_lots 跟上一個交易日完全一樣（stale duplicate）
+    - 原本用 dates[0] vs dates[1] 算 → diff 全 0 → 全部過濾 → 顯示 "--"
+    - 改：用「最後一個有實質 shares 變動的日期」當 today、前一天當 yesterday
+    - 例：6/28 (週日) DB 內 = [6/28, 6/27, 6/26, ...]
+        6/28 vs 6/27 完全一樣 → 跳過
+        6/27 vs 6/26 有 35 row 變動 → 用 6/27 當 today、6/26 當 yesterday
     """
     if today_str is None:
         today_str = datetime.now().strftime("%Y-%m-%d")
 
     with sqlite3.connect(db_path) as conn:
+        # 多取幾天（週末/假日可能有 stale duplicate）
         cur = conn.execute(
-            "SELECT DISTINCT date FROM etf_holding_history ORDER BY date DESC LIMIT 2"
+            "SELECT DISTINCT date FROM etf_holding_history ORDER BY date DESC LIMIT 10"
         )
-        dates = [r[0] for r in cur.fetchall()]
-        if not dates:
+        all_dates = [r[0] for r in cur.fetchall()]
+        if not all_dates:
             return pd.DataFrame()
-        if today_str not in dates:
-            return pd.DataFrame()
-        today_str = dates[0]
-        yesterday_str = dates[1] if len(dates) > 1 else None
+
+        if today_str in all_dates:
+            # caller 指定 today_str 嚴格用 caller 的（避免測試誤判）
+            # 但仍要做 weekend fallback：dates[0] vs dates[1] 若完全相同、往前找
+            candidate_today = all_dates[0]
+            candidate_yesterday = all_dates[1] if len(all_dates) > 1 else None
+
+            if (
+                candidate_yesterday
+                and not _etf_dates_have_changes(db_path, candidate_today, candidate_yesterday)
+            ):
+                # dates[0] 是週末/假日 stale → 往前找有變動的對
+                found = _find_latest_changed_etf_pair(db_path, all_dates)
+                if found:
+                    candidate_today, candidate_yesterday = found
+                # 找不到 → 保留原本的（會算 diff 全 0 → 過濾）
+
+            today_str = candidate_today
+            yesterday_str = candidate_yesterday
+        else:
+            # caller 沒指定 / today_str 是週末/假日（DB 沒這個日期）
+            # → 從 all_dates 找「最後一個有實質變動的對」
+            found = _find_latest_changed_etf_pair(db_path, all_dates)
+            if not found:
+                return pd.DataFrame()
+            today_str, yesterday_str = found
 
         if yesterday_str is None:
             return pd.DataFrame()
