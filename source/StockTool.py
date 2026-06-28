@@ -4,7 +4,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1-etf-weekend
-最後更新: 2026-06-28 09:01 (Asia/Taipei)
+最後更新: 2026-06-28 09:32 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -878,7 +878,7 @@ console log 顯示「⚠️ 讀取 ...12QEPSRate.xls 失敗: `Import lxml` faile
 - 存成 excel、高亮與手動選股一致
 
 【資料源設計】找 TWSE 官方 API
-- 主動式 ETF 列表：TWSE `/rwd/zh/ETF/activeList` （官方、JSON、有 19 檔 domestic）
+- 主動式 ETF 列表：TWSE `/rwd/zh/ETF/activeList` （官方、JSON、過濾只留 domestic、數量隨 TWSE 上市動態變動；2026-06-28 為 20 檔）
 - 前 10 大成股：etfinfo.tw `/etf/{code}` （總覽頁 HTML、SSR 表格、可 parse）
 - 個股收盤價：複用既有 `cache/price.xlsx`
 
@@ -891,7 +891,7 @@ console log 顯示「⚠️ 讀取 ...12QEPSRate.xls 失敗: `Import lxml` faile
    · 用 regex parse `<a href="/stock/{code}">{code}</a>`、名稱、權重
    · 回傳 list of dict (stock_code, stock_name, weight)
 3. `build_etf_holdings_table`：完整 long-format table
-   · 走 19 檔 ETF、每檔抓前 10 大
+   · 走全部 domestic 主動式 ETF、每檔抓前 10 大
    · 合併為 (stock_code, stock_name, etf_code, etf_name, weight)
    · 邊界：單檔失敗不中斷整個抓取
 4. `aggregate_etf_holdings`：合併去重 + 計算 etf_count
@@ -3545,7 +3545,7 @@ class StrategyGUI(tk.Tk):
         # ---- 上方：狀態列 ----
         status_frame = ttk.Frame(parent)
         status_frame.pack(fill="x", padx=8, pady=(6, 0))
-        self._etf_status = tk.StringVar(value="主動式 ETF 持股：首次進入會自動抓取（19 檔 × 前 10 大）")
+        self._etf_status = tk.StringVar(value="主動式 ETF 持股：首次進入會自動抓取（依 TWSE activeList 動態、當前 N 檔 × 前 10 大）")
         ttk.Label(status_frame, textvariable=self._etf_status,
                   foreground="#555555", font=("Helvetica", 9)).pack(anchor="w")
 
@@ -5079,8 +5079,8 @@ class StrategyGUI(tk.Tk):
         self._etf_display_results(self._etf_agg_df)
 
     def _etf_refresh_holdings(self):
-        """【V0.9.5-etf】重新抓取 19 檔 ETF 的前 10 大持股 → merge price cache → 重新顯示
-        用 threading 避免凍結 UI
+        """【V0.9.5-etf】重新抓取全部 domestic 主動式 ETF（依 TWSE activeList 動態）的
+        前 10 大持股 → merge price cache → 重新顯示。用 threading 避免凍結 UI
         """
         if hasattr(self, '_bg_price_fetching') and self._bg_price_fetching:
             messagebox.showwarning("請稍後", "股價背景抓取中、請等候完成")
@@ -5128,10 +5128,12 @@ class StrategyGUI(tk.Tk):
         self._save_etf_holdings_to_db(long_df)
         # 計算今日異動
         self._etf_change_df = self._compute_etf_changes_from_db()
+        # 【V0.9.5-etf-weekend】動態顯示實際抓到的 ETF 數（不寫死）
+        etf_count = long_df["etf_code"].nunique() if (long_df is not None and not long_df.empty) else 0
         self._etf_data_status.set(
-            f"ETF 持股：最後更新 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ({len(agg_df)} 檔個股)"
+            f"ETF 持股：最後更新 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ({len(agg_df)} 檔個股、從 {etf_count} 檔 ETF)"
         )
-        self._etf_status.set(f"✅ ETF 持股抓取完成：{len(agg_df)} 檔個股被多檔 ETF 持有")
+        self._etf_status.set(f"✅ ETF 持股抓取完成：從 {etf_count} 檔主動式 ETF 抓到 {len(agg_df)} 檔個股")
         # 自動套用一次篩選
         self._etf_display_results(agg_df, self._etf_change_df)
 
@@ -5338,13 +5340,15 @@ class StrategyGUI(tk.Tk):
         self._save_etf_holdings_to_db(long_df)
         # 計算今日異動
         self._etf_change_df = self._compute_etf_changes_from_db()
+        # 【V0.9.5-etf-weekend】動態顯示實際抓到的 ETF 數
+        etf_count = long_df["etf_code"].nunique() if (long_df is not None and not long_df.empty) else 0
         if self._etf_change_df is not None and not self._etf_change_df.empty:
             self._etf_data_status.set(
-            f"ETF 持股：最後更新 {datetime.now().strftime('%%Y-%%m-%%d %%H:%%M:%%S')} ({len(agg_df)} 檔個股) ✅ 有昨日資料可比較"
+            f"ETF 持股：最後更新 {datetime.now().strftime('%%Y-%%m-%%d %%H:%%M:%%S')} ({len(agg_df)} 檔個股、從 {etf_count} 檔 ETF) ✅ 有昨日資料可比較"
             )
         else:
             self._etf_data_status.set(
-            f"ETF 持股：最後更新 {datetime.now().strftime('%%Y-%%m-%%d %%H:%%M:%%S')} ({len(agg_df)} 檔個股) ⚠️ 無昨日資料"
+            f"ETF 持股：最後更新 {datetime.now().strftime('%%Y-%%m-%%d %%H:%%M:%%S')} ({len(agg_df)} 檔個股、從 {etf_count} 檔 ETF) ⚠️ 無昨日資料"
             )
     def _load_price_df(self):
         """【V0.9.5-etf】讀取 price 快取 DataFrame、若不存在就 try fetch_prices 一次

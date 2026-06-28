@@ -225,7 +225,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
 def build_etf_holdings_table(session: requests.Session, cfg: StrategyConfig,
                               logger) -> pd.DataFrame:
     """【V0.9.5-etf】完整 ETF 持股 table
-    1. 抓 18 檔 domestic ETF 列表
+    1. 抓「全部 domestic」主動式 ETF 列表（依 TWSE activeList API、隨時新上市自動增加）
     2. 對每檔 ETF 抓前 10 大
     3. 合併為長表 (stock_code, stock_name, etf_code, etf_name, weight)
     """
@@ -327,7 +327,7 @@ def aggregate_etf_holdings(holdings_long: pd.DataFrame, price_df: pd.DataFrame) 
 
 # 【V0.9.5-etf 新增】2026-06-19 William 要求：
 #   主動式 ETF 成份股 Tab
-#   - 來源 1：TWSE 官方 API `/rwd/zh/ETF/activeList` 拿 18 檔 domestic 主動式 ETF
+#   - 來源 1：TWSE 官方 API `/rwd/zh/ETF/activeList` 拿「全部」domestic 主動式 ETF（動態、未來新增自動涵蓋）
 #   - 來源 2：etfinfo.tw `/etf/{code}` 總覽頁、parse「前 10 大成分股」HTML 表格
 # ==========================================================
 
