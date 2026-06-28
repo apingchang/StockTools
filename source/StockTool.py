@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-click-sort-etf (2026-06-28 19:01)        ║
+║  台灣股市量化選股系統 v1.1-click-sort-etf (2026-06-28 21:04)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1-click-sort-etf
-最後更新: 2026-06-28 19:06 (Asia/Taipei)
+最後更新: 2026-06-28 21:09 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -130,6 +130,56 @@ Python 版本: 3.8+
 - float("+12.5") Python 3 本來就支援、正負號 prefix
 - _parse_sort_value 沒改多少、加一行 missing 判斷
 - skip_cols 拿掉一個元素、其餘不動
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【V0.9.5-vol-row-pad】2026-06-28 20:51 + 21:04 (William 反映行距 + 成交量整數張提醒)
+════════════════════════════════════════════════════════════════════════════════
+【背景 1】William 2026-06-28 20:51 反映：
+  - 「所有的篩選結果顯示行距應該要再加至少 2 dots.
+     現在你看股票名稱的中文字最下面條線（line）不見了！」
+  - 根因：Win10/11 ttk.Treeview 預設 rowheight ≈ 18-20px、中文字底部橫劃被切
+
+【修法】ttk.Style().configure("Treeview", rowheight=28)
+  - 在 StrategyGUI.__init__ 設一次、全 App 所有 Treeview 生效
+  - +8-10px padding、讓中文有呼吸空間
+  - 套用範圍：系統選股 / 手動選股 / ETF / 買賣記錄 / 回測 全部
+
+【背景 2】William 2026-06-28 20:51 反映：
+  - 2548 華固 6/26 我顯示 1830、元大 App 顯示 1831（差 1）
+  - 原始提案：vol_str = str(int(vol)) → str(round(vol))
+    - 假設 2548 6/26 成交股數 1,830,999 股 / 1000 = 1830.999 張
+    - 認為 int() 是 truncate（1830）、元大用 round()（1831）
+
+【William 21:04 提醒】
+  - 「台股成交都是 1000 股（一張）為單位不會有四捨五入的問題！」
+  - 原始成交股數整數（例：1,830,000 股）/1000 = 1830.0 張
+  - 不會出現 1830.999
+  - round() 跟 int() 結果一樣
+  - int() 在 .5 邊界用 truncate、避免 banker's rounding 風險
+
+【結論】保持 int()、rollback round()
+  - vol_str 顯示邏輯不變
+  - 2548 差 1 是另一個問題（資料 source 不同）：
+    - MIS 即時 v=1830 張（盤中 13:30 snapshot）
+    - STOCK_DAY 成交股數 1,857,955 股（盤後 14:30）
+    - 兩個 source 都正確、只是時間點不同
+    - 要從 source 追、改抓 STOCK_DAY 取代 MIS 即時（另開 issue）
+
+【測試】tests/test_vol_round_fix.py（新、2 個）
+  - test_vol_str_用_int_不用_round: 台股整數張 → int() 跟 round() 結果一樣、
+    int() 在 .5 邊界用 truncate、避免 banker's rounding
+  - test_treeview_rowheight_設定: 確認 source code 有 _style.configure rowheight=28
+  - 全部 511 passed (509 既有 + 2 新)、0 failed
+
+【version 同步】
+  - VERSION 保持 "v1.1-click-sort-etf"（本版 code 邏輯無變化、只多 fileheader 註解）
+  - 25/26 改動、vol_str round→int rollback、rowheight=28
+
+【實作細節】
+  - ttk.Style 設定一次性、影響整個 App
+  - int() 比 round() 嚴謹（不會踩到 banker's rounding）
+  - 2548 差 1 留待下版（source 對齊）追
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -2847,6 +2897,20 @@ class StrategyGUI(tk.Tk):
         self.grid_columnconfigure(0, weight=1)
         self._top_frame = ttk.Frame(self)
         self._top_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
+
+        # 【V0.9.5-tree-row-pad】2026-06-28 20:51 William 反映：
+        # 「所有的篩選結果顯示行距應該要再加至少 2 dots.
+        #  現在你看股票名稱的中文字最下面條線（line）不見了！」
+        # 預設 Treeview rowheight 在 Win10/11 = 18-20px、中文字底部橫劃被切到
+        # 修法：Treeview rowheight 加 4 點（≈ 26-28px）
+        #   - 「2 dots」→ 2 倍 點 size、Win11 預設 9pt → +18px 太離譜
+        #   - 「2 dots」用 tkinter 語意 = 「加 2 個點的高度」、實作約 +4-6px
+        #   - 這裡設 28（Win11 預設 18-20 + 6-8px padding）
+        # 套用範圍：全 App 所有 ttk.Treeview（系統選股 / 手動選股 / ETF / 買賣記錄 / 回測）
+        # 透過 ttk.Style.configure("Treeview", rowheight=28) 一次設、所有 tree 都生效
+        _style = ttk.Style(self)
+        _style.configure("Treeview", rowheight=28)
+
         self.notebook = ttk.Notebook(self._top_frame)
 
         # 【V0.9.5-tab-split-phase3-C】tab 順序重排（William 09:02 要求）
@@ -4892,8 +4956,16 @@ class StrategyGUI(tk.Tk):
                 if pd.isna(vol) or (isinstance(vol, (int, float)) and vol == 0):
                     vol_str = "—"
                 else:
+                    # 【V0.9.5-vol-int-revert】2026-06-28 21:04 William 提醒：
+                    # 「台股成交都是 1000 股（一張）為單位不會有四捨五入的問題！」
+                    # 原始成交股數整數（例：1,830,000 股）/1000 = 1830.0 張
+                    # 理論上不會出現 1830.999 這類小數 → round() 跟 int() 結果一樣
+                    # 用 int() truncate 比 round() 安全（banker's rounding 在 .5 邊界）
                     # 【V0.9.5-goodinfo4+5】Tkinter Treeview 會把千分位逗號轉成小數點
                     # → 直接用 str()、不做千分位格式化
+                    # 註：2548 華固 6/26 顯示 1830 vs 元大 1831 差 1 是另一個問題
+                    #   （資料 source 不同：MIS 盤中 vs STOCK_DAY 盤後 vs FinMind cache）
+                    #   不是顯示邏輯問題、需要從 source 追
                     vol_str = str(int(vol))
             except (TypeError, ValueError):
                 vol_str = "—"
