@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-price-color-fix (2026-06-29 14:54)        ║
+║  台灣股市量化選股系統 v1.1-price-color-fix2 (2026-06-29 15:20)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-price-color-fix
-最後更新: 2026-06-29 14:58 (Asia/Taipei)
+Version: v1.1-price-color-fix2
+最後更新: 2026-06-29 15:27 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -3467,12 +3467,18 @@ class StrategyGUI(tk.Tk):
         results_tree.tag_configure("checked", background="#d0e8ff")
         results_tree.tag_configure("unchecked", background="#ffffff")
         results_tree.tag_configure("hover", background="#fff3a0")
-        # 【V1.1-price-color】選股結果顛跌價染色 tag（只設 foreground、不設 background）
+        # 【V1.1-price-color】選股結果漲跌價染色 tag（只設 foreground、不設 background）
         # ttk.Treeview tag 可以多個組合（row tags=("checked","price_up")）
         # → checked 控背景、price_* 控前景、兩者不會衝突
         results_tree.tag_configure("price_up", foreground=COLOR_PROFIT_POS)
         results_tree.tag_configure("price_down", foreground=COLOR_PROFIT_NEG)
         results_tree.tag_configure("price_zero", foreground=COLOR_PROFIT_ZERO)
+        # 【V1.1-price-color-fix2】hover × price 組合 tag（3 種、避免 ttk 多 tag 組合 bug）
+        # 根因：hover 設了 background + 多 tag 組合時、Linux ttk 前景會被吃掉變黑
+        # 解法：hover 時不套 "hover" + price_* 雙 tag、改用「hover_<price>」單一 tag
+        # 該 tag 同時設 background (黃) + foreground (對應色)、不再有 attribute 遺失
+        for ptag, fcolor in [("up", COLOR_PROFIT_POS), ("down", COLOR_PROFIT_NEG), ("zero", COLOR_PROFIT_ZERO)]:
+            results_tree.tag_configure(f"hover_{ptag}", background="#fff3a0", foreground=fcolor)
         results_tree.bind("<Motion>", self._on_select_tree_hover)
         results_tree.bind("<Leave>", self._on_select_tree_leave)
         results_tree.bind("<Button-1>", self._on_select_tree_click)
@@ -4338,6 +4344,9 @@ class StrategyGUI(tk.Tk):
         self._etf_tree.tag_configure("price_up", foreground=COLOR_PROFIT_POS)
         self._etf_tree.tag_configure("price_down", foreground=COLOR_PROFIT_NEG)
         self._etf_tree.tag_configure("price_zero", foreground=COLOR_PROFIT_ZERO)
+        # 【V1.1-price-color-fix2】hover × price 組合 tag（3 種、避免多 tag 組合 bug）
+        for ptag, fcolor in [("up", COLOR_PROFIT_POS), ("down", COLOR_PROFIT_NEG), ("zero", COLOR_PROFIT_ZERO)]:
+            self._etf_tree.tag_configure(f"hover_{ptag}", background="#fff3a0", foreground=fcolor)
         self._etf_hover_iid = None  # 跟手動選股一樣機制
         # popup 變數
         self._etf_popup = None  # Toplevel 視窗（若有）
@@ -4596,6 +4605,9 @@ class StrategyGUI(tk.Tk):
         self._ms_tree.tag_configure("price_up", foreground=COLOR_PROFIT_POS)
         self._ms_tree.tag_configure("price_down", foreground=COLOR_PROFIT_NEG)
         self._ms_tree.tag_configure("price_zero", foreground=COLOR_PROFIT_ZERO)
+        # 【V1.1-price-color-fix2】hover × price 組合 tag（3 種）
+        for ptag, fcolor in [("up", COLOR_PROFIT_POS), ("down", COLOR_PROFIT_NEG), ("zero", COLOR_PROFIT_ZERO)]:
+            self._ms_tree.tag_configure(f"hover_{ptag}", background="#fff3a0", foreground=fcolor)
         self._ms_hover_iid = None  # 記住目前 hover 的 row iid（若有）
         self._ms_tree.bind("<Motion>", self._on_tree_hover)
         self._ms_tree.bind("<Leave>", self._on_tree_leave)
@@ -5326,7 +5338,7 @@ class StrategyGUI(tk.Tk):
         self._ms_hover_iid = iid
         # 【V1.1-price-color】保留 price_* tag
         price_tag = getattr(self, "_ms_price_tags", {}).get(iid, "price_zero")
-        self._ms_tree.item(iid, tags=(price_tag, "hover"))
+        self._ms_tree.item(iid, tags=(f'hover_{price_tag[6:]}',))
 
     def _on_tree_leave(self, event):
         """【v1.0-hover】滑鼠離開 Treeview → 清除 hover"""
@@ -5397,7 +5409,7 @@ class StrategyGUI(tk.Tk):
         self._ms_hover_iid = iid
         # 【V1.1-price-color】保留 price_* tag
         price_tag = getattr(self, "_ms_price_tags", {}).get(iid, "price_zero")
-        self._ms_tree.item(iid, tags=(price_tag, "hover"))
+        self._ms_tree.item(iid, tags=(f'hover_{price_tag[6:]}',))
 
     def _ms_tree_leave(self, event):
         self._ms_clear_hover()
@@ -5530,7 +5542,7 @@ class StrategyGUI(tk.Tk):
             self._etf_hover_iid = iid
             # 【V1.1-price-color】保留 price_* tag
             price_tag = getattr(self, "_etf_price_tags", {}).get(iid, "price_zero")
-            self._etf_tree.item(iid, tags=(price_tag, "hover"))
+            self._etf_tree.item(iid, tags=(f'hover_{price_tag[6:]}',))
 
         # 在「ETF數」欄（第 5 欄 = #5）上才顯示 popup
         if column == "#5":
@@ -7449,7 +7461,7 @@ class StrategyGUI(tk.Tk):
         if iid and iid in tree.get_children():
             self._select_hover_iids[id(tree)] = iid
             price_tag = self._select_price_tags.get(iid, "price_zero")
-            tree.item(iid, tags=(price_tag, "hover"))
+            tree.item(iid, tags=(f'hover_{price_tag[6:]}',))
         else:
             # 離開範圍：刪除 hover 記錄
             self._select_hover_iids.pop(id(tree), None)

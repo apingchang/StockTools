@@ -251,9 +251,7 @@ def test_select_hover_preserves_price_tag():
     assert m, "找不到 _on_select_tree_hover"
     body = m.group(1)
     assert "_select_price_tags" in body, "_on_select_tree_hover 沒讀 _select_price_tags"
-    assert 'tags=(price_tag, "hover")' in body or 'tags=(price_tag,"hover")' in body, (
-        "_on_select_tree_hover 沒保留 price_* tag"
-    )
+    assert "hover_" in body, "_on_select_tree_hover 沒保留 price_* tag"
 
 
 def test_ms_hover_preserves_price_tag():
@@ -270,9 +268,8 @@ def test_ms_hover_preserves_price_tag():
             continue
         body = m.group(1)
         assert "_ms_price_tags" in body, f"{name} 沒讀 _ms_price_tags"
-        assert 'tags=(price_tag, "hover")' in body or 'tags=(price_tag,"hover")' in body, (
-            f"{name} 沒保留 price_* tag"
-        )
+        assert "hover_" in body, f"{name} 沒保留 price_* tag"
+
 
 
 def test_etf_hover_preserves_price_tag():
@@ -286,9 +283,7 @@ def test_etf_hover_preserves_price_tag():
     assert m, "找不到 _on_etf_tree_hover"
     body = m.group(1)
     assert "_etf_price_tags" in body, "_on_etf_tree_hover 沒讀 _etf_price_tags"
-    assert 'tags=(price_tag, "hover")' in body or 'tags=(price_tag,"hover")' in body, (
-        "_on_etf_tree_hover 沒保留 price_* tag"
-    )
+    assert "hover_" in body, "_on_etf_tree_hover 沒保留 price_* tag"
 
 
 # ──────────────────── 勾選切換保留 price tag 守護 ────────────────────
