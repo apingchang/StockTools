@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-etf-data-status-multiline (2026-06-29 10:33)        ║
+║  台灣股市量化選股系統 v1.1-remove-after-hour (2026-06-29 13:46)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-etf-data-status-multiline
-最後更新: 2026-06-29 10:40 (Asia/Taipei)
+Version: v1.1-remove-after-hour
+最後更新: 2026-06-29 13:53 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -287,6 +287,50 @@ Python 版本: 3.8+
 
 【version 同步】
   - VERSION = "v1.1-portfolio-taiwan-color" → "v1.1-etf-data-status-multiline"
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【V1.1-remove-after-hour】2026-06-29 13:46 (William 13:46 反映手動選股盤後量無資料)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-29 13:46 反映
+  - 「手動選股結果盤後量都沒資料、取消顯示！」
+
+【根因】
+  - TWSE BFT41U API 只回個位數筆個股、TPEx 上櫃無公開 API
+  - 絕大多數個股顯示 '—'、欄位沒實質用處
+  - 完整清理：拿掉函數 + Step 6 + 欄位 + rename + cache 防呆
+
+【修法】
+  1. StockTool.py
+     - _ms_tree cols：拿掉「盤後量(張)」（15 欄 → 14 欄）
+     - _ms_display_results insert：拿掉 after_hour_vol_str
+     - 拿掉 after_hour_vol 變數定義、if abs(cl) < 0.001 邏輯
+  2. stocktool/scoring.py
+     - price_cols list 拿掉「盤後量_股」
+     - out_cols list 拿掉「盤後量_股」
+     - final_cols list 拿掉「盤後量_股」
+     - rename dict 拿掉「盤後量_股」:「盤後量(張)」
+     - cache 沒有「盤後量_股」時補 None 邏輯拿掉
+  3. stocktool/fetch_market.py
+     - fetch_after_hour_volumes() 函數拿掉（47 行）
+     - fetch_prices Step 6 拿掉（盤後定價交易量 fetch + merge + fillna）
+     - return cols 拿掉「盤後量_股」
+
+【測試】10 個新 guard test (test_remove_after_hour.py)
+  - 1 個 fetch_after_hour_volumes 函數移除守護
+  - 1 個 BFT41U URL 移除守護
+  - 3 個 StockTool 欄位守護（欄位、邏輯、cols count）
+  - 4 個 scoring 守護（price_cols / out_cols / final_cols / rename）
+  - 1 個 all_files_compile
+  - 拿掉舊的 test_after_hour_volume.py (9 個)
+
+【實作細節】
+  - 拿掉函數時是移除語意、不只是註解化（避免被誤用）
+  - 原抓的 BFT41U API URL 可以在 git history 裡查
+  - 以後若 TPEx 有公開 API、或 TWSE BFT41U 資料變多、可從 git history 還原
+
+【version 同步】
+  - VERSION = "v1.1-etf-data-status-multiline" → "v1.1-remove-after-hour"
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -4403,14 +4447,13 @@ class StrategyGUI(tk.Tk):
         cols = ("勾選","代號","名稱","現價","累計YoY%",
                 "今股票","今現金","今現金殖%",
                 "PE","成交量(張)",
-                "盤後量(張)",  # 【V0.9.5-after-hour】TWSE BFT41U 盤後定價交易量；TPEx 無公開 API → 顯示「—」
                 "去年股票","去年現金","去年現金殖%",
                 "資料日期")
         self._ms_tree = ttk.Treeview(tree_frame, columns=cols, show="headings",
                                      selectmode="none", height=25)
-        # 15 欄（V0.9.5-after-hour 加「盤後量(張)」）：原本 14 欄 + 1 = 15
+        # 14 欄（V1.1-remove-after-hour 拿掉「盤後量(張)」）：原本 15 欄 - 1 = 14 欄
         col_widths = (40, 60, 100, 70, 70, 60, 60, 80,
-                      50, 80, 80,
+                      50, 80,
                       60, 60, 80,
                       90)
         for col, w in zip(cols, col_widths):
@@ -5084,21 +5127,11 @@ class StrategyGUI(tk.Tk):
                     vol_str = str(int(vol))
             except (TypeError, ValueError):
                 vol_str = "—"
-            # 【V0.9.5-after-hour】2026-06-28 William 反映：
-            # 「成交量少了盤後交易數量」→ 加「盤後量(張)」欄位
-            # - TWSE 上市：BFT41U API 抓「盤後定價交易」(13:40~14:30 第二節)
-            # - TPEx 上櫃：無公開 API → 顯示「—」
-            # - API 失敗 / cache 沒資料 → 顯示「—」
-            # - 單位是「股」、股數較少顯示為「股」未轉「張」(例：134 股 → "134 股")
-            # - 但 0 股不上算成交 → 顯示「—」(避免看起來「有成交但 0 股」的誤導)
-            after_hour_vol = row.get("盤後量(張)")
-            try:
-                if pd.isna(after_hour_vol) or (isinstance(after_hour_vol, (int, float)) and after_hour_vol == 0):
-                    after_hour_vol_str = "—"
-                else:
-                    after_hour_vol_str = f"{int(after_hour_vol):,} 股"
-            except (TypeError, ValueError):
-                after_hour_vol_str = "—"
+            # 【V1.1-remove-after-hour】2026-06-29 13:46 William 反映：
+            # 「手動選股結果盤後量都沒資料、取消顯示！」
+            # 原因：TWSE BFT41U API 只有個位數筆有資料、TPEx 上櫃無 API
+            # 絕大多數個股都顯示 '—'、欄位沒實質用處
+            # 修法：拿掉欄位、同時拿掉底層 fetch_after_hour_volumes / Step 6 整合
             last_stock_str = _fmt_float(row.get("去年股票股利(元)"), decimals=3)
             # 【V0.9.5+ Phase 8 新增】去年現金股利金額
             # 【V0.9.5-goodinfo4+5】改 3 位小數
@@ -5116,12 +5149,12 @@ class StrategyGUI(tk.Tk):
             data_date_str = data_date if data_date else "—"
             # 【V0.9.5-twser3】Treeview 從 15 欄變 13 欄（拿掉 2 個股票殖利率）
             # 【v1.0-info】再加 1 欄「資料日期」變 14 欄
+            # 【V1.1-remove-after-hour】再拿掉「盤後量(張)」變 14 欄 - 1 = 13 欄
             self._ms_tree.insert("", "end", iid=code, values=(
                 "☑" if self._ms_checked.get(code, False) else "☐",
                 code, name, price_str, rev_str,
                 stock_str, cash_div_str, cash_str,
                 pe_str, vol_str,
-                after_hour_vol_str,  # 【V0.9.5-after-hour】盤後定價交易量
                 last_stock_str, last_cash_div_str, last_cash_str,
                 data_date_str
             ), tags=(tag,))
