@@ -4,7 +4,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1-etf-popup-detail
-最後更新: 2026-06-29 09:54 (Asia/Taipei)
+最後更新: 2026-06-29 09:57 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -202,7 +202,7 @@ Python 版本: 3.8+
   2. json.loads(cr["etf_changes_json"]) → per-ETF list
   3. 從 _etf_agg_df 的 etf_list 補 etf_name（json 內 etf_name=""）
      格式："0050 元大台灣50(9.37%)\n006208 富邦台50(8.71%)"
-     re.match r"^(\S+)\s+(.+?)\([\d.]+%\)\s*$" 拆出 code/name
+     re.match r"^(\\S+)\\s+(.+?)\\([\\d.]+%\\)\\s*$" 拆出 code/name
   4. 過濾 abs(cl) < 0.001 的項目、絕對值由大到小排
   5. 標題列：「{stock_code} {stock_name}（{etf_count} 檔 ETF、今日 {len(entries)} 檔異動）」
   6. 各 ETF 一行：「{sign}{cl:,.1f}  {etf_code}  {etf_name}」
