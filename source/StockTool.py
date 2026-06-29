@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-etf-popup-detail (2026-06-29 09:47)        ║
+║  台灣股市量化選股系統 v1.1-portfolio-taiwan-color (2026-06-29 10:16)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-etf-popup-detail
-最後更新: 2026-06-29 09:57 (Asia/Taipei)
+Version: v1.1-portfolio-taiwan-color
+最後更新: 2026-06-29 10:25 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -221,6 +221,42 @@ Python 版本: 3.8+
   - per-ETF 排序用 abs() 為 key、不影響正負號顯示
   - 過濾 abs(cl) < 0.001 避免「0 0.0」的雜訊
   - etf_name_map 從 agg_df 的 etf_list 一次 parse、不另存
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【V1.1-portfolio-taiwan-color】2026-06-29 10:16 (William 10:16 反映買賣記錄損益色)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-29 10:16 反映
+  - 「買賣紀錄中顯示profit + 改用紅字, - 改用綠字」
+
+【根因】之前用西方慣例（+綠/-紅）
+  - pl_color = COLOR_PROFIT_NEG if summary.total_unrealized_pl >= 0 else COLOR_PROFIT_POS
+  - 台股相反、對 William 不親合
+
+【修法】依台股慣例
+  1. stocktool/config.py 加 3 個常數：
+     COLOR_PROFIT_POS = ...   # 正數（贖錢 / 派）= 紅
+     COLOR_PROFIT_NEG = ...   # 負數（虧錢 / 跌）= 綠
+     COLOR_PROFIT_ZERO = ...  # 零 = 深灰
+  2. StockTool.py import 進來、集中管理
+  3. 拿掉所有 hardcode 損益色
+  4. 套用範圍：
+     - summary labels (4 個: 未實現 / 已實現淨 / 總報酬率 % / 總損益)
+     - _positions_tree 持倉明細 整列顏色（以未實現為主、現價=0 時用已實現）
+     - _show_position_detail dialog (3 個: 未實現 / 預估淨收入 / 已實現)
+
+【實作細節】
+  - tag_configure 3 個：profit_pos / profit_neg / profit_zero
+  - ttk.Treeview tag 只能套整列、以主指標為準（不每儲存格不同色、避免複雜度）
+  - primary_pl 邏輯：current_price > 0 → unrealized_pl、否則 realized_pl
+  - calendar.py 的「週日紅字」是另一語境、不屬於損益色、不動
+
+【測試】17 個新（test_portfolio_taiwan_color.py）
+  - 2 個設定常數守護、2 個 import 守護、4 個 summary 守護、3 個 dialog 守護、3 個 positions_tree 守護、2 個編譯守護、2 個整合測試
+  - 536 passed (519 既有 + 17 新)、0 failed (1 既有 test_data_date 跟本版無關)
+
+【version 同步】
+  - VERSION = "v1.1-etf-popup-detail" → "v1.1-portfolio-taiwan-color"
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -2613,6 +2649,9 @@ from stocktool.config import (
     find_col,
     _is_market_hours,
     VERSION,
+    COLOR_PROFIT_POS,
+    COLOR_PROFIT_NEG,
+    COLOR_PROFIT_ZERO,
 )
 from stocktool.cache import (
     get_cache_file,
@@ -3949,6 +3988,10 @@ class StrategyGUI(tk.Tk):
         self._positions_tree.configure(yscrollcommand=pos_scroll.set)
         self._positions_tree.pack(side="left", fill="both", expand=True)
         pos_scroll.pack(side="right", fill="y")
+        # 【V1.1-portfolio-taiwan-color】台股慣例：正數（贖錢）= 紅、負數（虧錢）= 綠
+        self._positions_tree.tag_configure("profit_pos", foreground=COLOR_PROFIT_POS)
+        self._positions_tree.tag_configure("profit_neg", foreground=COLOR_PROFIT_NEG)
+        self._positions_tree.tag_configure("profit_zero", foreground=COLOR_PROFIT_ZERO)
         self._positions_tree.bind("<<TreeviewSelect>>", self._on_position_selected)
 
         # 下方：交易明細 Treeview
@@ -6147,14 +6190,14 @@ class StrategyGUI(tk.Tk):
         stat(cf, "目前現價", f"{cur_price:,.2f} 元")
         stat(cf, "市值", f"{cur_mv:,.2f} 元")
         stat(cf, "未實現損益", f"{unrealized_pl:+,.2f} 元",
-             "#0a7d2c" if unrealized_pl >= 0 else "#c00000")
+             COLOR_PROFIT_POS if unrealized_pl >= 0 else COLOR_PROFIT_NEG)
 
         # ── 預估賣出（以現價）──
         section_hdr(cf, "【預估賣出（以現價）】")
         stat(cf, "預估手續費", f"{est_fee:,.2f} 元（費率 {self.portfolio.broker_discount*0.1425:.4f}%）")
         stat(cf, "預估證交稅", f"{est_tax:,.2f} 元（0.3%）")
         stat(cf, "預估淨收入", f"{est_net:,.2f} 元",
-             "#0a7d2c" if est_net >= cur_mv - cur_mv * 0.004425 else "#c00000")
+             COLOR_PROFIT_POS if est_net >= cur_mv - cur_mv * 0.004425 else COLOR_PROFIT_NEG)
         stat(cf, "含費總成本", f"{(total_fee + sum(t.shares*t.price+t.fee for t in buys)):,.2f} 元")
 
         # ── 費用累計 ──
@@ -6169,7 +6212,7 @@ class StrategyGUI(tk.Tk):
             stat(cf, "總賣出淨收入", f"{sell_net:,.2f} 元")
             stat(cf, "含費總成本", f"{buy_cost_excl_fee + total_fee:,.2f} 元")
             stat(cf, "已實現損益（扣費稅）", f"{realized_pl:+,.2f} 元",
-                 "#0a7d2c" if realized_pl >= 0 else "#c00000")
+                 COLOR_PROFIT_POS if realized_pl >= 0 else COLOR_PROFIT_NEG)
 
         # ── 交易明細 mini table ──
         section_hdr(cf, "【交易明細】")
@@ -6218,18 +6261,19 @@ class StrategyGUI(tk.Tk):
             # 總覽（8 個 label）V0.9.4 phase2.3
             self._summary_labels["total_cost"].config(text=f"{summary.total_cost:,.0f}")
             self._summary_labels["total_market_value"].config(text=f"{summary.total_market_value:,.0f}")
-            pl_color = "#0a7d2c" if summary.total_unrealized_pl >= 0 else "#c00000"
+            # 【V1.1-portfolio-taiwan-color】台股慣例：+ 紅、- 綠（之前是西方慣例 0a7d2c 綠 / c00000 紅）
+            pl_color = COLOR_PROFIT_POS if summary.total_unrealized_pl >= 0 else COLOR_PROFIT_NEG
             self._summary_labels["total_unrealized_pl"].config(text=f"{summary.total_unrealized_pl:+,.0f}", foreground=pl_color)
             self._summary_labels["total_fee"].config(text=f"{summary.total_fee:,.0f}")
             # V0.9.5+ Phase 11：累計證交稅 = 持倉現價累計（current_tax）
             #   「歷史累計已付稅」另外顯示（historical_tax = summary.total_tax）
             self._summary_labels["total_tax"].config(text=f"{summary.current_tax:,.0f}")
             self._summary_labels["historical_tax"].config(text=f"{summary.total_tax:,.0f}")
-            net_color = "#0a7d2c" if summary.net_realized_pl >= 0 else "#c00000"
+            net_color = COLOR_PROFIT_POS if summary.net_realized_pl >= 0 else COLOR_PROFIT_NEG
             self._summary_labels["net_realized_pl"].config(text=f"{summary.net_realized_pl:+,.0f}", foreground=net_color)
-            ret_color = "#0a7d2c" if summary.total_return_pct >= 0 else "#c00000"
+            ret_color = COLOR_PROFIT_POS if summary.total_return_pct >= 0 else COLOR_PROFIT_NEG
             self._summary_labels["total_return_pct"].config(text=f"{summary.total_return_pct:+.2f}%", foreground=ret_color)
-            pl_color2 = "#0a7d2c" if summary.total_pl >= 0 else "#c00000"
+            pl_color2 = COLOR_PROFIT_POS if summary.total_pl >= 0 else COLOR_PROFIT_NEG
             self._summary_labels["total_pl"].config(text=f"{summary.total_pl:+,.0f}", foreground=pl_color2)
 
             # 持倉明細
@@ -6238,6 +6282,19 @@ class StrategyGUI(tk.Tk):
             for p in positions:
                 # 顯示名稱：優先用 fetch 到的最新名稱，其次用 DB 儲存的名稱
                 display_name = self._current_names.get(p.stock_id, p.stock_name) or p.stock_name
+                # 【V1.1-portfolio-taiwan-color】台股慣例：未實現損益為主
+                #   顏色：+ 紅、- 綠、未實現=0（無現價）則用已實現、未實現跟已實現都 0 默認色
+                #   ttk.Treeview tag 只能套整列、不能每儲存格不同色、以主指標為準
+                if p.current_price > 0:
+                    primary_pl = p.unrealized_pl
+                else:
+                    primary_pl = p.realized_pl
+                if primary_pl > 0:
+                    row_tag = "profit_pos"
+                elif primary_pl < 0:
+                    row_tag = "profit_neg"
+                else:
+                    row_tag = "profit_zero"
                 self._positions_tree.insert("", "end", values=(
                     p.stock_id, display_name,
                     # 【V0.9.5-locale-comma-fix】Treeview cell 不用千分位
@@ -6249,7 +6306,7 @@ class StrategyGUI(tk.Tk):
                     f"{p.unrealized_pl:+.0f}" if p.current_price > 0 else "—",
                     f"{p.unrealized_pl_pct:+.2f}%" if p.current_price > 0 else "—",
                     f"{p.realized_pl:+.0f}",
-                ))
+                ), tags=(row_tag,))
 
             # 交易明細
             for item in self._tx_tree.get_children():
