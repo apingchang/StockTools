@@ -1054,16 +1054,47 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         twse_response.raise_for_status()
         twse = pd.DataFrame(twse_response.json())
     except Exception as e:
+        # 【V1.1-etf-cache-completeness】2026-06-29 21:03 William 反映
+        # twse 失敗後靜默用空 DataFrame → full_list 變成只剩 tpex 部分
+        # → cache 只有 ~1000 筆 → ETF Tab merge 後大部分顯示 --
+        # 修法：retry 2 次、間隔 1.5s / 3.0s 拉長退避
         print(f"⚠️ 讀取上市股價失敗：{e}")
         twse = pd.DataFrame()
+        for attempt, wait_sec in enumerate([1.5, 3.0], start=1):
+            try:
+                print(f"   ↻ twse retry {attempt}/2、等 {wait_sec}s")
+                time.sleep(wait_sec)
+                twse_response = session.get(twse_url, timeout=cfg.timeout)
+                twse_response.raise_for_status()
+                twse = pd.DataFrame(twse_response.json())
+                print(f"   ✅ twse retry 成功：{len(twse)} 筆")
+                break
+            except Exception as e2:
+                print(f"   ⚠️ twse retry {attempt}/2 仍失敗：{e2}")
+        if twse.empty:
+            print("❌ twse STOCK_DAY_ALL 最後仍失敗、cache 可能不全！")
 
     try:
         tpex_response = session.get(tpex_url, timeout=cfg.timeout)
         tpex_response.raise_for_status()
         tpex = pd.DataFrame(tpex_response.json())
     except Exception as e:
+        # 【V1.1-etf-cache-completeness】同 twse、retry 2 次
         print(f"⚠️ 讀取上櫃股價失敗：{e}")
         tpex = pd.DataFrame()
+        for attempt, wait_sec in enumerate([1.5, 3.0], start=1):
+            try:
+                print(f"   ↻ tpex retry {attempt}/2、等 {wait_sec}s")
+                time.sleep(wait_sec)
+                tpex_response = session.get(tpex_url, timeout=cfg.timeout)
+                tpex_response.raise_for_status()
+                tpex = pd.DataFrame(tpex_response.json())
+                print(f"   ✅ tpex retry 成功：{len(tpex)} 筆")
+                break
+            except Exception as e2:
+                print(f"   ⚠️ tpex retry {attempt}/2 仍失敗：{e2}")
+        if tpex.empty:
+            print("❌ tpex 最後仍失敗、cache 可能不全！")
 
     if twse.empty and tpex.empty:
         print("❌ 無法讀取任何股價資料")

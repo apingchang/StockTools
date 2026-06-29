@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-manual-change-fix (2026-06-29 20:19)        ║
+║  台灣股市量化選股系統 v1.1-etf-cache-completeness (2026-06-29 21:03)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-manual-change-fix
-最後更新: 2026-06-29 20:26 (Asia/Taipei)
+Version: v1.1-etf-cache-completeness
+最後更新: 2026-06-29 21:34 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
