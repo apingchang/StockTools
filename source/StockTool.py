@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-remove-after-hour (2026-06-29 13:46)        ║
+║  台灣股市量化選股系統 v1.1-add-change-col (2026-06-29 13:57)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-remove-after-hour
-最後更新: 2026-06-29 13:53 (Asia/Taipei)
+Version: v1.1-add-change-col
+最後更新: 2026-06-29 14:05 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -331,6 +331,48 @@ Python 版本: 3.8+
 
 【version 同步】
   - VERSION = "v1.1-etf-data-status-multiline" → "v1.1-remove-after-hour"
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【V1.1-add-change-col】2026-06-29 13:57 (William 13:57 反映 3 個選股結果加顀跌價)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-29 13:57 反映
+  - 「所有的選股結果增加漲跌價欄位、一樣要有 sorting 功能」
+
+【修法】
+  1. 新增 _fmt_change(v) helper（模組層級、line 2857 附近）
+     - +5.0 (正數帶 +)
+     - -3.2 (負數自帶 -)
+     - 0.0 (零不帶正負號)
+     - -- (NaN/None)
+  2. 3 個選股 tree 都加「漀跌價」欄
+     - select_tree (系統選股): 9 欄 → 10 欄
+     - _ms_tree (手動選股): 14 欄 → 15 欄
+     - _etf_tree (ETF 選股): 6 欄 → 7 欄
+  3. scoring.py final_cols 加「顀跌」（讓手動選股有資料）
+  4. aggregate_etf_holdings 順便 merge「顀跌」→ 1 行代加
+  5. 不加到 skip_cols → 可以排序（_parse_sort_value 本來就支援 ± prefix）
+
+【實作細節】
+  - price_df 本來就有「顀跌」欄（fetch_market.py line 1175 算出、pz - y）
+  - 系統選股 df_sel 自動有「顀跌」（price.merge）
+  - 手動選股 result 需 scoring.py final_cols 加「顀跌」才能拿到
+  - ETF 選股需 aggregate_etf_holdings merge「顀跌」
+  - 「顀跌」是 optional、舊 cache 可能沒有、用 intersection 安全 merge
+
+【測試】13 個新 (test_add_change_column.py)
+  - 5 個 _fmt_change 邏輯守護（+ / - / 0 / None / NaN）
+  - 3 個 tree 欄位守護（select / ms / etf）
+  - 1 個 scoring final_cols 守護
+  - 1 個 aggregate_etf_holdings merge 守護
+  - 1 個 skip_cols 守護（「顀跌價」不能被 skip）
+  - 1 個 _parse_sort_value 整合守護
+  - 1 個 all_files_compile
+  - 順手修 test_remove_after_hour 的 cols count 14 → 15
+  - 558 passed (545 既有 + 13 新)、0 failed (1 既有 test_data_date 跟本版無關)
+
+【version 同步】
+  - VERSION = "v1.1-remove-after-hour" → "v1.1-add-change-col"
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -2854,6 +2896,31 @@ from stocktool.gui.calendar import _CalendarDialog
 # - 數字欄自動 parse (處理千分位、單位「股/張/%」)
 # - 文字欄當字串排（代號/名稱/日期）
 
+def _fmt_change(v, decimals=1, na="--"):
+    """【V1.1-add-change-col】顀跌價欄位顯示
+
+    Args:
+        v: 顀跌值（可能是 None / NaN / 0 / +5.0 / -3.2）
+        decimals: 小數位數（預設 1）
+        na: 缺失值顯示（預設 "--"）
+
+    Returns:
+        "+5.0" / "-3.2" / "0.0" / "--"
+    """
+    try:
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return na
+        f = float(v)
+        if f > 0:
+            return f"+{f:,.{decimals}f}"
+        elif f < 0:
+            return f"{f:,.{decimals}f}"  # 負數本身帶 -
+        else:
+            return f"{f:.{decimals}f}"  # 0 顯 0.0、不帶正負號
+    except (TypeError, ValueError):
+        return na
+
+
 def _parse_sort_value(v):
     """【V0.9.5-click-sort】Treeview 顯示字串 → 可排序值
 
@@ -4205,10 +4272,12 @@ class StrategyGUI(tk.Tk):
         tree_frame = ttk.Frame(right_frame)
         tree_frame.pack(fill="both", expand=True)
 
-        cols = ("勾選", "代號", "名稱", "收盤價", "ETF數", "今日異動")
+        # 【V1.1-add-change-col】2026-06-29 13:57 William 反映
+        # 「所有的選股結果增加漲跌價欄位、一樣要有 sorting 功能」
+        cols = ("勾選", "代號", "名稱", "收盤價", "漲跌價", "ETF數", "今日異動")
         self._etf_tree = ttk.Treeview(tree_frame, columns=cols, show="headings",
                                       selectmode="none", height=25)
-        col_widths = (40, 70, 130, 80, 70, 100)
+        col_widths = (40, 70, 130, 80, 70, 70, 100)
         for col, w in zip(cols, col_widths):
             self._etf_tree.heading(col, text=col)
             self._etf_tree.column(col, width=w, anchor="center")
@@ -4444,15 +4513,19 @@ class StrategyGUI(tk.Tk):
         # 【V0.9.5-goodinfo4+5 修 Bug】2026-06-18 18:12 William 反映：
         #   1. 「成交量不是我要的今日成交量」→ 拿掉盤中/收盤後切換、直接顯示 price_df 的「成交量(張)」
         #   2. 「順便將篩選結果依照營收累計YoY由大到小排序」→ 主排序改為營收累計YoY 降序
-        cols = ("勾選","代號","名稱","現價","累計YoY%",
+        # 【V1.1-add-change-col】2026-06-29 13:57 William 反映
+        # 「所有的選股結果增加漲跌價欄位、一樣要有 sorting 功能」
+        cols = ("勾選","代號","名稱","現價","漲跌價",  # 加「漲跌價」在「現價」之後
+                "累計YoY%",
                 "今股票","今現金","今現金殖%",
                 "PE","成交量(張)",
                 "去年股票","去年現金","去年現金殖%",
                 "資料日期")
         self._ms_tree = ttk.Treeview(tree_frame, columns=cols, show="headings",
                                      selectmode="none", height=25)
-        # 14 欄（V1.1-remove-after-hour 拿掉「盤後量(張)」）：原本 15 欄 - 1 = 14 欄
-        col_widths = (40, 60, 100, 70, 70, 60, 60, 80,
+        # 15 欄（V1.1-add-change-col 加「漲跌價」）：原本 14 欄 + 1 = 15 欄
+        col_widths = (40, 60, 100, 70, 70, 70,  # 加一欄 70
+                      60, 60, 80,
                       50, 80,
                       60, 60, 80,
                       90)
@@ -5087,6 +5160,8 @@ class StrategyGUI(tk.Tk):
             code = str(row.get("股票代號", "")).strip()
             name = str(row.get("股票名稱", "")).strip()
             price_str = _fmt_float(row.get("現價"))
+            # 【V1.1-add-change-col】顀跌：scoring.py final_cols 已加這欄
+            change_str = _fmt_change(row.get("漲跌", 0))
             rev_str = _fmt_float(row.get("累計營收YoY(%)"))
             # 【V0.9.5+ Phase 8】key 保留「(元)」：_run_manual_selection final rename
             # 把「今年股票股利」→「今年股票股利(元)」、這裡要跟著帶「(元)」
@@ -5150,9 +5225,10 @@ class StrategyGUI(tk.Tk):
             # 【V0.9.5-twser3】Treeview 從 15 欄變 13 欄（拿掉 2 個股票殖利率）
             # 【v1.0-info】再加 1 欄「資料日期」變 14 欄
             # 【V1.1-remove-after-hour】再拿掉「盤後量(張)」變 14 欄 - 1 = 13 欄
+            # 【V1.1-add-change-col】加「漲跌價」變 13 欄 + 1 = 14 欄（但現價之後）
             self._ms_tree.insert("", "end", iid=code, values=(
                 "☑" if self._ms_checked.get(code, False) else "☐",
-                code, name, price_str, rev_str,
+                code, name, price_str, change_str, rev_str,  # 【V1.1-add-change-col】加 change_str
                 stock_str, cash_div_str, cash_str,
                 pe_str, vol_str,
                 last_stock_str, last_cash_div_str, last_cash_str,
@@ -5845,6 +5921,8 @@ class StrategyGUI(tk.Tk):
             else:
                 # 【V0.9.5-locale-comma-fix】不用千分位、Tkinter Treeview 會把 , 轉成 .
                 price_str = f"{float(price):.2f}"
+            # 【V1.1-add-change-col】顀跌價
+            change_price_str = _fmt_change(row.get("漲跌", 0))
             change_lots = row.get("total_change_lots", 0) or 0
             if abs(change_lots) < 0.001:
                 change_str = "--"
@@ -5852,7 +5930,8 @@ class StrategyGUI(tk.Tk):
                 change_str = f"{change_lots:+.1f}"
             self._etf_tree.insert(
                 "", "end", iid=iid,
-                values=("☐", iid, str(row.get("股票名稱", "")), price_str, int(row["etf_count"]), change_str),
+                values=("☐", iid, str(row.get("股票名稱", "")), price_str, change_price_str,
+                        int(row["etf_count"]), change_str),
                 tags=("unchecked",),
             )
 
@@ -7085,7 +7164,9 @@ class StrategyGUI(tk.Tk):
     def _display_select_results(self, df_sel):
         """【V0.9.5-tab-split-phase3 B-1】把選股結果顯示在 select_tree
 
-        顯示欄位：代號、名稱、股價、Score、營收YoY、EPSYoY、PE、殖利率
+        顯示欄位：代號、名稱、股價、漲跌價、Score、營收YoY、EPSYoY、PE、殖利率
+        【V1.1-add-change-col】2026-06-29 13:57 William 反映
+        「所有的選股結果增加漲跌價欄位、一樣要有 sorting 功能」
         """
         if df_sel is None or df_sel.empty:
             self.logger.log("⚠️ 選股結果為空、無法顯示")
@@ -7097,8 +7178,9 @@ class StrategyGUI(tk.Tk):
 
         # 設定欄位（如果還沒設定）
         if not self.select_tree["columns"]:
-            cols = ("☑", "代號", "名稱", "股價", "Score", "營收YoY(%)", "EPSYoY(%)", "PE", "殖利率(%)")
-            col_widths = (35, 60, 100, 60, 60, 80, 80, 50, 70)
+            # 【V1.1-add-change-col】加「漲跌價」在「股價」之後
+            cols = ("☑", "代號", "名稱", "股價", "漲跌價", "Score", "營收YoY(%)", "EPSYoY(%)", "PE", "殖利率(%)")
+            col_widths = (35, 60, 100, 60, 70, 60, 80, 80, 50, 70)
             self.select_tree.configure(columns=cols)
             for col, w in zip(cols, col_widths):
                 self.select_tree.heading(col, text=col)
@@ -7137,6 +7219,8 @@ class StrategyGUI(tk.Tk):
                 continue
             name = str(row.get("公司名稱_來源", row.get("股票名稱", "")))
             price = row.get("股價", row.get("收盤價", 0))
+            # 【V1.1-add-change-col】顀跌價：price_df 已合進 df_sel、有「顀跌」欄
+            change = row.get("漲跌", 0)
             score = row.get("Score", 0)
             rev_yoy = row.get("營收YoY(%)", 0)
             _raw_ey = row.get("EPSYoY_顯示(%)", row.get("EPSYoY(%)", 0))
@@ -7159,6 +7243,7 @@ class StrategyGUI(tk.Tk):
                 code,
                 name[:8] if name else "--",
                 _fmt(price),
+                _fmt_change(change),  # 【V1.1-add-change-col】顀跌價
                 _fmt(score, fmt=".3f"),
                 _fmt(rev_yoy),
                 _fmt(eps_yoy),

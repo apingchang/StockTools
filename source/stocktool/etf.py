@@ -302,11 +302,19 @@ def aggregate_etf_holdings(holdings_long: pd.DataFrame, price_df: pd.DataFrame) 
 
     result = pd.DataFrame(rows)
 
-    # 2. merge 收盤價
+    # 2. merge 收盤價 + 漲跌
+    # 【V1.1-add-change-col】2026-06-29 13:57 William 反映
+    # 「所有的選股結果增加漲跌價欄位、一樣要有 sorting 功能」
     if price_df is not None and not price_df.empty:
-        price_map = price_df[["股票代號", "股價"]].copy()
+        # 「漲跌」是 optional（舊 cache 可能沒有）、用 intersection 安全 merge
+        price_cols = ["股票代號", "股價"]
+        if "漲跌" in price_df.columns:
+            price_cols.append("漲跌")
+        price_map = price_df[price_cols].copy()
         price_map["股票代號"] = price_map["股票代號"].astype(str).str.strip()
         price_map["股價"] = pd.to_numeric(price_map["股價"], errors="coerce")
+        if "漲跌" in price_map.columns:
+            price_map["漲跌"] = pd.to_numeric(price_map["漲跌"], errors="coerce")
         result = result.merge(
             price_map,
             on="股票代號",
@@ -315,6 +323,7 @@ def aggregate_etf_holdings(holdings_long: pd.DataFrame, price_df: pd.DataFrame) 
         result = result.rename(columns={"股價": "收盤價"})
     else:
         result["收盤價"] = None
+        result["漲跌"] = None
 
     # 3. 排序：依 etf_count 由大到小
     result = result.sort_values(

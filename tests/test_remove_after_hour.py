@@ -105,8 +105,8 @@ def test_ms_display_results_no_after_hour_logic():
     )
 
 
-def test_ms_tree_cols_count_14():
-    """_ms_tree 應該 14 欄（拿掉 1 個後）
+def test_ms_tree_cols_count_15():
+    """_ms_tree 應該 15 欄（拿掉盤後量後 14、V1.1-add-change-col 加漲跌價 +1 = 15）
 
     用 balanced paren parser 避免被「成交量(張)」裡的 ) 誤判
     """
@@ -139,8 +139,8 @@ def test_ms_tree_cols_count_14():
         i += 1
     cols_body = before[paren_start + 1 : i - 1]
     n = len(re.findall(r'"[^"]*"|\'[^\']*\'', cols_body))
-    assert n == 14, (
-        f"❌ _ms_tree cols 應該 14 欄、實際 {n} 欄\n"
+    assert n == 15, (
+        f"❌ _ms_tree cols 應該 15 欄、實際 {n} 欄\n"
         f"  cols body: {cols_body[:300]}..."
     )
 
