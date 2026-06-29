@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-price-color (2026-06-29 14:12)        ║
+║  台灣股市量化選股系統 v1.1-price-color-fix (2026-06-29 14:54)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-price-color
-最後更新: 2026-06-29 14:27 (Asia/Taipei)
+Version: v1.1-price-color-fix
+最後更新: 2026-06-29 14:58 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5326,7 +5326,7 @@ class StrategyGUI(tk.Tk):
         self._ms_hover_iid = iid
         # 【V1.1-price-color】保留 price_* tag
         price_tag = getattr(self, "_ms_price_tags", {}).get(iid, "price_zero")
-        self._ms_tree.item(iid, tags=("hover", price_tag))
+        self._ms_tree.item(iid, tags=(price_tag, "hover"))
 
     def _on_tree_leave(self, event):
         """【v1.0-hover】滑鼠離開 Treeview → 清除 hover"""
@@ -5397,7 +5397,7 @@ class StrategyGUI(tk.Tk):
         self._ms_hover_iid = iid
         # 【V1.1-price-color】保留 price_* tag
         price_tag = getattr(self, "_ms_price_tags", {}).get(iid, "price_zero")
-        self._ms_tree.item(iid, tags=("hover", price_tag))
+        self._ms_tree.item(iid, tags=(price_tag, "hover"))
 
     def _ms_tree_leave(self, event):
         self._ms_clear_hover()
@@ -5530,7 +5530,7 @@ class StrategyGUI(tk.Tk):
             self._etf_hover_iid = iid
             # 【V1.1-price-color】保留 price_* tag
             price_tag = getattr(self, "_etf_price_tags", {}).get(iid, "price_zero")
-            self._etf_tree.item(iid, tags=("hover", price_tag))
+            self._etf_tree.item(iid, tags=(price_tag, "hover"))
 
         # 在「ETF數」欄（第 5 欄 = #5）上才顯示 popup
         if column == "#5":
@@ -7449,7 +7449,7 @@ class StrategyGUI(tk.Tk):
         if iid and iid in tree.get_children():
             self._select_hover_iids[id(tree)] = iid
             price_tag = self._select_price_tags.get(iid, "price_zero")
-            tree.item(iid, tags=("hover", price_tag))
+            tree.item(iid, tags=(price_tag, "hover"))
         else:
             # 離開範圍：刪除 hover 記錄
             self._select_hover_iids.pop(id(tree), None)
