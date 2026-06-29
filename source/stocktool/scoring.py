@@ -304,22 +304,24 @@ def _run_manual_selection(
         sd = base["去年股票股利"]
         mask &= sd.notna() & (sd >= filters["min_last_stock_div"])
 
-    # 今年現金殖利率 ≥ X%（軟：不擋 mask、只算排序）
+    # 今年現金殖利率 ≥ X%（硬：勾選 = 必須 AND 過、殖利率 < 門檻 或 None 都排除）
+    # 【V1.1-yld-hard-filter】2026-06-29 21:59 William 反映
+    # 「左邊篩選條件參數有打開時要全部滿足 (logic AND) 才列出來！」
+    # 之前 V0.9.5-goodinfo3 設計成「軟條件」（殖利率 None 不擋 mask、怕資料不全誤刪）
+    # → 但這跟其他硬條件邏輯不一致、讓使用者誤以為殖利率條件沒生效
+    # → 改成硬 AND：殖利率 < 門檻 或 None 都排除（使用者明確要求就該嚴格過濾）
     if filters.get("min_cash_div_yld") is not None:
         any_checked = True
-        # 不動 mask、留給排序處理
+        cyld = base["今年現金殖利率(%)"]
+        mask &= cyld.notna() & (cyld >= filters["min_cash_div_yld"])
 
-    # 去年現金殖利率 ≥ X%（軟：不擋 mask、只算排序）
-    # 【V0.9.5-alpha Phase 6 修 Bug】2026-06-15
-    # 原本以「data_score / pass_score 雙計分」實作（舊 B 邏輯），
-    # 但 Phase 4 已改成「硬 AND + 軟不擋 mask」邏輯，data_score/pass_score
-    # 從未被初始化，導致勾選「去年現金殖利率 ≥ X%」時 UnboundLocalError，
-    # 整個手動選股流程崩潰。
-    # 修法：跟「今年現金殖利率」一樣的 no-op（只設 any_checked=True），
-    # 排序階段用 _yld_has_data 自然處理殖利率有/無資料的排序。
+    # 去年現金殖利率 ≥ X%（硬：同上邏輯）
+    # 原本 V0.9.5-alpha Phase 6 是為了修 UnboundLocalError 寫成 soft no-op
+    # 現在改成硬 AND、不會再觸發 UnboundLocalError（mask 直接 &= 而已）
     if filters.get("min_last_cash_yld") is not None:
         any_checked = True
-        # 不動 mask、留給排序處理
+        lyld = base["去年現金殖利率(%)"]
+        mask &= lyld.notna() & (lyld >= filters["min_last_cash_yld"])
 
     # 過濾：硬條件 AND mask（楊重複保險，殖利率軟條件不擋 mask）
     # 注：如果是「什麼都沒勾」的情況、保留全部（向後相容）

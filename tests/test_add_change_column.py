@@ -327,3 +327,39 @@ def test_scoring_out_cols_keeps_change():
         f"  V1.1-add-change-col 修法：final_cols 也要加、out_cols 也要加\n"
         f"  out_cols body: {body[:200]}"
     )
+
+
+def test_yld_filter_is_hard_filter():
+    """【V1.1-yld-hard-filter】殖利率條件要硬過濾、不要 soft no-op
+
+    Bug：William 2026-06-29 21:59 反映「左邊篩選條件參數有打開時要全部滿足 (logic AND) 才列出來！」
+    根因：scoring.py 內 min_cash_div_yld / min_last_cash_yld 之前是「soft no-op」、只 any_checked=True 不擋 mask
+    → 殖利率 < 門檻 或 None 的股票還是會出現在結果、違反使用者意圖
+
+    修法：兩個殖利率條件改為硬 AND：殖利率 < 門檻 或 None 都排除
+    """
+    content = _read(SCORING_PY)
+    # min_cash_div_yld 必須用 mask &= 處理（硬 AND）
+    m = re.search(
+        r'if filters\.get\("min_cash_div_yld"\) is not None:(.*?)(?=\n    if filters\.get\(|\n    # 過濾)',
+        content,
+        re.DOTALL,
+    )
+    assert m, "找不到 min_cash_div_yld block"
+    body = m.group(1)
+    assert "mask &=" in body, (
+        f"❌ min_cash_div_yld 沒用 mask &= 硬過濾！\n"
+        f"  body: {body[:300]}"
+    )
+    # min_last_cash_yld 也要硬 AND
+    m2 = re.search(
+        r'if filters\.get\("min_last_cash_yld"\) is not None:(.*?)(?=\n    if filters\.get\(|\n    # 過濾)',
+        content,
+        re.DOTALL,
+    )
+    assert m2, "找不到 min_last_cash_yld block"
+    body2 = m2.group(1)
+    assert "mask &=" in body2, (
+        f"❌ min_last_cash_yld 沒用 mask &= 硬過濾！\n"
+        f"  body: {body2[:300]}"
+    )

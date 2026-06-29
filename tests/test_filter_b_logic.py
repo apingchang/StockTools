@@ -52,14 +52,20 @@ def _make_div_df(codes_with_div: dict) -> pd.DataFrame:
     """
     rows = []
     for code, div in codes_with_div.items():
+        # 【V1.1-yld-hard-filter】2026-06-29 21:59 修法
+        # scoring.py line 177: cy=當前年,「今年現金股利」= f"{cy}現金股利"
+        # → mock 必須把 this_cash 放在 f"{CY}現金股利" 才能讓殖利率算得出來
+        # 之前 mock 寫 f"{CY - 1}現金股利": this_cash → 跟 scoring 對不上、殖利率永遠 None
+        # → 但舊測試只看 None 行為（殖利率 None 不擋 mask）、所以還是過
+        # → V1.1 改硬過濾、殖利率 None 排除 → 測試才暴露 mock bug
         rows.append({
             "股票代號": code,
-            f"{CY}現金股利": None,        # 2026（今年除息還沒公告）
-            f"{CY}股票股利": None,
-            f"{CY - 1}現金股利": div.get("this_cash"),  # 2025 = 「今年」
-            f"{CY - 1}股票股利": div.get("this_stock", 0.0),
-            f"{CY - 2}現金股利": div.get("last_cash"),  # 2024 = 「去年」
-            f"{CY - 2}股票股利": div.get("last_stock", 0.0),
+            f"{CY}現金股利": div.get("this_cash"),  # 2026 = 「今年」（cy=當年）
+            f"{CY}股票股利": div.get("this_stock", 0.0),
+            f"{CY - 1}現金股利": div.get("last_cash"),  # 2025 = 「去年」（cy-1）
+            f"{CY - 1}股票股利": div.get("last_stock", 0.0),
+            f"{CY - 2}現金股利": None,
+            f"{CY - 2}股票股利": None,
         })
     return pd.DataFrame(rows)
 
@@ -128,10 +134,15 @@ def test_硬條件YoY為None_該股票被排除():
 # 【B 邏輯核心】殖利率軟條件不擋 mask
 # ==========================================================
 
-def test_殖利率None_但其他硬條件都過_仍納入():
-    """【關鍵 case】殖利率 None 不擋 mask
+def test_殖利率None_其他硬條件都過_不納入_v1_1_yld_hard_filter():
+    """【V1.1-yld-hard-filter】殖利率 None 改為排除（硬過濾）
+
+    V0.9.5-goodinfo3 舊設計：殖利率 None 不擋 mask、軟條件排序
+    → 2026-06-29 21:59 William 反映「左邊篩選條件參數有打開時要全部滿足」
+    → V1.1-yld-hard-filter：殖利率 < 門檻 或 None 都排除（硬 AND）
+
     Case: A1 殖利率 5%（達標）vs A2 殖利率 None
-    只要 YoY、PE、現價、成交量都過 → 兩者都納入
+    期望：A1 納入、A2 排除
     """
     _setup_mock({
         "A1": {"this_cash": 2.5, "last_cash": 0.5},   # 殖利率 5%
@@ -149,14 +160,17 @@ def test_殖利率None_但其他硬條件都過_仍納入():
     ])
     filters = {"min_rev_yoy": 30.0, "min_cash_div_yld": 1.0}
     result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=10)
-    # 兩檔都應納入（殖利率是軟條件）
-    assert "A1" in result["股票代號"].values, f"A1 應納入，實際: {result['股票代號'].tolist()}"
-    assert "A2" in result["股票代號"].values, \
-        f"A2 應納入（殖利率軟不擋 mask），實際: {result['股票代號'].tolist()}"
+    # V1.1-yld-hard-filter：A1 殖利率達標 → 納入；A2 殖利率 None → 排除
+    assert "A1" in result["股票代號"].values, f"A1 應納入（殖利率達標），實際: {result['股票代號'].tolist()}"
+    assert "A2" not in result["股票代號"].values, f"A2 應排除（殖利率 None 硬過濾），實際: {result['股票代號'].tolist()}"
 
 
-def test_殖利率有值但未達標_不擋mask():
-    """殖利率 0.5%（未達 1%）不擋 mask、只影響排序（排到殖利率達標後面）"""
+def test_殖利率有值但未達標_排除_v1_1_yld_hard_filter():
+    """【V1.1-yld-hard-filter】殖利率 0.5%（未達 1%）→ 排除（硬過濾）
+
+    V0.9.5-goodinfo3 舊設計：殖利率 0.5% 不擋 mask、只影響排序
+    → V1.1：殖利率 < 門檻 排除
+    """
     _setup_mock({
         "A1": {"this_cash": 2.5, "last_cash": 0.5},   # 殖利率 5%（達標）
         "A2": {"this_cash": 0.25, "last_cash": 0.5},  # 殖利率 0.5%（未達標）
@@ -173,13 +187,9 @@ def test_殖利率有值但未達標_不擋mask():
     ])
     filters = {"min_rev_yoy": 30.0, "min_cash_div_yld": 1.0}
     result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=10)
-    # 兩檔都應納入
-    assert "A1" in result["股票代號"].values
-    assert "A2" in result["股票代號"].values
-    # A1 (5%) 排前
-    a1_idx = result.index[result["股票代號"] == "A1"][0]
-    a2_idx = result.index[result["股票代號"] == "A2"][0]
-    assert a1_idx < a2_idx, f"A1 (5%) 應在 A2 (0.5%) 前面，實際: A1={a1_idx}, A2={a2_idx}"
+    # V1.1-yld-hard-filter：A1 殖利率 5% 達標 → 納入；A2 殖利率 0.5% 未達標 → 排除
+    assert "A1" in result["股票代號"].values, f"A1 應納入（殖利率 5% 達標），實際: {result['股票代號'].tolist()}"
+    assert "A2" not in result["股票代號"].values, f"A2 應排除（殖利率 0.5% < 1%），實際: {result['股票代號'].tolist()}"
 
 
 # ==========================================================
@@ -297,10 +307,10 @@ if __name__ == "__main__":
     print("✅ test_硬條件YoY沒過_該股票被排除 passed")
     test_硬條件YoY為None_該股票被排除()
     print("✅ test_硬條件YoY為None_該股票被排除 passed")
-    test_殖利率None_但其他硬條件都過_仍納入()
-    print("✅ test_殖利率None_但其他硬條件都過_仍納入 passed")
-    test_殖利率有值但未達標_不擋mask()
-    print("✅ test_殖利率有值但未達標_不擋mask passed")
+    test_殖利率None_其他硬條件都過_不納入_v1_1_yld_hard_filter()
+    print("✅ test_殖利率None_其他硬條件都過_不納入_v1_1_yld_hard_filter passed")
+    test_殖利率有值但未達標_排除_v1_1_yld_hard_filter()
+    print("✅ test_殖利率有值但未達標_排除_v1_1_yld_hard_filter passed")
     test_殖利率有值_排殖利率None前面()
     print("✅ test_殖利率有值_排殖利率None前面 passed")
     test_殖利率達標_排殖利率未達標前面()
@@ -310,3 +320,4 @@ if __name__ == "__main__":
     test_William截圖情境_YoY小於30不該出現()
     print("✅ test_William截圖情境_YoY小於30不該出現 passed")
     print("\n🎉 All B-logic tests passed!")
+

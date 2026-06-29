@@ -1,6 +1,8 @@
 """
 test_filter_last_yld_unbound.py
-驗證 V0.9.5-alpha Phase 6 修 Bug：勾選「去年現金殖利率 ≥ X%」不應拋 UnboundLocalError。
+驗證「去年現金殖利率 ≥ X%」不應拋 UnboundLocalError（V0.9.5-alpha Phase 6 修 Bug）。
+
+【V1.1-yld-hard-filter】2026-06-29 21:59 William 反映、殖利率從軟改硬。
 
 【Bug 描述】2026-06-15 William 09:35 截圖
 - 在「手動選股」勾選「去年現金殖利率 ≥ 0.1%」（含其他條件）
@@ -39,17 +41,38 @@ CY = datetime.now().year  # 2026
 def _make_div_df(codes_with_div: dict) -> pd.DataFrame:
     """Mock _fetch_finmind_dividend 回傳的股利 df
     codes_with_div: {code: {"this_cash": float, "last_cash": float, ...}}
+
+    【V1.1-yld-hard-filter】2026-06-29 21:59
+    - scoring line 220 改用 goodinfo 算「去年現金殖利率(%)」(`f"{CY-1}現金殖利率_goodinfo"`)
+    - mock 必須加 `last_yld` 欄位才會讓殖利率算出來
+    - this_cash → f"{CY-1}現金股利"（「去年現金股利」= cy-1）
+    - last_cash → f"{CY-2}現金股利」（前年）
     """
     rows = []
     for code, div in codes_with_div.items():
+        this_cash = div.get("this_cash")
+        last_cash = div.get("last_cash")
+        # 【V1.1-yld-hard-filter】去年殖利率 = goodinfo 提供、不是 cash/現價
+        # mock last_yld 讓殖利率真的有值（測試需要）
+        last_yld = div.get("last_yld")
+        if last_yld is None and last_cash is not None:
+            # 沒指定 last_yld、但有 last_cash → 自動算（用 mock 用的 price=50 算）
+            # 但這樣 mock 寫法跟 goodinfo 實際欄位名對應才好
+            last_yld = (last_cash / 50.0) * 100
         rows.append({
             "股票代號": code,
             f"{CY}現金股利": None,
             f"{CY}股票股利": None,
-            f"{CY - 1}現金股利": div.get("this_cash"),
+            f"{CY}現金殖利率_goodinfo": None,
+            f"{CY}股票殖利率_goodinfo": None,
+            f"{CY - 1}現金股利": this_cash,
             f"{CY - 1}股票股利": div.get("this_stock", 0.0),
-            f"{CY - 2}現金股利": div.get("last_cash"),
+            f"{CY - 1}現金殖利率_goodinfo": last_yld,
+            f"{CY - 1}股票殖利率_goodinfo": None,
+            f"{CY - 2}現金股利": last_cash,
             f"{CY - 2}股票股利": div.get("last_stock", 0.0),
+            f"{CY - 2}現金殖利率_goodinfo": None,
+            f"{CY - 2}股票殖利率_goodinfo": None,
         })
     return pd.DataFrame(rows)
 
@@ -101,10 +124,11 @@ def test_勾選去年現金殖利率_不拋UnboundLocalError():
 # 【B 邏輯】去年現金殖利率是軟條件、不擋 mask
 # ==========================================================
 
-def test_去年殖利率軟條件_不擋mask():
-    """【B 邏輯一致性】去年現金殖利率跟今年現金殖利率一樣是軟條件
+def test_去年殖利率硬條件_排除_v1_1_yld_hard_filter():
+    """【V1.1-yld-hard-filter】去年現金殖利率 = 硬 AND
+
     Case: A1 去年殖利率 5%（達標）vs A2 去年殖利率 None
-    只要 YoY、PE、現價、成交量都過 → 兩者都納入
+    期望：A1 納入、A2 排除
     """
     _setup_mock({
         "A1": {"this_cash": 1.0, "last_cash": 2.5},   # 去年殖利率 5%
@@ -122,13 +146,12 @@ def test_去年殖利率軟條件_不擋mask():
     ])
     filters = {"min_rev_yoy": 30.0, "min_last_cash_yld": 1.0}
     result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=10)
-    # 兩檔都應納入（去年殖利率是軟條件）
-    assert "A1" in result["股票代號"].values, f"A1 應納入，實際: {result['股票代號'].tolist()}"
-    assert "A2" in result["股票代號"].values, \
-        f"A2 應納入（去年殖利率軟不擋 mask），實際: {result['股票代號'].tolist()}"
+    # V1.1-yld-hard-filter：A1 去年殖利率 5% 達標 → 納入；A2 去年殖利率 None → 排除
+    assert "A1" in result["股票代號"].values, f"A1 應納入（殖利率達標），實際: {result['股票代號'].tolist()}"
+    assert "A2" not in result["股票代號"].values, f"A2 應排除（殖利率 None 硬過濾），實際: {result['股票代號'].tolist()}"
 
 
-def test_去年殖利率有值但未達標_不擋mask():
+def test_去年殖利率有值但未達標_排除_v1_1_yld_hard_filter():
     """去年殖利率 0.5%（未達 1%）不擋 mask、只影響排序（排到殖利率達標後面）"""
     _setup_mock({
         "A1": {"this_cash": 1.0, "last_cash": 2.5},   # 去年殖利率 5%（達標）
@@ -146,9 +169,9 @@ def test_去年殖利率有值但未達標_不擋mask():
     ])
     filters = {"min_rev_yoy": 30.0, "min_last_cash_yld": 1.0}
     result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=10)
-    # 兩檔都應納入
-    assert "A1" in result["股票代號"].values
-    assert "A2" in result["股票代號"].values
+    # V1.1-yld-hard-filter：A1 去年殖利率 5% 達標 → 納入；A2 去年殖利率 0.5% 未達標 → 排除
+    assert "A1" in result["股票代號"].values, f"A1 應納入（殖利率達標），實際: {result['股票代號'].tolist()}"
+    assert "A2" not in result["股票代號"].values, f"A2 應排除（殖利率未達標），實際: {result['股票代號'].tolist()}"
 
 
 def test_只勾選去年現金殖利率_仍可運行():
@@ -169,9 +192,10 @@ def test_只勾選去年現金殖利率_仍可運行():
         {"股票代號": "A1", "營收YoY(%)": 30.0},
         {"股票代號": "A2", "營收YoY(%)": 30.0},
     ])
-    # 只有軟條件、無硬條件
+    # 只有去年現金殖利率勾、其他硬條件都沒勾
     filters = {"min_last_cash_yld": 1.0}
     # 不應拋任何例外
     result = st._run_manual_selection(price_df, revenue_df, pd.DataFrame(), filters, top_n=10)
-    # 軟條件不擋 mask → 兩檔都納入
-    assert len(result) == 2, f"只有軟條件時應保留全部 2 檔，實際: {len(result)}"
+    # V1.1-yld-hard-filter：A1 殖利率 1.0% 達標 → 納入；A2 殖利率 None → 排除
+    assert len(result) == 1, f"預期 1 筆（A1 達標、A2 殖利率 None 排除），實際: {result['股票代號'].tolist() if len(result) > 0 else '空'}"
+    assert "A1" in result["股票代號"].values
