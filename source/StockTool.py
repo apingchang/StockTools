@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-price-color-fix3 (2026-06-29 16:00)        ║
+║  台灣股市量化選股系統 v1.1-popup-col-shift (2026-06-29 19:44)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-price-color-fix3
-最後更新: 2026-06-29 16:07 (Asia/Taipei)
+Version: v1.1-popup-col-shift
+最後更新: 2026-06-29 19:47 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5493,9 +5493,12 @@ class StrategyGUI(tk.Tk):
         self._etf_hover_iid = iid
 
         # Popup（舊版的 _show_etf_popup 邏輯）
-        if column == "#5":
+        # 【V1.1-popup-col-shift】加「漲跌價」欄後、column 往右移一欄
+        #   原本：#5 = ETF數、#6 = 今日異動
+        #   現在：#5 = 漲跌價、#6 = ETF數、#7 = 今日異動
+        if column == "#6":
             self._show_etf_popup(iid, event.x_root, event.y_root, mode="etf_list")
-        elif column == "#6":
+        elif column == "#7":
             self._show_etf_popup(iid, event.x_root, event.y_root, mode="changes")
         else:
             self._close_etf_popup()
@@ -5555,9 +5558,12 @@ class StrategyGUI(tk.Tk):
             self._etf_tree.item(iid, tags=(f'hover_{price_tag[6:]}',))
 
         # 在「ETF數」欄（第 5 欄 = #5）上才顯示 popup
-        if column == "#5":
+        # 【V1.1-popup-col-shift】加「漲跌價」欄後、column 往右移一欄
+        #   原本：#5 = ETF數、#6 = 今日異動
+        #   現在：#5 = 漲跌價、#6 = ETF數、#7 = 今日異動
+        if column == "#6":
             self._show_etf_popup(iid, event.x_root, event.y_root, mode="etf_list")
-        elif column == "#6":
+        elif column == "#7":
             self._show_etf_popup(iid, event.x_root, event.y_root, mode="changes")
         else:
             self._close_etf_popup()
