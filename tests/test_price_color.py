@@ -372,3 +372,31 @@ def test_all_files_compile():
             py_compile.compile(f, doraise=True)
         except py_compile.PyCompileError as e:
             pytest.fail(f"❌ {f} 編譯失敗：\n{e}")
+
+def test_etf_hover_combined_uses_price_tag():
+    """【V1.1-price-color-fix3】_etf_tree_hover_combined (ETF 真正的 bind 函數) 也要帶 price tag
+
+    Bug 歷史：William 15:49 反映 cursor 移到第一行再移開後變黑
+    根因：_etf_tree.bind('<Motion>', self._etf_tree_hover_combined) 走的是 combined 函數
+          而非 _on_etf_tree_hover。前幾次 fix 都改錯函數了！
+    修法：combined 函數也要用 f'hover_{price_tag[6:]}' + _etf_clear_hover_new 也要保留 price_tag
+    """
+    content = _read(STOCKTOOL_PY)
+    m = re.search(
+        r'def _etf_tree_hover_combined\(self, event\):(.*?)(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    assert m, "找不到 _etf_tree_hover_combined"
+    body = m.group(1)
+    assert "_etf_price_tags" in body, "_etf_tree_hover_combined 沒讀 _etf_price_tags"
+    assert "hover_" in body, "_etf_tree_hover_combined 沒用 hover_<price> 單一 tag"
+    # _etf_clear_hover_new 也要保留 price_tag
+    m2 = re.search(
+        r'def _etf_clear_hover_new\(self\):(.*?)(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    assert m2, "找不到 _etf_clear_hover_new"
+    body2 = m2.group(1)
+    assert "_etf_price_tags" in body2, "_etf_clear_hover_new 沒保留 price_tag (clear 後會變黑)"

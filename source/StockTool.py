@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-price-color-fix2 (2026-06-29 15:20)        ║
+║  台灣股市量化選股系統 v1.1-price-color-fix3 (2026-06-29 16:00)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-price-color-fix2
-最後更新: 2026-06-29 15:27 (Asia/Taipei)
+Version: v1.1-price-color-fix3
+最後更新: 2026-06-29 16:07 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -5482,7 +5482,13 @@ class StrategyGUI(tk.Tk):
         if iid != getattr(self, "_etf_hover_iid_new", None):
             self._etf_clear_hover_new()
             self._etf_hover_iid_new = iid
-            self._etf_tree.item(iid, tags=("hover",))
+            # 【V1.1-price-color-fix3】原本寫 tags=(\"hover\",) 只設 background、沒前景色
+            # → hover 時整列會變黑（取消 price_tag 色彩）
+            # 修法：用 f'hover_{price_tag[6:]}' 單一 tag、同時設 bg + fg
+            #   price_tag 從 _etf_price_tags dict 取（該 dict 會是 _price_tag_for() 結果「price_up/price_zero」）
+            #   [6:] 去掉 "price_" prefix
+            price_tag = getattr(self, "_etf_price_tags", {}).get(iid, "price_zero")
+            self._etf_tree.item(iid, tags=(f'hover_{price_tag[6:]}',))
         # 同步舊版的 _etf_hover_iid（讓 _clear_etf_hover 也能運作）
         self._etf_hover_iid = iid
 
@@ -5511,7 +5517,11 @@ class StrategyGUI(tk.Tk):
         try:
             if iid in self._etf_tree.get_children():
                 checked = self._etf_checked.get(iid, False)
-                self._etf_tree.item(iid, tags=("checked" if checked else "unchecked",))
+                # 【V1.1-price-color-fix3】原本寫 (\"checked\"/\"unchecked\",) 沒前景色
+                # → 會把 price_tag 色彩蓋掉、整列變黑
+                # 修法：加 price_tag、恢復紅/綠/灰前景
+                price_tag = getattr(self, "_etf_price_tags", {}).get(iid, "price_zero")
+                self._etf_tree.item(iid, tags=("checked" if checked else "unchecked", price_tag))
         except Exception:
             pass
 
