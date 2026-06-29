@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-add-change-col (2026-06-29 13:57)        ║
+║  台灣股市量化選股系統 v1.1-price-color (2026-06-29 14:12)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-add-change-col
-最後更新: 2026-06-29 14:05 (Asia/Taipei)
+Version: v1.1-price-color
+最後更新: 2026-06-29 14:27 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -2896,6 +2896,26 @@ from stocktool.gui.calendar import _CalendarDialog
 # - 數字欄自動 parse (處理千分位、單位「股/張/%」)
 # - 文字欄當字串排（代號/名稱/日期）
 
+def _price_tag_for(v):
+    """【V1.1-price-color】根據顀跌值決定 row 的 price_* tag
+
+    Returns:
+        "price_up" / "price_down" / "price_zero"
+    """
+    try:
+        if v is None:
+            return "price_zero"
+        f = float(v)
+        if f > 0:
+            return "price_up"
+        elif f < 0:
+            return "price_down"
+        else:
+            return "price_zero"
+    except (TypeError, ValueError):
+        return "price_zero"
+
+
 def _fmt_change(v, decimals=1, na="--"):
     """【V1.1-add-change-col】顀跌價欄位顯示
 
@@ -3447,6 +3467,12 @@ class StrategyGUI(tk.Tk):
         results_tree.tag_configure("checked", background="#d0e8ff")
         results_tree.tag_configure("unchecked", background="#ffffff")
         results_tree.tag_configure("hover", background="#fff3a0")
+        # 【V1.1-price-color】選股結果顛跌價染色 tag（只設 foreground、不設 background）
+        # ttk.Treeview tag 可以多個組合（row tags=("checked","price_up")）
+        # → checked 控背景、price_* 控前景、兩者不會衝突
+        results_tree.tag_configure("price_up", foreground=COLOR_PROFIT_POS)
+        results_tree.tag_configure("price_down", foreground=COLOR_PROFIT_NEG)
+        results_tree.tag_configure("price_zero", foreground=COLOR_PROFIT_ZERO)
         results_tree.bind("<Motion>", self._on_select_tree_hover)
         results_tree.bind("<Leave>", self._on_select_tree_leave)
         results_tree.bind("<Button-1>", self._on_select_tree_click)
@@ -4308,6 +4334,10 @@ class StrategyGUI(tk.Tk):
         self._etf_tree.tag_configure("checked", background="#d0e8ff")
         self._etf_tree.tag_configure("unchecked", background="#ffffff")
         self._etf_tree.tag_configure("hover", background="#fff3a0")
+        # 【V1.1-price-color】漲跌價染色 tag
+        self._etf_tree.tag_configure("price_up", foreground=COLOR_PROFIT_POS)
+        self._etf_tree.tag_configure("price_down", foreground=COLOR_PROFIT_NEG)
+        self._etf_tree.tag_configure("price_zero", foreground=COLOR_PROFIT_ZERO)
         self._etf_hover_iid = None  # 跟手動選股一樣機制
         # popup 變數
         self._etf_popup = None  # Toplevel 視窗（若有）
@@ -4558,10 +4588,14 @@ class StrategyGUI(tk.Tk):
         # 實現方式：建立 _hover iid 變數。
         #   - Motion 進新 row 時：把 _hover 設為該 iid、用 item.configure(tag) 動態改 tag
         #   - Leave 或 Motion 到別的 row：清掉 _hover、該 row 設回原本 tag
-        # 注意：ttk.Treeview 多 tag 只取第一個生效、所以只動態切換 tag 字串。
+        # 【V1.1-price-color】ttk.Treeview 多 tag 可組合：row tags=("checked","price_up")
+        #   checked/unchecked/hover 控 background、price_* 控 foreground、兩者不衝突
         self._ms_tree.tag_configure("checked", background="#d0e8ff")
         self._ms_tree.tag_configure("unchecked", background="#ffffff")
         self._ms_tree.tag_configure("hover", background="#fff3a0")
+        self._ms_tree.tag_configure("price_up", foreground=COLOR_PROFIT_POS)
+        self._ms_tree.tag_configure("price_down", foreground=COLOR_PROFIT_NEG)
+        self._ms_tree.tag_configure("price_zero", foreground=COLOR_PROFIT_ZERO)
         self._ms_hover_iid = None  # 記住目前 hover 的 row iid（若有）
         self._ms_tree.bind("<Motion>", self._on_tree_hover)
         self._ms_tree.bind("<Leave>", self._on_tree_leave)
@@ -5226,6 +5260,11 @@ class StrategyGUI(tk.Tk):
             # 【v1.0-info】再加 1 欄「資料日期」變 14 欄
             # 【V1.1-remove-after-hour】再拿掉「盤後量(張)」變 14 欄 - 1 = 13 欄
             # 【V1.1-add-change-col】加「漲跌價」變 13 欄 + 1 = 14 欄（但現價之後）
+            # 【V1.1-price-color】加 price_* tag（漲跌色）
+            price_tag = _price_tag_for(row.get("漲跌", 0))
+            if not hasattr(self, "_ms_price_tags"):
+                self._ms_price_tags = {}
+            self._ms_price_tags[code] = price_tag
             self._ms_tree.insert("", "end", iid=code, values=(
                 "☑" if self._ms_checked.get(code, False) else "☐",
                 code, name, price_str, change_str, rev_str,  # 【V1.1-add-change-col】加 change_str
@@ -5233,7 +5272,7 @@ class StrategyGUI(tk.Tk):
                 pe_str, vol_str,
                 last_stock_str, last_cash_div_str, last_cash_str,
                 data_date_str
-            ), tags=(tag,))
+            ), tags=(tag, price_tag))
 
         self._ms_status.set(f"✅ 符合條件：{len(result)} 檔（上限 {self._ms_limit_var.get()} 檔）｜排序：營收YoY > 今年股票 > 今年現金殖% > PE")
         # 【V0.9.5-tab-split-phase3-D】動態更新 checkbox header（新資料剛填、預設全未勾 → ☐）
@@ -5268,6 +5307,7 @@ class StrategyGUI(tk.Tk):
         - 若進入新列 → 離開舊列 hover、進入新列 hover（黃色）
         - 注意：勾選狀態 (checked/unchecked) 不能被覆蓋。
           解法：現在用「只設一個 tag」、hover 時設為「hover」、離開時讀 _ms_checked 恢復。
+        - 【V1.1-price-color】hover 仍保留 price_* tag（顫跌色）、背景仍可控
         """
         region = self._ms_tree.identify("region", event.x, event.y)
         if region != "cell":
@@ -5284,7 +5324,9 @@ class StrategyGUI(tk.Tk):
         self._clear_hover()
         # 進新列
         self._ms_hover_iid = iid
-        self._ms_tree.item(iid, tags=("hover",))
+        # 【V1.1-price-color】保留 price_* tag
+        price_tag = getattr(self, "_ms_price_tags", {}).get(iid, "price_zero")
+        self._ms_tree.item(iid, tags=("hover", price_tag))
 
     def _on_tree_leave(self, event):
         """【v1.0-hover】滑鼠離開 Treeview → 清除 hover"""
@@ -5300,9 +5342,11 @@ class StrategyGUI(tk.Tk):
         try:
             if old_iid in self._ms_tree.get_children():
                 checked = self._ms_checked.get(old_iid, False)
+                # 【V1.1-price-color】保留 price_* tag
+                price_tag = getattr(self, "_ms_price_tags", {}).get(old_iid, "price_zero")
                 self._ms_tree.item(
                     old_iid,
-                    tags=("checked" if checked else "unchecked",),
+                    tags=("checked" if checked else "unchecked", price_tag),
                 )
         except tk.TclError:
             pass
@@ -5329,8 +5373,10 @@ class StrategyGUI(tk.Tk):
         self._ms_checked[item_id] = not current
         vals = list(self._ms_tree.item(item_id, "values"))
         vals[0] = "☑" if not current else "☐"
+        # 【V1.1-price-color】保留 price_* tag
+        price_tag = getattr(self, "_ms_price_tags", {}).get(item_id, "price_zero")
         self._ms_tree.item(item_id, values=vals,
-                           tags=("checked" if not current else "unchecked",))
+                           tags=("checked" if not current else "unchecked", price_tag))
         # 【V0.9.5-tab-split-phase3-D】動態更新 header
         self._update_checkbox_header(self._ms_tree, self._ms_checked)
 
@@ -5349,7 +5395,9 @@ class StrategyGUI(tk.Tk):
             return
         self._ms_clear_hover()
         self._ms_hover_iid = iid
-        self._ms_tree.item(iid, tags=("hover",))
+        # 【V1.1-price-color】保留 price_* tag
+        price_tag = getattr(self, "_ms_price_tags", {}).get(iid, "price_zero")
+        self._ms_tree.item(iid, tags=("hover", price_tag))
 
     def _ms_tree_leave(self, event):
         self._ms_clear_hover()
@@ -5362,7 +5410,9 @@ class StrategyGUI(tk.Tk):
         try:
             if old_iid in self._ms_tree.get_children():
                 checked = self._ms_checked.get(old_iid, False)
-                self._ms_tree.item(old_iid, tags=("checked" if checked else "unchecked",))
+                # 【V1.1-price-color】保留 price_* tag
+                price_tag = getattr(self, "_ms_price_tags", {}).get(old_iid, "price_zero")
+                self._ms_tree.item(old_iid, tags=("checked" if checked else "unchecked", price_tag))
         except Exception:
             pass
 
@@ -5371,7 +5421,9 @@ class StrategyGUI(tk.Tk):
             self._ms_checked[item] = True
             vals = list(self._ms_tree.item(item, "values"))
             vals[0] = "☑"
-            self._ms_tree.item(item, values=vals, tags=("checked",))
+            # 【V1.1-price-color】保留 price_* tag
+            price_tag = getattr(self, "_ms_price_tags", {}).get(item, "price_zero")
+            self._ms_tree.item(item, values=vals, tags=("checked", price_tag))
         # 【V0.9.5-tab-split-phase3-D】動態更新 header
         self._update_checkbox_header(self._ms_tree, self._ms_checked)
 
@@ -5380,7 +5432,9 @@ class StrategyGUI(tk.Tk):
             self._ms_checked[item] = False
             vals = list(self._ms_tree.item(item, "values"))
             vals[0] = "☐"
-            self._ms_tree.item(item, values=vals, tags=("unchecked",))
+            # 【V1.1-price-color】保留 price_* tag
+            price_tag = getattr(self, "_ms_price_tags", {}).get(item, "price_zero")
+            self._ms_tree.item(item, values=vals, tags=("unchecked", price_tag))
         # 【V0.9.5-tab-split-phase3-D】動態更新 header
         self._update_checkbox_header(self._ms_tree, self._ms_checked)
 
@@ -5474,7 +5528,9 @@ class StrategyGUI(tk.Tk):
         if iid != self._etf_hover_iid:
             self._clear_etf_hover()
             self._etf_hover_iid = iid
-            self._etf_tree.item(iid, tags=("hover",))
+            # 【V1.1-price-color】保留 price_* tag
+            price_tag = getattr(self, "_etf_price_tags", {}).get(iid, "price_zero")
+            self._etf_tree.item(iid, tags=("hover", price_tag))
 
         # 在「ETF數」欄（第 5 欄 = #5）上才顯示 popup
         if column == "#5":
@@ -5497,9 +5553,11 @@ class StrategyGUI(tk.Tk):
         try:
             if old_iid in self._etf_tree.get_children():
                 checked = self._etf_checked.get(old_iid, False)
+                # 【V1.1-price-color】保留 price_* tag
+                price_tag = getattr(self, "_etf_price_tags", {}).get(old_iid, "price_zero")
                 self._etf_tree.item(
                     old_iid,
-                    tags=("checked" if checked else "unchecked",),
+                    tags=("checked" if checked else "unchecked", price_tag),
                 )
         except tk.TclError:
             pass
@@ -5700,9 +5758,11 @@ class StrategyGUI(tk.Tk):
         self._etf_checked[item_id] = not current
         vals = list(self._etf_tree.item(item_id, "values"))
         vals[0] = "☑" if not current else "☐"
+        # 【V1.1-price-color】保留 price_* tag
+        price_tag = getattr(self, "_etf_price_tags", {}).get(item_id, "price_zero")
         self._etf_tree.item(
             item_id, values=vals,
-            tags=("checked" if not current else "unchecked",),
+            tags=("checked" if not current else "unchecked", price_tag),
         )
         # 【V0.9.5-tab-split-phase3-D】動態更新 header
         self._update_checkbox_header(self._etf_tree, self._etf_checked)
@@ -5712,7 +5772,9 @@ class StrategyGUI(tk.Tk):
             self._etf_checked[item] = True
             vals = list(self._etf_tree.item(item, "values"))
             vals[0] = "☑"
-            self._etf_tree.item(item, values=vals, tags=("checked",))
+            # 【V1.1-price-color】保留 price_* tag
+            price_tag = getattr(self, "_etf_price_tags", {}).get(item, "price_zero")
+            self._etf_tree.item(item, values=vals, tags=("checked", price_tag))
         # 【V0.9.5-tab-split-phase3-D】動態更新 header
         self._update_checkbox_header(self._etf_tree, self._etf_checked)
 
@@ -5721,7 +5783,9 @@ class StrategyGUI(tk.Tk):
             self._etf_checked[item] = False
             vals = list(self._etf_tree.item(item, "values"))
             vals[0] = "☐"
-            self._etf_tree.item(item, values=vals, tags=("unchecked",))
+            # 【V1.1-price-color】保留 price_* tag
+            price_tag = getattr(self, "_etf_price_tags", {}).get(item, "price_zero")
+            self._etf_tree.item(item, values=vals, tags=("unchecked", price_tag))
         # 【V0.9.5-tab-split-phase3-D】動態更新 header
         self._update_checkbox_header(self._etf_tree, self._etf_checked)
 
@@ -5932,8 +5996,12 @@ class StrategyGUI(tk.Tk):
                 "", "end", iid=iid,
                 values=("☐", iid, str(row.get("股票名稱", "")), price_str, change_price_str,
                         int(row["etf_count"]), change_str),
-                tags=("unchecked",),
+                tags=("unchecked", _price_tag_for(row.get("漲跌", 0))),
             )
+            # 【V1.1-price-color】記下 price_* tag（hover/select 時要帶走）
+            if not hasattr(self, "_etf_price_tags"):
+                self._etf_price_tags = {}
+            self._etf_price_tags[iid] = _price_tag_for(row.get("漲跌", 0))
 
         self._etf_status.set(
             f"✅ 顯示 {len(df)} 檔個股（總資料 {len(agg_df)} 檔）"
@@ -7238,6 +7306,11 @@ class StrategyGUI(tk.Tk):
                     return na
 
             tag = "checked" if self._select_checked.get(code, False) else "unchecked"
+            # 【V1.1-price-color】顀跌染色：price_* tag 只設 foreground、跟 checked/unchecked 背景不衝突
+            price_tag = _price_tag_for(change)
+            if not hasattr(self, "_select_price_tags"):
+                self._select_price_tags = {}
+            self._select_price_tags[code] = price_tag
             self.select_tree.insert("", "end", iid=code, values=(
                 "☑" if self._select_checked.get(code, False) else "☐",
                 code,
@@ -7249,7 +7322,7 @@ class StrategyGUI(tk.Tk):
                 _fmt(eps_yoy),
                 _fmt(pe),
                 _fmt_pct(yld),
-            ), tags=(tag,))
+            ), tags=(tag, price_tag))
             display_count += 1
 
         self.logger.log(f"📋 已顯示 {display_count} 筆選股結果（總共 {len(df_sel)} 筆）")
@@ -7349,10 +7422,13 @@ class StrategyGUI(tk.Tk):
         - 進新列 → 離開舊列（restore 原本 tag）、進新列（hover）
         - 離開 cell/列 → restore 舊列原本 tag
         - 移到同一列 → 不動作
+        - 【V1.1-price-color】hover 時保留 price_up/down/zero tag（背景仍可控）
         """
         tree = event.widget
         if not hasattr(self, "_select_hover_iids"):
             self._select_hover_iids = {}
+        if not hasattr(self, "_select_price_tags"):
+            self._select_price_tags = {}
 
         region = tree.identify("region", event.x, event.y)
         iid = tree.identify_row(event.y) if region == "cell" else None
@@ -7363,15 +7439,17 @@ class StrategyGUI(tk.Tk):
         if iid and iid == old_iid:
             return
 
-        # 離開舊列：restore 原本 tag（hover → checked/unchecked）
+        # 離開舊列：restore 原本 tag（hover → checked/unchecked + price_*）
         if old_iid and old_iid in tree.get_children():
             checked = self._select_checked.get(old_iid, False) if tree == self.select_tree else getattr(self, "_bt_checked", {}).get(old_iid, False)
-            tree.item(old_iid, tags=("checked" if checked else "unchecked",))
+            price_tag = self._select_price_tags.get(old_iid, "price_zero")
+            tree.item(old_iid, tags=("checked" if checked else "unchecked", price_tag))
 
         # 進新列 or 無效區域
         if iid and iid in tree.get_children():
             self._select_hover_iids[id(tree)] = iid
-            tree.item(iid, tags=("hover",))
+            price_tag = self._select_price_tags.get(iid, "price_zero")
+            tree.item(iid, tags=("hover", price_tag))
         else:
             # 離開範圍：刪除 hover 記錄
             self._select_hover_iids.pop(id(tree), None)
@@ -7387,7 +7465,9 @@ class StrategyGUI(tk.Tk):
         if not iid or iid not in tree.get_children():
             return
         checked = self._select_checked.get(iid, False) if tree == self.select_tree else getattr(self, "_bt_checked", {}).get(iid, False)
-        tree.item(iid, tags=("checked" if checked else "unchecked",))
+        # 【V1.1-price-color】保留 price_* tag
+        price_tag = getattr(self, "_select_price_tags", {}).get(iid, "price_zero")
+        tree.item(iid, tags=("checked" if checked else "unchecked", price_tag))
         self._select_hover_iids.pop(id(tree), None)
 
     def _on_select_tree_click(self, event):
@@ -7427,7 +7507,9 @@ class StrategyGUI(tk.Tk):
         checked_dict[iid] = not current
         vals = list(tree.item(iid, "values"))
         vals[0] = "☑" if not current else "☐"
-        tree.item(iid, values=vals, tags=("checked" if not current else "unchecked",))
+        # 【V1.1-price-color】保留 price_* tag
+        price_tag = getattr(self, "_select_price_tags", {}).get(iid, "price_zero")
+        tree.item(iid, values=vals, tags=("checked" if not current else "unchecked", price_tag))
         # 【V0.9.5-tab-split-phase3-D】動態更新 header（個別 toggle 也會影響整體狀態）
         self._update_checkbox_header(tree, checked_dict)
 
@@ -7440,7 +7522,9 @@ class StrategyGUI(tk.Tk):
             checked_dict[item] = True
             vals = list(tree.item(item, "values"))
             vals[0] = "☑"
-            tree.item(item, values=vals, tags=("checked",))
+            # 【V1.1-price-color】保留 price_* tag
+            price_tag = getattr(self, "_select_price_tags", {}).get(item, "price_zero")
+            tree.item(item, values=vals, tags=("checked", price_tag))
         # 【V0.9.5-tab-split-phase3-D】動態更新 header
         self._update_checkbox_header(tree, checked_dict)
 
@@ -7451,7 +7535,9 @@ class StrategyGUI(tk.Tk):
             checked_dict[item] = False
             vals = list(tree.item(item, "values"))
             vals[0] = "☐"
-            tree.item(item, values=vals, tags=("unchecked",))
+            # 【V1.1-price-color】保留 price_* tag
+            price_tag = getattr(self, "_select_price_tags", {}).get(item, "price_zero")
+            tree.item(item, values=vals, tags=("unchecked", price_tag))
         # 【V0.9.5-tab-split-phase3-D】動態更新 header
         self._update_checkbox_header(tree, checked_dict)
 
