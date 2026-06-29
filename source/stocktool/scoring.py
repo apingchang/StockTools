@@ -358,6 +358,7 @@ def _run_manual_selection(
                 f"{cy}現金股利", f"{cy - 1}現金股利", f"{cy - 2}現金股利",
                 # V0.9.5-goodinfo3：殖利率加強欄位（10Y 平均殖利率已拿掉，William 不需要）
                 "今年股票殖利率(%)", "去年股票殖利率(%)",
+                "漲跌",
                 "data_date"]  # 【v1.0-info】Treeview 「資料日期」欄位用
     out_cols = [c for c in out_cols if c in result.columns]
     # 整理重複的現金股利（保留乾淨的今年/去年/前年）

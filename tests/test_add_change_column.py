@@ -309,3 +309,21 @@ def test_all_files_compile():
             py_compile.compile(f, doraise=True)
         except py_compile.PyCompileError as e:
             pytest.fail(f"❌ {f} 編譯失敗：\n{e}")
+
+
+def test_scoring_out_cols_keeps_change():
+    """【V1.1-add-change-col-fix】scoring.py out_cols 必須保留「漲跌」欄
+
+    Bug 歷史：William 2026-06-29 20:19 反映手動選股「漲跌價」全 0.0
+    根因：scoring.py line 357-365 out_cols 漏加「漲跌」→ result 被 filter 掉
+    修法：out_cols 也要加「漲跌」、確保一路保留到 result
+    """
+    content = _read(SCORING_PY)
+    m = re.search(r'out_cols\s*=\s*\[(.*?)\]', content, re.DOTALL)
+    assert m, "找不到 out_cols = [...]"
+    body = m.group(1)
+    assert '"漲跌"' in body, (
+        f"❌ scoring.py out_cols 漏加「漲跌」！\n"
+        f"  V1.1-add-change-col 修法：final_cols 也要加、out_cols 也要加\n"
+        f"  out_cols body: {body[:200]}"
+    )
