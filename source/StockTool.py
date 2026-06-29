@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-click-sort-etf (2026-06-28 21:04)        ║
+║  台灣股市量化選股系統 v1.1-etf-popup-detail (2026-06-29 09:47)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-click-sort-etf
-最後更新: 2026-06-28 21:09 (Asia/Taipei)
+Version: v1.1-etf-popup-detail
+最後更新: 2026-06-29 09:54 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -180,6 +180,47 @@ Python 版本: 3.8+
   - ttk.Style 設定一次性、影響整個 App
   - int() 比 round() 嚴謹（不會踩到 banker's rounding）
   - 2548 差 1 留待下版（source 對齊）追
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【V1.1-etf-popup-detail】2026-06-29 09:47 (William 09:47 反映 ETF 今日異動 popup 沒列出 per-ETF 異動)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-29 09:47 反映：
+  - 「ETF選股結果今日異動欄當cursor移到異動數字上時、pop up window中請詳列各個ETF異動數」
+
+【根因】_show_etf_popup mode="changes" 在讀錯欄位：
+  - 之前 code：
+    for _, cr in stock_changes.iterrows():   # stock-level row
+        etf_code = str(cr.get("etf_code", ""))   # ← stock row 沒這欄、空字串
+        etf_name = str(cr.get("etf_name", etf_code))  # ← 空字串
+        cl = cr.get("today_change_lots", 0)      # ← 這是「總和」、不是 per-ETF
+  - 結果：popup 只能顯示「+12.5」（一行總和）、完全看不到各檔 ETF 的異動
+  - per-ETF 異動其實在 etf_changes_json 欄（JSON string）、一直沒被 parse
+
+【修法】_show_etf_popup mode="changes"：
+  1. cr = stock_changes.iloc[0] 拿單 row
+  2. json.loads(cr["etf_changes_json"]) → per-ETF list
+  3. 從 _etf_agg_df 的 etf_list 補 etf_name（json 內 etf_name=""）
+     格式："0050 元大台灣50(9.37%)\n006208 富邦台50(8.71%)"
+     re.match r"^(\S+)\s+(.+?)\([\d.]+%\)\s*$" 拆出 code/name
+  4. 過濾 abs(cl) < 0.001 的項目、絕對值由大到小排
+  5. 標題列：「{stock_code} {stock_name}（{etf_count} 檔 ETF、今日 {len(entries)} 檔異動）」
+  6. 各 ETF 一行：「{sign}{cl:,.1f}  {etf_code}  {etf_name}」
+  7. 結尾：「總和  {sign}{total:,.1f}  張」
+
+【測試】（3 個新）
+  - test_etf_popup_detail_parses_etf_changes_json: 確認有 parse json、各 ETF 各一行
+  - test_etf_popup_detail_enriches_etf_name_from_agg: 確認 etf_name 有從 etf_list 補上
+  - test_etf_popup_detail_shows_total_and_header: 確認標題列 + 總和行
+
+【version 同步】
+  - VERSION = "v1.1-click-sort-etf" → "v1.1-etf-popup-detail" (stocktool/config.py)
+
+【實作細節】
+  - re 是新加的 import
+  - per-ETF 排序用 abs() 為 key、不影響正負號顯示
+  - 過濾 abs(cl) < 0.001 避免「0 0.0」的雜訊
+  - etf_name_map 從 agg_df 的 etf_list 一次 parse、不另存
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -2523,6 +2564,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import json
 import time
 import queue
@@ -5305,26 +5347,75 @@ class StrategyGUI(tk.Tk):
             if stock_changes.empty:
                 self._close_etf_popup()
                 return
-            change_lines = []
-            total = 0.0
-            for _, cr in stock_changes.iterrows():
-                etf_code = str(cr.get("etf_code", "")).strip()
-                etf_name = str(cr.get("etf_name", etf_code))
-                # 【V0.9.5-tab-split-phase3-H FixA2】2026-06-23 12:12 William 反映
-                # _compute_etf_changes 回傳欄位是 today_change_lots、不是 change_lots
-                # 之前用 change_lots 永遠抓到 0（.get 預設值）、沒人發現
-                cl = cr.get("today_change_lots", 0) or 0
-                if abs(cl) < 0.001:
-                    continue
-                total += cl
-                sign = "+" if cl > 0 else ""
-                change_lines.append(f"{sign}{cl:,.1f}  {etf_code} {etf_name}")
-            if not change_lines:
+
+            # 【V0.9.5-etf-popup-detail】2026-06-29 09:47 William 反映：
+            # 移到「今日異動」欄時、popup 只顯示一行總和、看不出每檔 ETF 的異動數
+            # 根因：_compute_etf_changes 回傳的 stock-level row 沒有 etf_code/etf_name 欄
+            #      per-ETF 異動在 etf_changes_json 內（JSON string）
+            #      之前用 cr.get("etf_code", "") 拿到空字串、etf_name 也是空
+            #      today_change_lots 是「總和」、不是 per-ETF → 只能顯示一行
+            # 修法：parse etf_changes_json 拿 per-ETF list
+            #      從 _etf_agg_df 的 etf_list 補 etf_name（json 內是空字串）
+            cr = stock_changes.iloc[0]
+            raw_json = cr.get("etf_changes_json", "")
+            if not raw_json:
                 self._close_etf_popup()
                 return
+            try:
+                etf_changes = json.loads(raw_json)
+            except Exception:
+                self._close_etf_popup()
+                return
+            if not etf_changes:
+                self._close_etf_popup()
+                return
+
+            # 從 agg_df 的 etf_list 補上 etf_name（json 內 etf_name=""）
+            # etf_list 格式："0050 元大台灣50(9.37%)\n006208 富邦台50(8.71%)\n..."
+            etf_name_map = {}
+            etf_list_str = match.iloc[0].get("etf_list", "")
+            if etf_list_str:
+                for line in etf_list_str.split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    m = re.match(r"^(\S+)\s+(.+?)\([\d.]+%\)\s*$", line)
+                    if m:
+                        etf_name_map[m.group(1).strip()] = m.group(2).strip()
+
+            # 整理 entries：跳過 ~0、補 etf_name
+            entries = []
+            for ec_entry in etf_changes:
+                cl = float(ec_entry.get("change_lots", 0) or 0)
+                if abs(cl) < 0.001:
+                    continue
+                ec = str(ec_entry.get("etf_code", "")).strip()
+                en = str(ec_entry.get("etf_name", "")).strip() or etf_name_map.get(ec, "")
+                entries.append((cl, ec, en))
+            if not entries:
+                self._close_etf_popup()
+                return
+
+            # 依絕對值由大到小排
+            entries.sort(key=lambda x: abs(x[0]), reverse=True)
+
+            # 標題列 + 分隔線 + 各 ETF 異動 + 總和
+            stock_name = str(cr.get("stock_name", "")).strip()
+            etf_count = int(cr.get("etf_count", 0) or 0)
+            change_lines = []
+            if stock_name:
+                change_lines.append(f"{stock_code} {stock_name}（{etf_count} 檔 ETF、今日 {len(entries)} 檔異動）")
+            else:
+                change_lines.append(f"{stock_code}（{etf_count} 檔 ETF、今日 {len(entries)} 檔異動）")
+            change_lines.append("─" * 20)
+            total = 0.0
+            for cl, ec, en in entries:
+                total += cl
+                sign = "+" if cl > 0 else ""
+                change_lines.append(f"{sign}{cl:,.1f}  {ec}  {en}")
+            change_lines.append("─" * 20)
             sign = "+" if total > 0 else ""
-            change_lines.append("-" * 20)
-            change_lines.append(f"總和 {sign}{total:,.1f} 張")
+            change_lines.append(f"總和  {sign}{total:,.1f}  張")
             popup_text = "\n".join(change_lines)
         else:
             # etf_list mode：顯示持有此股的 ETF 列表
