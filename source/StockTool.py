@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1-portfolio-taiwan-color (2026-06-29 10:16)        ║
+║  台灣股市量化選股系統 v1.1-etf-data-status-multiline (2026-06-29 10:33)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1-portfolio-taiwan-color
-最後更新: 2026-06-29 10:25 (Asia/Taipei)
+Version: v1.1-etf-data-status-multiline
+最後更新: 2026-06-29 10:40 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -257,6 +257,36 @@ Python 版本: 3.8+
 
 【version 同步】
   - VERSION = "v1.1-etf-popup-detail" → "v1.1-portfolio-taiwan-color"
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【V1.1-etf-data-status-multiline】2026-06-29 10:33 (William 10:33 反映 ETF 左欄說明太長)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-06-29 10:33 反映（截圖上可看到左欄被裁切）
+  - 「etf選股左欄說明太長了請拆成多行」
+
+【根因】兩個 bug 一起修
+  1. 原文 50+ 字元塞 200px 左欄、被裁切
+     範例：'ETF 持股：最後更新 2026-06-29 10:00:00 (53 檔個股、從 20 檔 ETF) ✅ 有昨日資料可比較'
+  2. 同時發現：strftime('%%Y-%%m-%%d') 印出字面 '%Y-%m-%d'（不是真正時間）
+     截圖上最後更新顯示為 '%Y-%m-%d %H:%M:%S' 就是這個 bug
+     原因：strftime 的 %% 是字面 %、但這裡是要顯示真實 datetime
+
+【修法】拆 3 行 + 修 %% bug
+  1. 改成 \\n.join(status_lines)：
+     Line 1: 'ETF 持股：53 檔個股、20 檔 ETF'
+     Line 2: '最後更新 2026-06-29 10:00:00'
+     Line 3: '✅ 有昨日資料可比較'  或 '⚠️ 無昨日資料'
+  2. 改用 datetime.now().strftime('%Y-%m-%d %H:%M:%S')（不是 %%Y）
+  3. 3 個 set 位置（line 5700、5911、5915）全部更新
+
+【實作細節】
+  - 有/無昨日資料判斷 has_yesterday 變數 + 3-element list
+  - 第一個 set 沒有「有/無昨日」（如 first time fetch）只設 2 行
+  - ttk.Label 支援 \\n 換行、原本就有 font=Helvetica 8、不需調
+
+【version 同步】
+  - VERSION = "v1.1-portfolio-taiwan-color" → "v1.1-etf-data-status-multiline"
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -5693,11 +5723,19 @@ class StrategyGUI(tk.Tk):
         self._save_etf_holdings_to_db(long_df)
         # 計算今日異動
         self._etf_change_df = self._compute_etf_changes_from_db()
-        # 【V0.9.5-etf-weekend】動態顯示實際抓到的 ETF 數（不寫死）
+        # 【V1.1-etf-data-status-multiline】2026-06-29 10:33 William 反映
+        # 「etf選股左欄說明太長了請拆成多行」
+        # 之前一行 50+ 字元塞 200px 左欄被裁切
+        # 改成 3 行：標題列 / 更新時間 / (有昨日才加指示)
+        # 同時修：之前 strftime('%%Y-%%m-%%d') 印出字面 '%Y-%m-%d'（不是真正時間）
         etf_count = long_df["etf_code"].nunique() if (long_df is not None and not long_df.empty) else 0
-        self._etf_data_status.set(
-            f"ETF 持股：最後更新 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ({len(agg_df)} 檔個股、從 {etf_count} 檔 ETF)"
-        )
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # 動態組裝 (v1.1.1-etf-data-status)：header + timestamp、可選補上「有/無昨日」
+        status_lines = [
+            f"ETF 持股：{len(agg_df)} 檔個股、{etf_count} 檔 ETF",
+            f"最後更新 {now_str}",
+        ]
+        self._etf_data_status.set("\n".join(status_lines))
         self._etf_status.set(f"✅ ETF 持股抓取完成：從 {etf_count} 檔主動式 ETF 抓到 {len(agg_df)} 檔個股")
         # 自動套用一次篩選
         self._etf_display_results(agg_df, self._etf_change_df)
@@ -5905,16 +5943,16 @@ class StrategyGUI(tk.Tk):
         self._save_etf_holdings_to_db(long_df)
         # 計算今日異動
         self._etf_change_df = self._compute_etf_changes_from_db()
-        # 【V0.9.5-etf-weekend】動態顯示實際抓到的 ETF 數
+        # 【V1.1-etf-data-status-multiline】同上、拆 3 行 + 修 %%Y bug
         etf_count = long_df["etf_code"].nunique() if (long_df is not None and not long_df.empty) else 0
-        if self._etf_change_df is not None and not self._etf_change_df.empty:
-            self._etf_data_status.set(
-            f"ETF 持股：最後更新 {datetime.now().strftime('%%Y-%%m-%%d %%H:%%M:%%S')} ({len(agg_df)} 檔個股、從 {etf_count} 檔 ETF) ✅ 有昨日資料可比較"
-            )
-        else:
-            self._etf_data_status.set(
-            f"ETF 持股：最後更新 {datetime.now().strftime('%%Y-%%m-%%d %%H:%%M:%%S')} ({len(agg_df)} 檔個股、從 {etf_count} 檔 ETF) ⚠️ 無昨日資料"
-            )
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        has_yesterday = self._etf_change_df is not None and not self._etf_change_df.empty
+        status_lines = [
+            f"ETF 持股：{len(agg_df)} 檔個股、{etf_count} 檔 ETF",
+            f"最後更新 {now_str}",
+            "✅ 有昨日資料可比較" if has_yesterday else "⚠️ 無昨日資料",
+        ]
+        self._etf_data_status.set("\n".join(status_lines))
     def _load_price_df(self):
         """【V0.9.5-etf】讀取 price 快取 DataFrame、若不存在就 try fetch_prices 一次
         回傳的 df 至少含欄位：股票代號、股價
