@@ -1201,6 +1201,29 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
                 if pd.isna(cur_vol) or cur_vol == 0:
                     merged.at[idx, "成交量_張"] = _vol_to_kilos(r["_raw_volume"])
 
+        # 【v1.1.2 補強 log】2026-06-30 23:15 William 反映
+        # fallback 跑完仍 isna 的股，列出代號 + 診斷常見原因（當日無成交 / KY 類 / 衍生檔）
+        still_missing = merged[merged["現價"].isna()]["股票代號"].tolist()
+        if still_missing:
+            # 檢查 TPEx 是否有「----」（當日無成交）標記
+            tpex["股票代號"] = tpex["股票代號"].astype(str).str.strip()
+            no_trade = set(tpex[tpex["股價"].astype(str).str.contains("----", na=False)]["股票代號"].tolist())
+            # 三類分流（互不重疊）：衍生檔 > KY 類 > 當日無成交 > 其他
+            etf_like = sorted([c for c in still_missing if str(c).startswith("020")])
+            ky_like = sorted([c for c in still_missing if str(c).endswith("KY") and c not in etf_like])
+            no_trade_only = sorted([c for c in still_missing if c in no_trade and c not in etf_like and c not in ky_like])
+            other = sorted([c for c in still_missing
+                            if c not in etf_like and c not in ky_like and c not in no_trade_only])
+            print(f"   ℹ️  fallback 後仍有 {len(still_missing)} 檔無股價：")
+            if etf_like:
+                print(f"      • 衍生檔（權證/牛熊 02000X、TPEx ----）：{len(etf_like)} 檔 → {etf_like}")
+            if ky_like:
+                print(f"      • KY 類（無 STOCK_DAY_ALL 資料）：{len(ky_like)} 檔 → {ky_like}")
+            if no_trade_only:
+                print(f"      • 當日無成交（TPEx 標 ----）：{len(no_trade_only)} 檔 → {no_trade_only[:10]}{'…' if len(no_trade_only) > 10 else ''}")
+            if other:
+                print(f"      • 其他（建議手動確認）：{len(other)} 檔 → {other[:10]}{'…' if len(other) > 10 else ''}")
+
     # Step 5: 整理欄位
     merged["現價"] = pd.to_numeric(merged["現價"], errors="coerce")
     merged["漲跌"] = pd.to_numeric(merged["漲跌"], errors="coerce")
