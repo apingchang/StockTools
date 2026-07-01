@@ -129,7 +129,7 @@ def roc_to_ad(roc_str: str):
 
 
 # 股利歷史庫（跟 eps_history 同一風格）
-def _load_goodinfo_12q_epsrate(goodinfo_dir=None):
+def _load_goodinfo_12q_epsrate(goodinfo_dir=None, logger: GuiLogger = None):
     """【V0.9.5-tab-split-phase3-C Fix10】
     載入 GoodInfo 12QEPSRate 3 個檔案，回傳 {stock_id: {quarter_str: yoy_pct}}
 
@@ -153,10 +153,10 @@ def _load_goodinfo_12q_epsrate(goodinfo_dir=None):
     try:
         import lxml  # noqa: F401
     except ImportError:
-        print("⚠️ GoodInfo 12QEPSRate 需要 lxml 才能讀取 .xls 檔（pd.read_html 依賴）")
-        print("   請執行：pip install lxml")
-        print("   或裝：pip install -r requirements.txt")
-        print("   （沒有 lxml → GoodInfo 覆蓋會跳過、EPSYoY 全 NaN）")
+        _log_print(logger, "⚠️ GoodInfo 12QEPSRate 需要 lxml 才能讀取 .xls 檔（pd.read_html 依賴）")
+        _log_print(logger, "   請執行：pip install lxml")
+        _log_print(logger, "   或裝：pip install -r requirements.txt")
+        _log_print(logger, "   （沒有 lxml → GoodInfo 覆蓋會跳過、EPSYoY 全 NaN）")
         return {}
 
     out = {}
@@ -164,7 +164,7 @@ def _load_goodinfo_12q_epsrate(goodinfo_dir=None):
     for fname in files:
         fpath = _os.path.join(goodinfo_dir, fname)
         if not _os.path.exists(fpath):
-            print(f"⚠️ GoodInfo 12QEPSRate 缺檔: {fpath}")
+            _log_print(logger, f"⚠️ GoodInfo 12QEPSRate 缺檔: {fpath}")
             continue
         try:
             # 這幾個檔案其實是 HTML 格式 (內容偽裝 .xls)
@@ -185,8 +185,8 @@ def _load_goodinfo_12q_epsrate(goodinfo_dir=None):
                         qkey = str(qc).replace("成長(%)", "")  # "26Q1"
                         out.setdefault(sid, {})[qkey] = float(val)
         except Exception as e:
-            print(f"⚠️ 讀取 {fname} 失敗: {e}")
-    print(f"📂 GoodInfo 12QEPSRate: {len(out)} 檔")
+            _log_print(logger, f"⚠️ 讀取 {fname} 失敗: {e}")
+    _log_print(logger, f"📂 GoodInfo 12QEPSRate: {len(out)} 檔")
     return out
 
 
@@ -261,7 +261,8 @@ _TWSE_REALTIME_BATCH_SIZE = 50   # 【V0.9.5-info3】batch 10→50（fetch_price
 
 
 def _fetch_twse_realtime_batch(stock_ids: List[str],
-                                progress_callback=None) -> pd.DataFrame:
+                                progress_callback=None,
+                                logger: GuiLogger = None) -> pd.DataFrame:
     """
     批次抓取台灣證券交易所即時股價（TWSE / TPEx 即時資訊）。
     完全取代 FinMind TaiwanStockPrice，實現【免費、無額度限制】的即時股價。
@@ -364,10 +365,10 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
                     # → 改 3.0s / 8.0s / 15.0s 拉長退避
                     wait_sec = [3.0, 8.0, 15.0][attempt] if attempt < 3 else 15.0
                     if attempt < max_retries - 1:
-                        print(f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}、{prefix}，重試 {attempt+1}/{max_retries}）：{type(e).__name__} - 等 {wait_sec}s")
+                        _log_print(logger, f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}、{prefix}，重試 {attempt+1}/{max_retries}）：{type(e).__name__} - 等 {wait_sec}s")
                         time.sleep(wait_sec)
                     else:
-                        print(f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}、{prefix}，放棄）：{type(e).__name__}: {e}")
+                        _log_print(logger, f"⚠️ TWSE API 失敗（批{batch_idx+1}/{n_batches}、{prefix}，放棄）：{type(e).__name__}: {e}")
             return []
 
         # Step 1: 先打 tse_
@@ -403,14 +404,14 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
                 except Exception as e:
                     wait_sec = [2.0, 5.0][attempt] if attempt < 2 else 5.0
                     if attempt < 1:
-                        print(f"⚠️ TWSE API otc fallback 失敗（重試 {attempt+1}/2）：{type(e).__name__} - 等 {wait_sec}s")
+                        _log_print(logger, f"⚠️ TWSE API otc fallback 失敗（重試 {attempt+1}/2）：{type(e).__name__} - 等 {wait_sec}s")
                         time.sleep(wait_sec)
                     else:
-                        print(f"⚠️ TWSE API otc fallback 失敗（放棄）：{type(e).__name__}: {e}")
+                        _log_print(logger, f"⚠️ TWSE API otc fallback 失敗（放棄）：{type(e).__name__}: {e}")
                         msg_otc = []
         elif missing_codes:
             # tse 整批失敗（missing > 90%）→ 不打 otc（otc 也會被擋）
-            print(f"⚠️ TWSE tse 整批失敗（{len(missing_codes)}/{len(batch_codes)}）→ 跳過 otc fallback")
+            _log_print(logger, f"⚠️ TWSE tse 整批失敗（{len(missing_codes)}/{len(batch_codes)}）→ 跳過 otc fallback")
 
         all_msg = msg_tse + msg_otc
 
@@ -566,7 +567,8 @@ def _parse_roc_year(year_str: str) -> int:
 
 def _fetch_finmind_prices_batch(stock_ids: List[str],
                                 progress_callback=None,
-                                force_refresh: bool = False) -> pd.DataFrame:
+                                force_refresh: bool = False,
+                                logger: GuiLogger = None) -> pd.DataFrame:
     """
     批次抓取股票現價（FinMind TaiwanStockPrice，支援 rate limit 回退）。
     每批 10 個，間隔 0.35s，超過 300/h 會被擋 → 等 61s 再試。
@@ -601,7 +603,7 @@ def _fetch_finmind_prices_batch(stock_ids: List[str],
         n_cleared = len(_FINMIND_PRICE_CACHE)
         _FINMIND_PRICE_CACHE.clear()
         # log 印在 console、不走 logger（背景 thread 也行）
-        print(f"🔄 [force_refresh] 已清空 {n_cleared} 檔 price cache，重新打 FinMind")
+        _log_print(logger, f"🔄 [force_refresh] 已清空 {n_cleared} 檔 price cache，重新打 FinMind")
 
     rows = []
     end_date = datetime.now().strftime("%Y-%m-%d")
@@ -665,7 +667,8 @@ def _fetch_finmind_dividend(stock_ids: List[str],
                              db_path: str = None,
                              progress_callback=None,
                              skip_remote: bool = False,
-                             cache_max_age_days: int = 30) -> pd.DataFrame:
+                             cache_max_age_days: int = 30,
+                             logger: GuiLogger = None) -> pd.DataFrame:
     """
     取得近 3 年股利（先查 DB，沒有的、或過期的才即時抓 FinMind 並寫回 DB）。
     - skip_remote=True: DB 沒有的回 None，不抓 FinMind（避免 rate limit）
@@ -810,7 +813,7 @@ def _fetch_finmind_dividend(stock_ids: List[str],
         # FinMind 402 額度已用完 → 記下錯誤、跳出 loop
         # 保留已抓到的 fetch_rows（不丢）
         _MS_PROGRESS["error"] = str(e)
-        print(f"❌ FinMind 額度錯誤：{e}（已抓 {len(fetch_rows)} 筆、部分寫入 DB）")
+        _log_print(logger, f"❌ FinMind 額度錯誤：{e}（已抓 {len(fetch_rows)} 筆、部分寫入 DB）")
     if fetch_rows:
         _upsert_div_history(db_path, fetch_rows)
         # 重新讀一次 DB 拿新資料（確保拿最新寫入的）
@@ -856,7 +859,8 @@ def _fetch_finmind_dividend(stock_ids: List[str],
                  f"{current_year - 2}現金殖利率_goodinfo", f"{current_year - 2}股票殖利率_goodinfo"])
 
 def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = None,
-                                  progress_callback=None, batch_size: Optional[int] = None) -> int:
+                                  progress_callback=None, batch_size: Optional[int] = None,
+                                  logger: GuiLogger = None) -> int:
     """
     背景抓取全市場股利寫入 DB（手動啟動用）。
 
@@ -903,7 +907,7 @@ def _background_fetch_all_dividend(stock_ids: List[str], db_path: str = None,
             data = _finmind_get("TaiwanStockDividend", code, start_date, end_date)
         except RuntimeError as e:
             # FinMind 402 額度用完 → 停止 loop、保留已抓的
-            print(f"❌ {e}")
+            _log_print(logger, f"❌ {e}")
             quota_exceeded = True
             break
         for rec in data:

@@ -30,6 +30,16 @@ import requests
 from openpyxl.utils import get_column_letter
 
 from .config import StrategyConfig, GuiLogger, build_session, VERSION
+
+
+# ==========================================================
+# 【V1.1.4b-print-to-logger】logger 路由 helper
+# ==========================================================
+def _log_print(logger, msg: str) -> None:
+    if logger is not None:
+        logger.log(msg)
+    else:
+        print(msg)
 from .fetch_market import (
     fetch_prices,
     fetch_revenue_latest,
@@ -273,27 +283,27 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         logger.log("=" * 60)
 
         # ========== DEBUG: 基本面資料診斷 ==========
-        print("\n" + "=" * 60)
-        print("🔍 [DEBUG] 基本面資料合併後診斷")
-        print("=" * 60)
+        _log_print(logger, "\n" + "=" * 60)
+        _log_print(logger, "🔍 [DEBUG] 基本面資料合併後診斷")
+        _log_print(logger, "=" * 60)
 
-        print(f"\n📊 df_sel 總筆數: {len(df_sel)}")
-        print(f"📊 有營收YoY的筆數: {df_sel['營收YoY(%)'].notna().sum()}")
-        print(f"📊 有EPS本期(非ETF)的筆數: {df_sel['EPS本期'].notna().sum()}")
-        print(f"📊 有EPSYoY_raw的筆數: {df_sel['EPSYoY_raw'].notna().sum()}")
+        _log_print(logger, f"\n📊 df_sel 總筆數: {len(df_sel)}")
+        _log_print(logger, f"📊 有營收YoY的筆數: {df_sel['營收YoY(%)'].notna().sum()}")
+        _log_print(logger, f"📊 有EPS本期(非ETF)的筆數: {df_sel['EPS本期'].notna().sum()}")
+        _log_print(logger, f"📊 有EPSYoY_raw的筆數: {df_sel['EPSYoY_raw'].notna().sum()}")
 
         # 顯示前5筆有EPS資料的股票
         eps_notna = df_sel[df_sel['EPS本期'].notna()].head(5)
         if len(eps_notna) > 0:
-            print(f"\n📋 有EPS資料的前5檔股票:")
+            _log_print(logger, f"\n📋 有EPS資料的前5檔股票:")
             for idx, row in eps_notna.iterrows():
-                print(
+                _log_print(logger, 
                     f"   {row['股票代號']} {row.get('公司名稱_來源', '')} | EPS: {row.get('EPS本期', 'N/A')} | EPS YoY: {row.get('EPSYoY_顯示(%)', 'N/A')}%")
         else:
-            print(f"\n⚠️ 沒有任何股票有 EPS 資料！")
-            print(f"   請檢查 fetch_eps_latest 函數是否正常運作。")
+            _log_print(logger, f"\n⚠️ 沒有任何股票有 EPS 資料！")
+            _log_print(logger, f"   請檢查 fetch_eps_latest 函數是否正常運作。")
 
-        print("\n" + "=" * 60 + "\n")
+        _log_print(logger, "\n" + "=" * 60 + "\n")
         # ========== DEBUG 結束 ==========
 
 

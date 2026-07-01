@@ -4,7 +4,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1.4-print-to-logger
-最後更新: 2026-07-02 00:17 (Asia/Taipei)
+最後更新: 2026-07-02 00:46 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -54,6 +54,94 @@ Python 版本: 3.8+
 - backtest.py 還有 1 個（docstring example）
 - config.py PrintLogger 還有 5 個 print()（保留、CLI 模式用）
 - StockTool.py 還有 6 個 print()（line 5214-5266、GUI console fallback 路徑）
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【v1.1.4b print-to-logger 第二階段】2026-07-02 00:50 (William 00:35 截圖反映仍有 print)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-07-02 00:35 截圖反映：
+  - 「還是有以下這些 messages 從 pycharm 的 run console 輸出」
+  - 列出 [📡 TWSE MIS 即時股價、2381 檔...]、[⚠️ TWSE tse 整批失敗]×20、[📂 GoodInfo 12QEPSRate: 1964]、[🔍 [DEBUG] calculate_simple_score 診斷]... 進 PyCharm
+
+【第一階段沒覆蓋的範圍】
+- fetch_market.py 內部 helper 函式：
+  - _load_goodinfo_12q_epsrate (7 print)
+  - _fetch_twse_realtime_batch (5 print)
+  - _fetch_finmind_prices_batch (1 print)
+  - _fetch_finmind_dividend (1 print)
+  - _background_fetch_all_dividend (1 print)
+  - _query_twse (nested, 2 print)
+- scoring.py calculate_simple_score (26 print) ← DEBUG 區塊
+- pipeline.py run_pipeline (12 print) ← DEBUG 區塊
+- etf.py fetch_etf_top10_holdings (1 print)
+- StockTool.py _do() / _ms_run_selection (7 print) ← GUI console fallback
+- StockTool.py 直接呼叫 fetch_prices (2 處) ← 沒傳 logger
+- backtest.py get_codes_for_period lambda (1 處) ← 沒傳 logger
+
+【本版修法】第二階段
+- fetch_market.py：
+  - 6 個 helper 函式 signature 加 logger: GuiLogger = None
+  - 函式內 + nested _query_twse 內 print() 換成 _log_print(logger, msg)
+- etf.py：
+  - fetch_etf_top10_holdings signature 加 logger
+  - 1 個 print() 換成 _log_print
+- scoring.py：
+  - calculate_simple_score signature 加 logger
+  - 26 個 print() 換成 _log_print
+  - 加 _log_print helper
+- pipeline.py：
+  - run_pipeline 已有 logger 參數
+  - 12 個 print() 換成 _log_print
+  - 加 _log_print helper
+- StockTool.py：
+  - _do() / _ms_run_selection 內 7 個 print() 換成 self.logger.log / self.logger.error
+  - 2 個 get_or_fetch lambda 加 self.logger 傳給 fetch_prices
+  - 1 個直接呼叫 fetch_prices 加 self.logger 參數（line 4870 / 6340）
+- backtest.py：
+  - get_codes_for_period 的 get_or_fetch lambda 加 logger 傳給 fetch_prices
+
+【closure 機制】nested function _query_twse
+- _query_twse 是 _fetch_twse_realtime_batch 內的 nested function
+- 沒顯式加 logger 參數（靠 Python closure）
+- outer 函式有 logger 參數、nested 函式 reference 自動 closure 找到
+
+【既有測試修】tests/test_fetch_prices_fallback_diag.py
+- test_version_bumped_past_v1_1_2: 放寬到 v1.1.3 OR v1.1.4 系列
+  - 原本 hardcode v1.1.3、升到 v1.1.4 後破
+  - 改成 v1.1.3 或 v1.1.4 都接受
+
+【新測試】tests/test_helper_logger_routing.py（8 個）
+- 5 個 fetch_market helper 都有 logger 參數
+- fetch_prices 沒被破壞
+- _log_print helper 在 fetch_market / scoring / pipeline 都有
+- calculate_simple_score 接受 logger
+- StockTool.py 7 個 self.logger.log/error（不再有 print()）
+- 所有 fetch_xxx 呼叫都傳 logger
+
+【驗證】616 passed（原本 600 + 第一階段 8 + 第二階段 8 = 616）
+- 0 failed
+- 2 既有的時間敏感 test 跳過
+
+【version 同步】
+- VERSION 保持 v1.1.4-print-to-logger（第一階段已升、第二階段延續）
+- App title / 啟動 log 自動改
+
+【不變項】
+- PrintLogger 保留（CLI 模式不破）
+- _log_print(None, ...) fallback print()（fetch_xxx 不傳 logger 時仍 work）
+- API 行為、cache 邏輯完全不動
+- 既有測試邏輯完全不動（只修版本檢查的 hardcode）
+
+【完全 clean 進度】
+✅ fetch_prices / fetch_revenue_latest / fetch_eps_latest：3 主函式 print() 全清
+✅ fetch_market.py 6 個 helper：print() 全清
+✅ scoring.py calculate_simple_score：26 print 全清
+✅ pipeline.py run_pipeline：12 print 全清
+✅ etf.py fetch_etf_top10_holdings：1 print 清
+✅ StockTool.py _do / _ms_run_selection：7 print 全清
+✅ 所有 fetch_xxx 呼叫處：都傳 logger
+⏳ PrintLogger：保留（CLI 用、5 個 print() 是 by design）
+⏳ config.py：保留（PrintLogger 內）
 
 【不變項】
 - PrintLogger 保留（CLI 模式不破）
@@ -4842,7 +4930,7 @@ class StrategyGUI(tk.Tk):
             try:
                 _s = build_session()
                 # get_or_fetch 內部會判斷 meta last_update == today
-                df = get_or_fetch("price", lambda: fetch_prices(_s, self.cfg), self.logger)
+                df = get_or_fetch("price", lambda: fetch_prices(_s, self.cfg, self.logger), self.logger)
                 self.after(0, lambda: self._on_bg_price_done(df, source="啟動時自動"))
             except Exception as e:
                 self.after(0, lambda err=str(e): self._on_bg_price_err(err, source="啟動時自動"))
@@ -4867,7 +4955,7 @@ class StrategyGUI(tk.Tk):
             try:
                 _s = build_session()
                 # 強制重抓：直接呼叫 fetch_prices（不查 cache）
-                df = fetch_prices(_s, self.cfg)
+                df = fetch_prices(_s, self.cfg, self.logger)
                 # 寫回 cache（更新 meta last_update = today）
                 save_cache(get_cache_file("price"), df)
                 self.after(0, lambda: self._on_bg_price_done(df, source="手動重抓"))
@@ -5264,7 +5352,7 @@ class StrategyGUI(tk.Tk):
                             if _is_cache_fresh(p):
                                 try:
                                     price_df = pd.read_excel(p, sheet_name="data", engine="openpyxl")
-                                    print(f"✅ 讀 price cache (last_update={pd.read_excel(p, sheet_name='meta', engine='openpyxl').loc[0, 'last_update']}): {len(price_df)} 筆")
+                                    self.logger.log(f"✅ 讀 price cache (last_update={pd.read_excel(p, sheet_name='meta', engine='openpyxl').loc[0, 'last_update']}): {len(price_df)} 筆")
                                     break
                                 except Exception:
                                     pass
@@ -5272,14 +5360,14 @@ class StrategyGUI(tk.Tk):
                                 # cache 過期 → 走 get_or_fetch 重抓（會自動寫回 cache）
                                 try:
                                     _s = build_session()
-                                    price_df = get_or_fetch("price", lambda: fetch_prices(_s, self.cfg), self.logger)
-                                    print(f"♻️ price cache 過期 → 重抓 {len(price_df)} 筆")
+                                    price_df = get_or_fetch("price", lambda: fetch_prices(_s, self.cfg, self.logger), self.logger)
+                                    self.logger.log(f"♻️ price cache 過期 → 重抓 {len(price_df)} 筆")
                                     break
                                 except Exception as _e:
-                                    print(f"⚠️ price 重抓失敗：{_e} → fallback 讀舊 cache")
+                                    self.logger.log(f"⚠️ price 重抓失敗：{_e} → fallback 讀舊 cache")
                                     try:
                                         price_df = pd.read_excel(p, sheet_name="data", engine="openpyxl")
-                                        print(f"✅ 讀 price cache (舊): {len(price_df)} 筆")
+                                        self.logger.log(f"✅ 讀 price cache (舊): {len(price_df)} 筆")
                                         break
                                     except Exception:
                                         pass
@@ -5288,7 +5376,7 @@ class StrategyGUI(tk.Tk):
                         if os.path.exists(p):
                             try:
                                 revenue_df = pd.read_excel(p, sheet_name="data", engine="openpyxl")
-                                print(f"✅ 讀 revenue cache: {len(revenue_df)} 筆")
+                                self.logger.log(f"✅ 讀 revenue cache: {len(revenue_df)} 筆")
                                 break
                             except Exception:
                                 pass
@@ -5297,7 +5385,7 @@ class StrategyGUI(tk.Tk):
                         if os.path.exists(p):
                             try:
                                 eps_df = pd.read_excel(p, sheet_name="data", engine="openpyxl")
-                                print(f"✅ 讀 eps cache: {len(eps_df)} 筆")
+                                self.logger.log(f"✅ 讀 eps cache: {len(eps_df)} 筆")
                                 break
                             except Exception:
                                 pass
@@ -5316,7 +5404,7 @@ class StrategyGUI(tk.Tk):
                 import traceback
                 tb = traceback.format_exc()
                 # 完整訊息寫到主 console（背景 thread 也能輸出）
-                print(f"[手動選股失敗] {e}\n{tb}")
+                self.logger.error(f"❌ [手動選股失敗] {e}\n{tb}")
                 err_msg = f"❌ 選股失敗：{e}\n{tb.splitlines()[-1] if tb else ''}"
                 self._ms_poll_running = False
                 self.after(0, lambda msg=err_msg: self._ms_status.set(msg))
@@ -6337,7 +6425,7 @@ class StrategyGUI(tk.Tk):
         # cache 沒資料 → try fetch_prices 抓一次（【V0.9.5-etf-session-fix】改用 build_session()）
         try:
             _s = build_session()
-            df = fetch_prices(_s, self.cfg)
+            df = fetch_prices(_s, self.cfg, self.logger)
             if df is not None and not df.empty:
                 save_cache(get_cache_file("price"), df)
             return df if df is not None else pd.DataFrame()

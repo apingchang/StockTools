@@ -494,7 +494,7 @@ def run_walk_forward(cfg: StrategyConfig, logger: GuiLogger, s: requests.Session
 
 
 def get_codes_for_period(s, cfg, start_date, end_date, logger):
-    from_cache = get_or_fetch("price", lambda: fetch_prices(s, cfg), logger)
+    from_cache = get_or_fetch("price", lambda: fetch_prices(s, cfg, logger), logger)
     codes = from_cache["股票代號"].dropna().astype(str).str.strip().tolist()
     return codes[:cfg.top_n_for_tech]
 

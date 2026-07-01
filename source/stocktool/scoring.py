@@ -25,6 +25,16 @@ import pandas as pd
 import numpy as np
 
 from .config import StrategyConfig, GuiLogger
+
+
+# ==========================================================
+# 【V1.1.4b-print-to-logger】logger 路由 helper
+# ==========================================================
+def _log_print(logger, msg: str) -> None:
+    if logger is not None:
+        logger.log(msg)
+    else:
+        print(msg)
 from .fetch_market import (
     fetch_prices,
     fetch_revenue_latest,
@@ -465,28 +475,28 @@ def calculate_enhanced_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFr
     return calculate_multi_factor_score(df, cfg)
 
 
-def calculate_simple_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFrame:
+def calculate_simple_score(df: pd.DataFrame, cfg: StrategyConfig, logger: GuiLogger = None) -> pd.DataFrame:
     df = df.copy()
 
     df["PE"] = df["PE"].replace([float("inf"), -float("inf")], pd.NA)
     df["EPSYoY_raw"] = df["EPSYoY_raw"].replace([float("inf"), -float("inf")], pd.NA)
 
     # ========== DEBUG: 簡易評分診斷 ==========
-    print("\n" + "=" * 60)
-    print("🔍 [DEBUG] calculate_simple_score 診斷")
-    print("=" * 60)
+    _log_print(logger, "\n" + "=" * 60)
+    _log_print(logger, "🔍 [DEBUG] calculate_simple_score 診斷")
+    _log_print(logger, "=" * 60)
 
-    print(f"\n📊 原始資料筆數: {len(df)}")
-    print(f"📊 有營收YoY資料的筆數: {df['營收YoY(%)'].notna().sum()}")
-    print(f"📊 有EPS本期資料的筆數: {df['EPS本期'].notna().sum()}")
-    print(f"📊 有EPSYoY_raw資料的筆數: {df['EPSYoY_raw'].notna().sum()}")
-    print(f"📊 有PE資料的筆數: {df['PE'].notna().sum()}")
+    _log_print(logger, f"\n📊 原始資料筆數: {len(df)}")
+    _log_print(logger, f"📊 有營收YoY資料的筆數: {df['營收YoY(%)'].notna().sum()}")
+    _log_print(logger, f"📊 有EPS本期資料的筆數: {df['EPS本期'].notna().sum()}")
+    _log_print(logger, f"📊 有EPSYoY_raw資料的筆數: {df['EPSYoY_raw'].notna().sum()}")
+    _log_print(logger, f"📊 有PE資料的筆數: {df['PE'].notna().sum()}")
 
-    print(f"\n⚙️ 目前門檻設定:")
-    print(f"   simple_min_rev_yoy = {cfg.simple_min_rev_yoy}")
-    print(f"   simple_min_eps_yoy = {cfg.simple_min_eps_yoy}")
-    print(f"   simple_min_eps = {cfg.simple_min_eps}")
-    print(f"   simple_max_pe = {cfg.simple_max_pe}")
+    _log_print(logger, f"\n⚙️ 目前門檻設定:")
+    _log_print(logger, f"   simple_min_rev_yoy = {cfg.simple_min_rev_yoy}")
+    _log_print(logger, f"   simple_min_eps_yoy = {cfg.simple_min_eps_yoy}")
+    _log_print(logger, f"   simple_min_eps = {cfg.simple_min_eps}")
+    _log_print(logger, f"   simple_max_pe = {cfg.simple_max_pe}")
     # ========== DEBUG 結束 ==========
 
     mask = pd.Series([True] * len(df))
@@ -508,36 +518,36 @@ def calculate_simple_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFram
         mask = mask & pe_ok
 
     # ========== DEBUG: 門檻通過數量 ==========
-    print(f"\n✅ 各門檻通過數量:")
+    _log_print(logger, f"\n✅ 各門檻通過數量:")
     if cfg.simple_min_rev_yoy > -998:
         rev_pass = (df["營收YoY(%)"].fillna(cfg.simple_min_rev_yoy - 1) >= cfg.simple_min_rev_yoy).sum()
-        print(f"   營收門檻 (>= {cfg.simple_min_rev_yoy}%): {rev_pass} 檔")
+        _log_print(logger, f"   營收門檻 (>= {cfg.simple_min_rev_yoy}%): {rev_pass} 檔")
     else:
-        print(f"   營收門檻: 未啟用")
+        _log_print(logger, f"   營收門檻: 未啟用")
 
     if cfg.simple_min_eps_yoy > -998:
         eps_yoy_pass = (
                     (df["EPSYoY_raw"].fillna(cfg.simple_min_eps_yoy / 100 - 1) * 100) >= cfg.simple_min_eps_yoy).sum()
-        print(f"   EPS YoY 門檻 (>= {cfg.simple_min_eps_yoy}%): {eps_yoy_pass} 檔")
+        _log_print(logger, f"   EPS YoY 門檻 (>= {cfg.simple_min_eps_yoy}%): {eps_yoy_pass} 檔")
     else:
-        print(f"   EPS YoY 門檻: 未啟用")
+        _log_print(logger, f"   EPS YoY 門檻: 未啟用")
 
     if cfg.simple_min_eps > -998:
         eps_pass = (df["EPS本期"].fillna(cfg.simple_min_eps - 1) >= cfg.simple_min_eps).sum()
-        print(f"   EPS 門檻 (>= {cfg.simple_min_eps}元): {eps_pass} 檔")
+        _log_print(logger, f"   EPS 門檻 (>= {cfg.simple_min_eps}元): {eps_pass} 檔")
     else:
-        print(f"   EPS 門檻: 未啟用")
+        _log_print(logger, f"   EPS 門檻: 未啟用")
 
     if cfg.simple_max_pe < 998:
         pe_pass = (df["PE"].fillna(cfg.simple_max_pe + 1) <= cfg.simple_max_pe).sum()
-        print(f"   PE 門檻 (<= {cfg.simple_max_pe}倍): {pe_pass} 檔")
+        _log_print(logger, f"   PE 門檻 (<= {cfg.simple_max_pe}倍): {pe_pass} 檔")
     else:
-        print(f"   PE 門檻: 未啟用")
+        _log_print(logger, f"   PE 門檻: 未啟用")
 
-    print(f"\n🎯 最終通過所有門檻的股票數量: {mask.sum()} 檔")
+    _log_print(logger, f"\n🎯 最終通過所有門檻的股票數量: {mask.sum()} 檔")
 
     if mask.sum() == 0 and len(df) > 0:
-        print(f"\n⚠️ 前5筆未通過股票的診斷:")
+        _log_print(logger, f"\n⚠️ 前5筆未通過股票的診斷:")
         failed_df = df[~mask].head(5)
         for idx, row in failed_df.iterrows():
             code = row.get("股票代號", "N/A")
@@ -546,7 +556,7 @@ def calculate_simple_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFram
             eps_yoy_raw = row.get("EPSYoY_raw", "N/A")
             eps = row.get("EPS本期", "N/A")
             pe = row.get("PE", "N/A")
-            print(f"   {code} {name} | 營收:{rev}% | EPS YoY:{eps_yoy_raw} | EPS:{eps} | PE:{pe}")
+            _log_print(logger, f"   {code} {name} | 營收:{rev}% | EPS YoY:{eps_yoy_raw} | EPS:{eps} | PE:{pe}")
     # ========== DEBUG 結束 ==========
 
     rev_score = df["營收YoY(%)"].fillna(0)
@@ -567,7 +577,7 @@ def calculate_simple_score(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFram
     df["Score"] = df["Score_raw"].where(mask, pd.NA)
     df["通過門檻"] = mask
 
-    print("\n" + "=" * 60 + " DEBUG 結束 " + "=" * 60 + "\n")
+    _log_print(logger, "\n" + "=" * 60 + " DEBUG 結束 " + "=" * 60 + "\n")
 
     return df
 
