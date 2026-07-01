@@ -72,7 +72,7 @@ def _run_manual_selection(
     # 優先用 pipeline 的 price_df；若為空才 fallback 抓全市場名單
     price_df = price_df.copy() if price_df is not None else pd.DataFrame()
     if price_df.empty:
-        base = _fetch_market_stock_list()
+        base = _fetch_market_stock_list(logger)
     else:
         if "公司名稱_來源" in price_df.columns:
             name_col = "公司名稱_來源"

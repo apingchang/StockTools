@@ -4,7 +4,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.1.4-print-to-logger
-最後更新: 2026-07-02 00:46 (Asia/Taipei)
+最後更新: 2026-07-02 01:07 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -58,6 +58,23 @@ Python 版本: 3.8+
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1.4b print-to-logger 第二階段】2026-07-02 00:50 (William 00:35 截圖反映仍有 print)
+【v1.1.4c print-to-logger 第三階段】2026-07-02 01:05 (William 01:02 反映「仍進 PyCharm」)
+  【第三輪根因】caller 仍寫成 `helper()` 沒傳 logger → 收到 logger=None → fallback print() 進 PyCharm
+  【具體位置（修了的）】
+  - pipeline.py 3 處 `calculate_simple_score(df_sel, cfg)` → 加 logger
+  - pipeline.py / fetch_market.py 內 `_fetch_market_stock_list()` → 加 logger
+  - pipeline.py / fetch_market.py 內 `_load_goodinfo_12q_epsrate()` → 加 logger
+  - StockTool.py 直接呼叫 `_load_goodinfo_12q_epsrate()` × 2 → 加 logger=self.logger
+  - StockTool.py 直接呼叫 `_fetch_market_stock_list()` × N → 加 logger=self.logger
+  - scoring.py 內的 call 也補上 logger
+  【函式 signature 改】_fetch_market_stock_list 加 logger 參數
+  【新測試】tests/test_logger_chain_through.py（4 個）
+  - 守住兩大 helper 有 logger 參數
+  - AST 掃所有 caller、保證 calculate_simple_score/_fetch_market_stock_list/_load_goodinfo_12q_epsrate 都傳 logger
+  - 主要模組只保留 _log_print 內的 print() fallback
+  【驗證】620 passed（原本 616 + 4 = 620）、0 failed
+  【commit】：本第二 + 第三階段一併 commit（ba1604e 的延伸）
+
 ════════════════════════════════════════════════════════════════════════════════
 【背景】William 2026-07-02 00:35 截圖反映：
   - 「還是有以下這些 messages 從 pycharm 的 run console 輸出」
@@ -1322,7 +1339,7 @@ console log 顯示「⚠️ 讀取 ...12QEPSRate.xls 失敗: `Import lxml` faile
 【根因】(V0.9.5-tab-split-phase3-C Fix10) _load_goodinfo_12q_epsrate 用 pd.read_html
 讀 GoodInfo 偽裝 xls 的 HTML 檔。pd.read_html 需要 lxml。
 - 沒裝 lxml → 每個檔案 raise ImportError
-- _load_goodinfo_12q_epsrate() 返回 0 檔
+- _load_goodinfo_12q_epsrate(logger=self.logger) 返回 0 檔
 - 整套 GoodInfo 覆蓋机制幹掉
 - 所有 EPSYoY = NaN、EPSYoY 顯示為 --
 
@@ -1330,7 +1347,7 @@ console log 顯示「⚠️ 讀取 ...12QEPSRate.xls 失敗: `Import lxml` faile
 1. 新增 requirements.txt （之前竟沒這個檔）
    - 加上 lxml>=4.9
    - 加註解說明 GoodInfo .xls 需要 lxml 才能 read_html
-2. _load_goodinfo_12q_epsrate() 開頭先 import lxml 檢查
+2. _load_goodinfo_12q_epsrate(logger=self.logger) 開頭先 import lxml 檢查
    - 缺 lxml → 印 friendly error message（告知 pip install -r requirements.txt）
    - 早退 return {}
 3. 順手重抓一次 cache、寫入正確資料 （1583/1968 檔有 YoY）

@@ -196,7 +196,7 @@ def _run_selection_only(cfg: StrategyConfig, logger: GuiLogger):
     if cfg.use_enhanced_score:
         df_sel = calculate_multi_factor_score(df_sel, cfg)
     else:
-        df_sel = calculate_simple_score(df_sel, cfg)
+        df_sel = calculate_simple_score(df_sel, cfg, logger)
 
     df_sel = df_sel.sort_values("Score", ascending=False).reset_index(drop=True)
     df_sel = _apply_strong_filter(df_sel, cfg, logger)
@@ -312,7 +312,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
             df_sel = calculate_multi_factor_score(df_sel, cfg)
             logger.log(f"   因子權重: 動能1M={cfg.factor_weight_mom1:.0%} 動能3M={cfg.factor_weight_mom3:.0%} 動能6M={cfg.factor_weight_mom6:.0%} 營收={cfg.factor_weight_rev:.0%} EPS={cfg.factor_weight_eps:.0%}")
         else:
-            df_sel = calculate_simple_score(df_sel, cfg)
+            df_sel = calculate_simple_score(df_sel, cfg, logger)
 
         df_sel = df_sel.sort_values("Score", ascending=False).reset_index(drop=True)
         # V0.9.5-tab-split-phase3 B-2：套用強勢股過濾
@@ -377,7 +377,7 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         df_sel = calculate_multi_factor_score(df_sel, cfg)
         logger.log(f"   因子權重: 動能1M={cfg.factor_weight_mom1:.0%} 動能3M={cfg.factor_weight_mom3:.0%} 動能6M={cfg.factor_weight_mom6:.0%} 營收={cfg.factor_weight_rev:.0%} EPS={cfg.factor_weight_eps:.0%}")
     else:
-        df_sel = calculate_simple_score(df_sel, cfg)
+        df_sel = calculate_simple_score(df_sel, cfg, logger)
         w_rev = cfg.simple_score_weight_rev
         w_eps = cfg.simple_score_weight_eps
         w_div = cfg.simple_score_weight_div

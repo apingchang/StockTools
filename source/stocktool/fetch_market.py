@@ -200,7 +200,7 @@ FINMIND_BASE = "https://api.finmindtrade.com/api/v4/data"
 _MS_PROGRESS = {"stage": "", "done": 0, "total": 0, "msg": "", "error": ""}
 
 
-def _fetch_market_stock_list() -> pd.DataFrame:
+def _fetch_market_stock_list(logger: GuiLogger = None) -> pd.DataFrame:
     """
     從 TWSE / TPEx 抓全市場股票代號與名稱（當 pipeline 未執行時的 fallback）。
     回傳 DataFrame：[股票代號, 股票名稱]
@@ -1452,7 +1452,7 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig, logger: Gui
 
     # Fix10: GoodInfo 12QEPSRate 直接覆蓋 (更精準的同季 YoY)
     # "26Q1成長(%)" 是 GoodInfo 算好的 %，比 EPS相減÷base 還準
-    gi_12q = _load_goodinfo_12q_epsrate()
+    gi_12q = _load_goodinfo_12q_epsrate(logger=logger)
     quarter_key = f"{str(latest_year)[-2:]}Q{latest_q}"  # 2026Q1 -> "26Q1"
     if gi_12q:
         covered = 0
