@@ -73,6 +73,20 @@ _MS_PROGRESS: Dict[str, Any] = {}
 
 
 # ==========================================================
+# 【V1.1.4-print-to-logger】logger 路由 helper
+# ==========================================================
+# 之前子模組 print() 會跳到 terminal、進不到 GUI console widget
+# 修法：所有 print() 換成 _log_print(logger, msg)
+#   - 有 logger → 走 GuiLogger.log() → queue → GUI console
+#   - 沒 logger → fallback 到 print()（CLI 模式不破壞）
+def _log_print(logger, msg: str) -> None:
+    if logger is not None:
+        logger.log(msg)
+    else:
+        print(msg)
+
+
+# ==========================================================
 # 日期 / 數字工具
 # ==========================================================
 
@@ -1022,7 +1036,7 @@ def fetch_csv_requests(session: requests.Session, url: str, cfg: StrategyConfig,
 # Data fetchers
 # ==========================================================
 
-def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame:
+def fetch_prices(session: requests.Session, cfg: StrategyConfig, logger: GuiLogger = None) -> pd.DataFrame:
     """【V0.9.5-info3】2026-06-27 00:17 William 反映：
     「手動選股資料日期要最後收盤日期及收盤價格才對」
 
@@ -1058,21 +1072,21 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         # twse 失敗後靜默用空 DataFrame → full_list 變成只剩 tpex 部分
         # → cache 只有 ~1000 筆 → ETF Tab merge 後大部分顯示 --
         # 修法：retry 2 次、間隔 1.5s / 3.0s 拉長退避
-        print(f"⚠️ 讀取上市股價失敗：{e}")
+        _log_print(logger, f"⚠️ 讀取上市股價失敗：{e}")
         twse = pd.DataFrame()
         for attempt, wait_sec in enumerate([1.5, 3.0], start=1):
             try:
-                print(f"   ↻ twse retry {attempt}/2、等 {wait_sec}s")
+                _log_print(logger, f"   ↻ twse retry {attempt}/2、等 {wait_sec}s")
                 time.sleep(wait_sec)
                 twse_response = session.get(twse_url, timeout=cfg.timeout)
                 twse_response.raise_for_status()
                 twse = pd.DataFrame(twse_response.json())
-                print(f"   ✅ twse retry 成功：{len(twse)} 筆")
+                _log_print(logger, f"   ✅ twse retry 成功：{len(twse)} 筆")
                 break
             except Exception as e2:
-                print(f"   ⚠️ twse retry {attempt}/2 仍失敗：{e2}")
+                _log_print(logger, f"   ⚠️ twse retry {attempt}/2 仍失敗：{e2}")
         if twse.empty:
-            print("❌ twse STOCK_DAY_ALL 最後仍失敗、cache 可能不全！")
+            _log_print(logger, "❌ twse STOCK_DAY_ALL 最後仍失敗、cache 可能不全！")
 
     try:
         tpex_response = session.get(tpex_url, timeout=cfg.timeout)
@@ -1080,24 +1094,24 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
         tpex = pd.DataFrame(tpex_response.json())
     except Exception as e:
         # 【V1.1-etf-cache-completeness】同 twse、retry 2 次
-        print(f"⚠️ 讀取上櫃股價失敗：{e}")
+        _log_print(logger, f"⚠️ 讀取上櫃股價失敗：{e}")
         tpex = pd.DataFrame()
         for attempt, wait_sec in enumerate([1.5, 3.0], start=1):
             try:
-                print(f"   ↻ tpex retry {attempt}/2、等 {wait_sec}s")
+                _log_print(logger, f"   ↻ tpex retry {attempt}/2、等 {wait_sec}s")
                 time.sleep(wait_sec)
                 tpex_response = session.get(tpex_url, timeout=cfg.timeout)
                 tpex_response.raise_for_status()
                 tpex = pd.DataFrame(tpex_response.json())
-                print(f"   ✅ tpex retry 成功：{len(tpex)} 筆")
+                _log_print(logger, f"   ✅ tpex retry 成功：{len(tpex)} 筆")
                 break
             except Exception as e2:
-                print(f"   ⚠️ tpex retry {attempt}/2 仍失敗：{e2}")
+                _log_print(logger, f"   ⚠️ tpex retry {attempt}/2 仍失敗：{e2}")
         if tpex.empty:
-            print("❌ tpex 最後仍失敗、cache 可能不全！")
+            _log_print(logger, "❌ tpex 最後仍失敗、cache 可能不全！")
 
     if twse.empty and tpex.empty:
-        print("❌ 無法讀取任何股價資料")
+        _log_print(logger, "❌ 無法讀取任何股價資料")
         return pd.DataFrame()
 
     _twse_date_col = find_col(twse.columns, ["Date", "資料日期"])
@@ -1167,7 +1181,7 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
     all_codes = full_list["股票代號"].tolist()
 
     # Step 3: TWSE MIS 即時 API 抓全部（上市上櫃涵蓋、~30 批 × 0.1s ~3s）
-    print(f"📡 TWSE MIS 即時股價、{len(all_codes)} 檔...")
+    _log_print(logger, f"📡 TWSE MIS 即時股價、{len(all_codes)} 檔...")
     realtime_df = _fetch_twse_realtime_batch(all_codes, progress_callback=None)
     # realtime_df 欄位: 股票代號 / 現價 / 成交量_張 / data_date_raw (西元 "20260626")
 
@@ -1176,7 +1190,7 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
     # MIS 沒回的股（興櫃股）→ 用 STOCK_DAY_ALL / TPEx 補
     missing = merged[merged["現價"].isna()]["股票代號"].tolist()
     if missing:
-        print(f"⚠️ MIS 未覆蓋 {len(missing)} 檔 (興櫃股)、fallback 到 STOCK_DAY_ALL / TPEx")
+        _log_print(logger, f"⚠️ MIS 未覆蓋 {len(missing)} 檔 (興櫃股)、fallback 到 STOCK_DAY_ALL / TPEx")
         fallback = pd.concat([
             twse[["股票代號", "股價", "漲跌", "_raw_date", "_raw_volume"]],
             tpex[["股票代號", "股價", "漲跌", "_raw_date", "_raw_volume"]]
@@ -1214,15 +1228,15 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
             no_trade_only = sorted([c for c in still_missing if c in no_trade and c not in etf_like and c not in ky_like])
             other = sorted([c for c in still_missing
                             if c not in etf_like and c not in ky_like and c not in no_trade_only])
-            print(f"   ℹ️  fallback 後仍有 {len(still_missing)} 檔無股價：")
+            _log_print(logger, f"   ℹ️  fallback 後仍有 {len(still_missing)} 檔無股價：")
             if etf_like:
-                print(f"      • 衍生檔（權證/牛熊 02000X、TPEx ----）：{len(etf_like)} 檔 → {etf_like}")
+                _log_print(logger, f"      • 衍生檔（權證/牛熊 02000X、TPEx ----）：{len(etf_like)} 檔 → {etf_like}")
             if ky_like:
-                print(f"      • KY 類（無 STOCK_DAY_ALL 資料）：{len(ky_like)} 檔 → {ky_like}")
+                _log_print(logger, f"      • KY 類（無 STOCK_DAY_ALL 資料）：{len(ky_like)} 檔 → {ky_like}")
             if no_trade_only:
-                print(f"      • 當日無成交（TPEx 標 ----）：{len(no_trade_only)} 檔 → {no_trade_only[:10]}{'…' if len(no_trade_only) > 10 else ''}")
+                _log_print(logger, f"      • 當日無成交（TPEx 標 ----）：{len(no_trade_only)} 檔 → {no_trade_only[:10]}{'…' if len(no_trade_only) > 10 else ''}")
             if other:
-                print(f"      • 其他（建議手動確認）：{len(other)} 檔 → {other[:10]}{'…' if len(other) > 10 else ''}")
+                _log_print(logger, f"      • 其他（建議手動確認）：{len(other)} 檔 → {other[:10]}{'…' if len(other) > 10 else ''}")
 
     # Step 5: 整理欄位
     merged["現價"] = pd.to_numeric(merged["現價"], errors="coerce")
@@ -1260,7 +1274,7 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame
     return merged[["股票代號", "公司名稱_來源", "股價", "漲跌", "data_date", "成交量_張"]].reset_index(drop=True)
 
 
-def fetch_revenue_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame:
+def fetch_revenue_latest(session: requests.Session, cfg: StrategyConfig, logger: GuiLogger = None) -> pd.DataFrame:
     urls = ["https://mopsfin.twse.com.tw/opendata/t187ap05_L.csv",
             "https://mopsfin.twse.com.tw/opendata/t187ap05_O.csv"]
     rev = pd.concat([fetch_csv_requests(session, u, cfg) for u in urls], ignore_index=True)
@@ -1298,7 +1312,7 @@ def fetch_revenue_latest(session: requests.Session, cfg: StrategyConfig) -> pd.D
     return rev[["股票代號", "年月", "當月營收(億元)", "營收YoY(%)"]].drop_duplicates("股票代號").reset_index(drop=True)
 
 
-def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataFrame:
+def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig, logger: GuiLogger = None) -> pd.DataFrame:
     urls = ["https://mopsfin.twse.com.tw/opendata/t187ap14_L.csv",
             "https://mopsfin.twse.com.tw/opendata/t187ap14_O.csv"]
 
@@ -1308,7 +1322,7 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
             df = fetch_csv_requests(session, url, cfg)
             eps_list.append(df)
         except Exception as e:
-            print(f"⚠️ 讀取 {url} 失敗：{e}")
+            _log_print(logger, f"⚠️ 讀取 {url} 失敗：{e}")
 
     if not eps_list:
         return pd.DataFrame()
@@ -1321,7 +1335,7 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     eps_col = find_col(eps.columns, ["基本每股盈餘(元)", "基本每股盈餘", "每股盈餘"])
 
     if None in [code_col, year_col, q_col, eps_col]:
-        print(f"❌ 找不到必要欄位")
+        _log_print(logger, f"❌ 找不到必要欄位")
         return pd.DataFrame()
 
     eps = eps.rename(columns={
@@ -1359,7 +1373,7 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
     latest_count = int(latest_row['count'])
     coverage_pct = latest_count / max_count * 100
 
-    print(f"📊 EPS 最新季: {latest_year}Q{latest_q}（{latest_count}/{max_count} 筆，覆蓋率 {coverage_pct:.0f}%）")
+    _log_print(logger, f"📊 EPS 最新季: {latest_year}Q{latest_q}（{latest_count}/{max_count} 筆，覆蓋率 {coverage_pct:.0f}%）")
 
     # ========== V0.9.4 phase4: 寫入歷史庫 ==========
     # 每天都存最新一季，累積一年後 fetch_eps_latest 就能算 YoY
@@ -1374,9 +1388,9 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
         ]
         saved = _upsert_eps_history(cfg.eps_history_db, rows_to_save)
         stats = _eps_history_stats(cfg.eps_history_db)
-        print(f"💾 歷史庫: 本次存 {saved} 筆，總累計 {stats['total']} 筆 / {stats['periods']} 季")
+        _log_print(logger, f"💾 歷史庫: 本次存 {saved} 筆，總累計 {stats['total']} 筆 / {stats['periods']} 季")
     except Exception as e:
-        print(f"⚠️ 寫入歷史庫失敗（不影響本函式結果）：{e}")
+        _log_print(logger, f"⚠️ 寫入歷史庫失敗（不影響本函式結果）：{e}")
 
     # Fix9: eps["年度"] 還是民國年（原始 CSV）、latest_year 已經是西元年
     cur = eps[(eps["年度"] == latest_year - 1911) & (eps["季別"] == latest_q)][["股票代號", "EPS"]].rename(
@@ -1395,7 +1409,7 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
         prev = prev_from_csv.merge(prev_from_db, on="股票代號", how="outer", suffixes=("_csv", "_db"))
         prev["EPS去年"] = prev["EPS去年_csv"].combine_first(prev["EPS去年_db"])
         prev = prev[["股票代號", "EPS去年"]]
-        print(f"📂 去年同期 {prev_year}Q{latest_q}: CSV {len(prev_from_csv)} 筆 + 歷史庫 {len(prev_from_db)} 筆 → 合併 {len(prev)} 筆")
+        _log_print(logger, f"📂 去年同期 {prev_year}Q{latest_q}: CSV {len(prev_from_csv)} 筆 + 歷史庫 {len(prev_from_db)} 筆 → 合併 {len(prev)} 筆")
     else:
         prev = prev_from_csv
         if prev.empty:
@@ -1413,12 +1427,12 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
                         ["股票代號", "EPS去年"]
                     ]
                     prev["股票代號"] = prev["股票代號"].astype(str).str.strip()
-                    print(f"   GoodInfo Q4 全年 EPS fallback: {len(prev)} 檔有 {prev_year}Q4 EPS")
+                    _log_print(logger, f"   GoodInfo Q4 全年 EPS fallback: {len(prev)} 檔有 {prev_year}Q4 EPS")
                 else:
-                    print(f"⚠️ 去年同期 {prev_year}Q{latest_q} 沒有資料（CSV 無、歷史庫也無）→ YoY 將全 NA")
+                    _log_print(logger, f"⚠️ 去年同期 {prev_year}Q{latest_q} 沒有資料（CSV 無、歷史庫也無）→ YoY 將全 NA")
             else:
                 # Q1/Q2/Q3 不適用 Q4 全年 fallback → 不算 YoY、等 GoodInfo 覆蓋
-                print(f"⚠️ 去年同期 {prev_year}Q{latest_q} 沒有資料、不适用 Q4 全年 fallback（避免 Q1 vs 全年 误算）→ YoY 留空等 GoodInfo 覆蓋")
+                _log_print(logger, f"⚠️ 去年同期 {prev_year}Q{latest_q} 沒有資料、不适用 Q4 全年 fallback（避免 Q1 vs 全年 误算）→ YoY 留空等 GoodInfo 覆蓋")
 
     out = cur.merge(prev, on="股票代號", how="left")
 
@@ -1449,11 +1463,11 @@ def fetch_eps_latest(session: requests.Session, cfg: StrategyConfig) -> pd.DataF
                 out.loc[mask, "EPSYoY_顯示(%)"] = val
                 covered += int(mask.sum())
         total = out["EPSYoY_顯示(%)"].notna().sum()
-        print(f"📈 GoodInfo 12QEPSRate 覆蓋 {quarter_key}: {covered}/{len(out)} (總有 YoY: {total}/{len(out)})")
+        _log_print(logger, f"📈 GoodInfo 12QEPSRate 覆蓋 {quarter_key}: {covered}/{len(out)} (總有 YoY: {total}/{len(out)})")
 
     out["EPS季別"] = f"{latest_year}Q{latest_q}"
 
-    print(f"📊 EPS 計算結果: 本期 {len(out)} 筆，有 YoY 資料 {out['EPSYoY_raw'].notna().sum()} 筆")
+    _log_print(logger, f"📊 EPS 計算結果: 本期 {len(out)} 筆，有 YoY 資料 {out['EPSYoY_raw'].notna().sum()} 筆")
 
     return out[["股票代號", "EPS季別", "EPS本期", "EPSYoY_raw", "EPSYoY_顯示(%)"]].drop_duplicates(
         "股票代號").reset_index(drop=True)

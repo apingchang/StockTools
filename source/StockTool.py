@@ -1,12 +1,65 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1.3-no-double-score (2026-07-01 10:40)       ║
+║  台灣股市量化選股系統 v1.1.4-print-to-logger (2026-07-02 00:35)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1.3-no-double-score
-最後更新: 2026-07-02 00:04 (Asia/Taipei)
+Version: v1.1.4-print-to-logger
+最後更新: 2026-07-02 00:17 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【v1.1.4 print-to-logger】2026-07-02 00:35 (William 00:09 反映 message 進 terminal)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-07-02 00:09 反映：
+  - 「把股神 APP 的 output message 改成全部都從 program console 輸出」
+  - 「現在有些 message 是從 terminal 輸出的！」
+
+【問題根因】
+- 股神 App 架構：
+  - GuiLogger → 走 queue.Queue → 主執行緒讀出來 → 寫入 GUI console widget（Text）
+  - PrintLogger → 直接 print() 到 terminal（CLI 模式用）
+- 子模組（fetch_market.py、etf.py、backtest.py 等）混用 print() 和 logger.log()
+  - logger.log() → 走 queue → 進 GUI console ✅
+  - print() → 直接進 terminal / PyCharm Run 視窗 → 使用者看不到 ❌
+- fetch_market.py 有 50+ 個 print() 散落、都是警告/錯誤/進度訊息
+
+【本版修法】第一階段：fetch_market.py 三個主函式
+- 改 source/stocktool/fetch_market.py：
+  - 加 module-level helper _log_print(logger, msg)
+    - 有 logger → 走 logger.log()
+    - 沒 logger (None) → fallback print()（CLI 模式不破）
+  - 改 fetch_prices / fetch_revenue_latest / fetch_eps_latest 簽章加 logger 參數（預設 None、向後相容）
+  - 函式內 29 個 print() 全部換成 _log_print(logger, msg)
+- 改 source/stocktool/pipeline.py：
+  - 6 處 lambda 從「lambda: fetch_xxx(s, cfg)」改成「lambda: fetch_xxx(s, cfg, logger)」
+  - logger 透傳進 fetch_*
+
+【新測試】tests/test_fetch_market_logger_routing.py（8 個）
+- _log_print 路由 3 個：有 logger 用 logger、沒 logger fallback print、訊息內容正確
+- 函式簽章 3 個：fetch_prices / fetch_revenue_latest / fetch_eps_latest 都接受 logger
+- pipeline lambda 1 個：6 處都傳 logger
+- 向後相容 1 個：_log_print(None, msg) 不 crash
+
+【驗證】608 passed（原本 600 + 8 新增 = 608）
+
+【version 同步】
+- VERSION = "v1.1.3-v1.0-complete" → "v1.1.4-print-to-logger" (stocktool/config.py)
+- User-Agent: v1.1.3-no-double-score → v1.1.4-print-to-logger (etf.py 兩處)
+- App title / 啟動 log 自動改
+
+【待辦（下一版）】第二階段：etf.py / backtest.py / StockTool.py 殘留的 print()
+- etf.py 還有 1 個 print()（line 220 V0.9.5-etf-history SSR parse 失敗）
+- backtest.py 還有 1 個（docstring example）
+- config.py PrintLogger 還有 5 個 print()（保留、CLI 模式用）
+- StockTool.py 還有 6 個 print()（line 5214-5266、GUI console fallback 路徑）
+
+【不變項】
+- PrintLogger 保留（CLI 模式不破）
+- _log_print(None, ...) fallback print()（fetch_xxx 不傳 logger 時仍 work）
+- fetch_xxx() 沒 logger 參數時 → TypeError、這版要求傳 logger（已加預設 None）
+- API 行為、cache 邏輯完全不動
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════

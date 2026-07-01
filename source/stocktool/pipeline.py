@@ -114,15 +114,15 @@ def _run_selection_only(cfg: StrategyConfig, logger: GuiLogger):
     logger.log("=" * 60)
 
     logger.log("1) 取得股價資料...")
-    price = get_or_fetch("price", lambda: fetch_prices(s, cfg), logger)
+    price = get_or_fetch("price", lambda: fetch_prices(s, cfg, logger), logger)
     price = ensure_str_column(price, "股票代號")
 
     logger.log("2) 取得月營收...")
-    revenue = get_or_fetch("revenue", lambda: fetch_revenue_latest(s, cfg), logger)
+    revenue = get_or_fetch("revenue", lambda: fetch_revenue_latest(s, cfg, logger), logger)
     revenue = ensure_str_column(revenue, "股票代號")
 
     logger.log("3) 取得 EPS...")
-    eps_data = get_or_fetch("eps", lambda: fetch_eps_latest(s, cfg), logger)
+    eps_data = get_or_fetch("eps", lambda: fetch_eps_latest(s, cfg, logger), logger)
     eps_data = ensure_str_column(eps_data, "股票代號")
 
     logger.log("4) 合併基本面資料...")
@@ -204,15 +204,15 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     logger.log("=" * 60)
 
     logger.log("1) 取得股價資料...")
-    price = get_or_fetch("price", lambda: fetch_prices(s, cfg), logger)
+    price = get_or_fetch("price", lambda: fetch_prices(s, cfg, logger), logger)
     price = ensure_str_column(price, "股票代號")
 
     logger.log("2) 取得月營收...")
-    revenue = get_or_fetch("revenue", lambda: fetch_revenue_latest(s, cfg), logger)
+    revenue = get_or_fetch("revenue", lambda: fetch_revenue_latest(s, cfg, logger), logger)
     revenue = ensure_str_column(revenue, "股票代號")
 
     logger.log("3) 取得 EPS...")
-    eps_data = get_or_fetch("eps", lambda: fetch_eps_latest(s, cfg), logger)
+    eps_data = get_or_fetch("eps", lambda: fetch_eps_latest(s, cfg, logger), logger)
     eps_data = ensure_str_column(eps_data, "股票代號")
 
     logger.log("4) 合併基本面資料...")
