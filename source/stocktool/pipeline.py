@@ -364,19 +364,22 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
     # ==========================================================
 
     if cfg.use_enhanced_score:
-        df_sel_temp = calculate_multi_factor_score(df_sel, cfg)
+        df_sel = calculate_multi_factor_score(df_sel, cfg)
         logger.log(f"   因子權重: 動能1M={cfg.factor_weight_mom1:.0%} 動能3M={cfg.factor_weight_mom3:.0%} 動能6M={cfg.factor_weight_mom6:.0%} 營收={cfg.factor_weight_rev:.0%} EPS={cfg.factor_weight_eps:.0%}")
     else:
-        df_sel_temp = calculate_simple_score(df_sel, cfg)
+        df_sel = calculate_simple_score(df_sel, cfg)
         w_rev = cfg.simple_score_weight_rev
         w_eps = cfg.simple_score_weight_eps
         w_div = cfg.simple_score_weight_div
         w_pe = cfg.simple_score_weight_pe
         logger.log(f"   權重: 營收{w_rev:.0f}% / EPS{w_eps:.0f}% / 殖利率{w_div:.0f}% / PE{w_pe:.0f}%")
 
-    df_sel_temp = df_sel_temp.sort_values("Score", ascending=False).reset_index(drop=True)
-    # V0.9.5-tab-split-phase3 B-2：套用強勢股過濾
-    df_sel_temp = _apply_strong_filter(df_sel_temp, cfg, logger)
+    # 【V1.1-no-double-score】2026-07-01 修 P0：只算一次評分
+    # 原本：line 367 df_sel_temp 算一次、line 415 df_sel 又算一次（同一份原始 df_sel 算兩次）
+    # 改成：df_sel 算一次、df_sel_temp 只是 strong_filter 副本（拿來跑技術分析 top N）
+    df_sel = df_sel.sort_values("Score", ascending=False).reset_index(drop=True)
+    # V0.9.5-tab-split-phase3 B-2：套用強勢股過濾（給技術分析 top N 用、給評分輸出用 df_sel 不過濾）
+    df_sel_temp = _apply_strong_filter(df_sel, cfg, logger)
 
     logger.log(f"5) 抓取前 {cfg.top_n_for_tech} 檔股票的歷史日K...")
 
@@ -411,13 +414,8 @@ def run_pipeline(cfg: StrategyConfig, logger: GuiLogger):
         logger.log("❌ 無歷史資料，請檢查網路連線")
         return
 
-    if cfg.use_enhanced_score:
-        df_sel = calculate_multi_factor_score(df_sel, cfg)
-    else:
-        df_sel = calculate_simple_score(df_sel, cfg)
-
-    df_sel = df_sel.sort_values("Score", ascending=False).reset_index(drop=True)
-
+    # 【V1.1-no-double-score】2026-07-01 修 P0：刪掉重複的評分計算（line 367 已算過）
+    # df_sel 已在 line 367 算完評分 + sort，這裡直接用、不要再算一次
     strong_sel = df_sel[
         (df_sel["營收YoY(%)"] > cfg.strong_revenue_yoy) &
         (df_sel["EPS本期"] > 0) &

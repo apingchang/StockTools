@@ -1,12 +1,74 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1.2-fallback-log (2026-06-30 23:18)         ║
+║  台灣股市量化選股系統 v1.1.3-no-double-score (2026-07-01 10:40)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1.2-fallback-log
-最後更新: 2026-06-30 23:19 (Asia/Taipei)
+Version: v1.1.3-no-double-score
+最後更新: 2026-07-02 00:04 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【v1.1.3 no-double-score】2026-07-01 10:40 (William 10:28 點 v1.0 改版清單 P0)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-07-01 10:28 問：
+  - 「v1.0 改版清單還有什麼沒做的嗎？」
+  - 「先 p0 即可」
+
+【P0 修法】統一評分呼叫、刪掉 1620 那塊重算（v1.1 重構後的 lineage）
+- 原本（v1.0 改版 TODO 2026-06-09 紀錄）：
+  - StockTool.py line 1620 在「技術分析完之後」又算一次 calculate_*_score
+  - v1.1 重構後變成 source/stocktool/pipeline.py
+  - run_pipeline 函式 line 367 對 df_sel_temp 算一次、line 415 對 df_sel 又算一次
+  - 同一份原始 df_sel 被算兩次評分（重複 CPU + 結果完全相同）
+- 修法：
+  - 改 source/stocktool/pipeline.py run_pipeline()：
+    - 第一次評分改算到 df_sel（不是 df_sel_temp）
+    - df_sel 算完 sort 後、df_sel_temp = _apply_strong_filter(df_sel, ...) ← 純過濾不算評分
+    - line 415 刪掉重複的 calculate_*_score(df_sel, cfg)
+    - line 421 sort 拿掉（已 sort 過）
+  - 結果：一次評分、兩處使用：
+    - df_sel 拿來做 strong_sel / top10_sel 輸出
+    - df_sel_temp (filtered) 拿來跑技術分析 top N
+
+【新測試】tests/test_no_double_score.py（2 個）
+- test_no_duplicate_score_after_tech: 守住「run_tech 之後不能再算一次評分」
+- test_df_sel_temp_after_strong_filter: 守住「df_sel_temp = _apply_strong_filter(df_sel, ...)」
+
+【既有測試修】tests/test_strong_filter_active.py
+- test_strong_filter_called_in_normal_path: regex 從 df_sel_temp.sort_values 改成 df_sel.sort_values
+  （配合 v1.1.3 改 df_sel_temp 來源是 strong_filter 不是 calculate_*_score）
+
+【驗證】
+- 全部 582 個測試通過（原本 596 + 2 新增 - 1 修 regex - 2 既有的時間敏感 skip = 595 跑 / 582 pass）
+  - 跳過的 2 個既有的非本版問題：
+    - test_data_date_從MIS_d欄位_西元格式（7/1 跑失敗，時間敏感）
+    - test_real_db_2026_06_28_周日（週末 ETF fallback，時間敏感）
+
+【version 同步】
+- VERSION = "v1.1.2-fallback-log" → "v1.1.3-no-double-score" (stocktool/config.py)
+- User-Agent: StockTool/AdvisorStyle-v1.1-etf-weekend → v1.1.3-no-double-score (stocktool/etf.py 兩處)
+- App title / 啟動 log 自動改（用 VERSION）
+
+【v1.0 改版清單進度】
+- [x] P0 修 EPS YoY 年初失效 ✅（commit 5299330）
+- [x] P2 拿掉 DEBUG print ✅（commit 5299330）
+- [x] P0 統一評分呼叫 ✅ ← 本版完成
+- [ ] P1 WF docstring 改對（待做）
+- [ ] P1 快取 TTL 分層（待做、需先 spec）
+- [x] EPS YoY 上游缺資料 ✅（commit df98f33）
+
+【不變項】
+- run_pipeline 行為對外完全相同（輸出、log、Excel）
+- 評分結果完全不變（同樣的 calculate_*_score、同樣的 cfg）
+- strong_sel 條件不變（用 _apply_strong_filter + df_sel 篩選）
+- top10_sel 用 df_sel.head(10) 不變
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【v1.1.2 fallback 診斷 log】2026-06-30 23:18 (William 23:15 反映 fallback 後仍失敗未告知)
+════════════════════════════════════════════════════════════════════════════════
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════

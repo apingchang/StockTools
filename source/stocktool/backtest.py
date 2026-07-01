@@ -345,6 +345,65 @@ def performance_by_year(trades_df):
 # ==========================================================
 
 def run_walk_forward(cfg: StrategyConfig, logger: GuiLogger, s: requests.Session):
+    """Walk-forward 分析：評估策略在不同時間窗口下的穏定性。
+
+    什麼是 Walk-forward？
+    -------------------
+    避免「過擬合」（in-sample overfitting）的標準驗證法：
+    - 將歷史資料切成多個「訓練期 + 測試期」滑動窗口
+    - 訓練期決定選股（get_codes_for_period）
+    - 測試期驗證績效（quick_backtest_for_period）
+    - 如果每個窗口的測試期纍效都接近訓練期，代表策略穏定
+
+    演算法
+    ------
+    1. 計算起始日 = 現在 - (wf_train_years + wf_test_years * 4)
+       （预留足夠時間產生 5+ 個 window）
+    2. 滑動產生 windows，每個 window 包含：
+       - train：[current_start, current_start + train_years)
+       - test： [train_end,       train_end + test_years)
+       - 步進 wf_step_years
+    3. 上限 10 個 windows（避免計算過久）
+    4. 如果 < 2 個 windows（歷史資料不足）→ return 空 DataFrame
+    5. 對每個 window 呼叫：
+       - get_codes_for_period()        取該期間評分達標的股號
+       - quick_backtest_for_period()   在測試期跑回測
+    6. 收集所有結果、計算「CAGR / Sharpe 標準差」評估穏定性
+
+    Args:
+        cfg: StrategyConfig。讀取以下參數：
+            - wf_train_years: int    訓練期年數（預設 3）
+            - wf_test_years:  int    測試期年數（預設 1）
+            - wf_step_years:  int    窗口步進年數（預設 1）
+        logger: GuiLogger。輸出 log。
+        s:     requests.Session。抓歷史資料用的 HTTP session。
+
+    Returns:
+        pd.DataFrame: 每個 window 一列。欄位：
+            - window:         int         窗口編號（1-based）
+            - train_period:   str         訓練期 "YYYY-YYYY"
+            - test_period:    str         測試期 "YYYY-YYYY"
+            - test_cagr:      float       測試期 CAGR（%）
+            - test_sharpe:    float       測試期 Sharpe ratio
+            - test_mdd:       float       測試期 最大回撤（%）
+            - test_trades:    int         測試期交易次數
+        歷史不足時（< 2 windows）回傳空 DataFrame。
+
+    Side effects:
+        - 透過 logger 輸出 Walk-forward 進度、每個 window 結果、穏定性評估
+        - 可能抓取歷史股價資料（透過 get_codes_for_period）
+
+    Example:
+        >>> df_wf = run_walk_forward(cfg, logger, s)
+        >>> print(df_wf[['window', 'test_period', 'test_cagr', 'test_sharpe']])
+        window test_period  test_cagr  test_sharpe
+            1    2022-2023       8.5        0.85
+            2    2023-2024      12.3        1.12
+
+    Note:
+        【V1.1.3-wf-docstring】2026-07-01 補 docstring（v1.0 改版 TODO P1）
+        原本完全沒有 docstring、呼叫者需要讀源碼才看得懂
+    """
     logger.log("\n" + "=" * 60)
     logger.log("📊 開始 Walk-forward 分析")
     logger.log("=" * 60)

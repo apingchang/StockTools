@@ -103,15 +103,16 @@ def test_strong_filter_called_in_normal_path():
     # 找 use_top10_backtest 區塊之後的「正常回測模式」段
     # 第一個 return 在 use_top10_backtest 區塊內、第二段是正常回測
     # 找「logger.log(f"5) 抓取前」附近的代碼
+    # 【V1.1-no-double-score】原本找 df_sel_temp.sort_values、改成 df_sel.sort_values + df_sel_temp = _apply_strong_filter
     m = re.search(
-        r'df_sel_temp\.sort_values\("Score".*?logger\.log\(f"5\) 抓取前',
+        r'df_sel\.sort_values\("Score".*?logger\.log\(f"5\) 抓取前',
         content,
         re.DOTALL,
     )
     assert m, "❌ 找不到正常回測路徑"
     body = m.group(0)
 
-    assert "_apply_strong_filter(df_sel_temp" in body, (
+    assert "_apply_strong_filter(df_sel" in body, (
         "❌ 正常回測路徑沒套強勢股過濾！\n"
         "應在 sort 之後、head(top_n_for_tech) 之前呼叫"
     )

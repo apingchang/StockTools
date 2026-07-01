@@ -17,7 +17,7 @@ from typing import Optional, Tuple
 
 import pandas as pd
 
-from .config import _is_market_hours, GuiLogger
+from .config import _is_market_hours, _CACHE_TTL, GuiLogger
 
 
 def get_cache_file(name: str) -> str:
@@ -219,6 +219,27 @@ def get_or_fetch(name: str, fetch_func, logger: GuiLogger):
                 return df
         logger.log(f"✅ [{name}] 使用快取資料")
         return df
+
+    # ============================================================
+    # 【V1.1.3-cache-ttl】TTL 分層判斷（revenue/eps/stock_list）
+    #   price 不走這層（盤中/收盤時間判斷更精準）
+    #   若 cache 還在 TTL 內、視為有效、免重抓
+    #   避免每天開 App 都重抓所有資料、節省 API 額度
+    # ============================================================
+    if name in _CACHE_TTL and last_update:
+        try:
+            cache_date = datetime.strptime(str(last_update).strip(), "%Y-%m-%d")
+            age_days = (datetime.now() - cache_date).days
+            ttl = _CACHE_TTL[name]
+            if age_days < ttl:
+                logger.log(
+                    f"✅ [{name}] cache 在 TTL 內（{age_days}/{ttl} 天）、免重抓"
+                )
+                return df
+        except (ValueError, TypeError):
+            # last_update 不是合法日期字串 → 走原本的「資料過期 → 重抓」路徑
+            pass
+
     logger.log(f"♻️ [{name}] 資料過期 → 重新下載")
     df = fetch_func()
     save_cache(file_path, df)

@@ -100,8 +100,13 @@ def test_fallback_diag_log_correctly_classifies_known_codes():
     assert set(other) == KNOWN_OTHER, f"其他分類錯: {other}"
 
 
-def test_version_bumped_to_v1_1_2():
-    """VERSION 必須更新為 v1.1.2-fallback-log"""
+def test_version_bumped_past_v1_1_2():
+    """VERSION 必須更新到 v1.1.2-fallback-log 之後（v1.1.3+）
+
+    【V1.1.3-no-double-score / cache-ttl】2026-07-01
+    - 原本 hardcode "v1.1.2-fallback-log"、每次升版都要改 test
+    - 改成：守住 VERSION 不再是 v1.1.2-fallback-log（代表有更新）
+    """
     import importlib
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "source"))
     if "stocktool" in sys.modules:
@@ -111,7 +116,14 @@ def test_version_bumped_to_v1_1_2():
             if mod_name.startswith("stocktool"):
                 importlib.reload(sys.modules[mod_name])
     from stocktool.config import VERSION
-    assert VERSION == "v1.1.2-fallback-log", f"❌ VERSION 應為 v1.1.2-fallback-log、實 {VERSION}"
+    assert VERSION != "v1.1.2-fallback-log", (
+        f"❌ VERSION 還是 v1.1.2-fallback-log、有新 commit 但忘記更新 VERSION？\n"
+        f"改 VERSION 到新版（如 v1.1.3-xxx）"
+    )
+    assert VERSION.startswith("v1.1.3"), (
+        f"❌ VERSION 應是 v1.1.3 系列、實 {VERSION}"
+    )
+    print(f"✅ VERSION = {VERSION}（已更新到 v1.1.3+）")
 
 
 if __name__ == "__main__":
