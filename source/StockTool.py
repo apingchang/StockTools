@@ -1,12 +1,47 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1.5b-fetch-missing-logger (2026-07-02 21:25) ║
+║  台灣股市量化選股系統 v1.1.5c-force-refresh-shared (2026-07-02 22:18) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1.5b-fetch-missing-logger
-最後更新: 2026-07-02 21:26 (Asia/Taipei)
+Version: v1.1.5c-force-refresh-shared
+最後更新: 2026-07-02 22:18 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【v1.1.5c force-refresh-shared】2026-07-02 22:18 (William 22:14 「系統選股 tab 加重新抓股價」)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-07-02 22:14 反映：
+  - 「系統選股 tab 中的左欄增加「重新抓股價」 button」
+
+【原狀】
+  - 手動選股 tab 已有「🔄 重新抓股價」按鈕 (V0.9.5-alpha 2nd commit)
+  - 系統選股 tab 沒有、但有時系統選股跑完後資料舊、需要重抓
+  - 只能切到手動選股 tab 重抓 → 不順
+
+【修法】抽共用方法、避免 code duplication
+  - _force_refresh_price(source_label) 共用背景 thread 重抓邏輯
+  - _ms_force_refresh_price() 變成 wrapper、 source_label = "手動重抓"
+  - 系統選股 tab 進 _build_ui 、在「▶ 執行系統選股」下加：
+    ttk.Button(btn_frame, text="🔄 重新抓股價",
+               command=lambda: self._force_refresh_price("系統重抓"))
+  - source_label 傳到 _on_bg_price_done / _on_bg_price_err
+  - status bar 顯示「🔄 系統重抓股價中...」 （可追查來源）
+
+【新測試】tests/test_force_refresh_shared.py (7 個)
+  - test_force_refresh_price_method_exists：共用方法存在
+  - test_ms_force_refresh_delegates_to_shared：手動選股 wrapper 呼叫共用
+  - test_system_tab_has_refresh_price_button：系統選股 tab 有按鈕 + source_label
+  - test_ms_tab_refresh_price_button_still_exists：backward compat
+  - test_force_refresh_passes_source_to_done_callback：source_label 傳遞
+  - test_force_refresh_runs_in_background_thread：不 block UI
+  - test_force_refresh_checks_bg_fetching_flag：防止重複打 FinMind
+
+【副帶修】tests/test_fetch_prices_fallback_diag.py
+  - VERSION 修為 v1.1.x 系列 (原本寫死 v1.1.3/v1.1.4、隨版本演進需修為會員)
+
+【驗證】669 passed (659 + 7 new + 1 modified + 2 pre-existing fail 與本版無關)
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -105,8 +140,8 @@ Python 版本: 3.8+
 【驗證】608 passed（原本 600 + 8 新增 = 608）
 
 【version 同步】
-- VERSION = "v1.1.5-holiday-console-log" → "v1.1.5b-fetch-missing-logger" (stocktool/config.py)
-- User-Agent: "v1.1.5-holiday-console-log" → "v1.1.5b-fetch-missing-logger"
+- VERSION = "v1.1.5b-fetch-missing-logger" → "v1.1.5c-force-refresh-shared" (stocktool/config.py)
+- User-Agent: "v1.1.5b-fetch-missing-logger" → "v1.1.5c-force-refresh-shared"
 - App title / 啟動 log 自動改
 
 【待辦（下一版）】第二階段：etf.py / backtest.py / StockTool.py 殘留的 print()
@@ -3709,6 +3744,16 @@ class StrategyGUI(tk.Tk):
         self.run_btn = ttk.Button(btn_frame, text="▶ 執行系統選股", command=self._on_run)
         self.run_btn.pack(fill="x", pady=2)
 
+        # 【v1.1.5c-force-refresh-sys】2026-07-02 22:14 William 要求：
+        # 「系統選股 tab 的左欄也加「重新抓股價」按鈕」
+        # 修法：呼叫共用 _force_refresh_price("系統重抓")
+        # - 不再需要手動選股 tab 跳來重抓股價
+        # - 兩個 tab 都用同一個 cache、不會重複打 FinMind
+        self.sys_refresh_price_btn = ttk.Button(
+            btn_frame, text="🔄 重新抓股價", command=lambda: self._force_refresh_price("系統重抓")
+        )
+        self.sys_refresh_price_btn.pack(fill="x", pady=2)
+
         # Fix15 (2026-06-21): 移除「💾 儲存設定」「🔄 載入預設」按鈕
         # Preset bar 已取代這兩個功能（手動選股也是這樣）
         self.clear_btn = ttk.Button(btn_frame, text="🗑 清除控制台", command=self._on_clear_console)
@@ -5088,18 +5133,22 @@ class StrategyGUI(tk.Tk):
 
         threading.Thread(target=_bg_worker, daemon=True).start()
 
-    def _ms_force_refresh_price(self):
-        """手動選股 Tab「🔄 重新抓股價」按鈕
-        - 若背景正在抓 → 跳過、提示使用者（避免重複打 FinMind）
-        - 反之強制重抓（不走 cache）
+    def _force_refresh_price(self, source_label: str = "重抓"):
+        """【v1.1.5c-force-refresh-shared】2026-07-02 22:14 William 要求：
+        「系統選股 tab 的左欄也加「重新抓股價」按鈕」
+
+        共用邏輯：強制重抓股價（不走 cache、寫回 cache）
+        - 手動選股 tab 跟系統選股 tab 都呼叫這個
+        - 行為一致、避免 code duplication
+        - 背景 thread 抓、寫入 cache、不 block UI
         """
         if self._bg_price_fetching:
-            self._ms_status.set("⏳ 背景抓取股價中｜按鈕已跳過、請稍候...")
-            self.logger.log("⏳ 背景抓股價中，手動按鈕跳過（避免重複打 FinMind）")
+            self._ms_status.set(f"⏳ 背景抓取股價中｜{source_label} 按鈕已跳過、請稍候...")
+            self.logger.log(f"⏳ 背景抓股價中、{source_label} 按鈕跳過（避免重複打 FinMind）")
             return
 
         self._bg_price_fetching = True
-        self._ms_status.set("🔄 手動重抓股價中（強制重抓、不走 cache）...")
+        self._ms_status.set(f"🔄 {source_label}股價中（強制重抓、不走 cache）...")
         self._ms_price_status.set("🔄 抓取中...")
 
         def _force_worker():
@@ -5109,11 +5158,19 @@ class StrategyGUI(tk.Tk):
                 df = fetch_prices(_s, self.cfg, self.logger)
                 # 寫回 cache（更新 meta last_update = today）
                 save_cache(get_cache_file("price"), df)
-                self.after(0, lambda: self._on_bg_price_done(df, source="手動重抓"))
+                self.after(0, lambda: self._on_bg_price_done(df, source=source_label))
             except Exception as e:
-                self.after(0, lambda err=str(e): self._on_bg_price_err(err, source="手動重抓"))
+                self.after(0, lambda err=str(e): self._on_bg_price_err(err, source=source_label))
 
         threading.Thread(target=_force_worker, daemon=True).start()
+
+    def _ms_force_refresh_price(self):
+        """手動選股 Tab「🔄 重新抓股價」按鈕
+        - 若背景正在抓 → 跳過、提示使用者（避免重複打 FinMind）
+        - 反之強制重抓（不走 cache）
+        - 【v1.1.5c-force-refresh-shared】呼叫共用 _force_refresh_price("手動重抓")
+        """
+        self._force_refresh_price("手動重抓")
 
     def _on_bg_price_done(self, df, source: str = ""):
         """背景重抓股價完成（不論啟動或手動）→ 更新 GUI"""
