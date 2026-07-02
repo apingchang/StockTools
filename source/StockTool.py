@@ -1,12 +1,45 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1.4-print-to-logger (2026-07-02 00:35)       ║
+║  台灣股市量化選股系統 v1.1.5-holiday-console-log (2026-07-02 10:30)  ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1.4-print-to-logger
-最後更新: 2026-07-02 01:07 (Asia/Taipei)
+Version: v1.1.5-holiday-console-log
+最後更新: 2026-07-02 21:05 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【v1.1.5 holiday-console-log】2026-07-02 10:30 (William 10:06 兩件事)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-07-02 10:06 反映：
+  - 问题 1：「取得股價資料、盤中時段要排除假日」→ 平時遇到國定假日 (228、勞動節、端午…)
+    仍誤判為盤中、強制 refresh、浪費 TWSE API 額度、甚至觸發「整批被擋」(50/50)
+  - 问题 2：「下面這些 messages 還是沒有顯示在 program console 中」
+    整批失敗 ~60 則 (TWSE tse 整批失敗（50/50）→ 跳過 otc fallback) 不見在 console
+
+【修法 1】stocktool/config.py: 加 _HOLIDAY_DATES + 設定 _is_market_hours 進邏輯
+  - 2026 國定假日 + 補假日 14 天：元旦 / 春節6天 / 228補假 / 兒童清明補假 / 勞動節
+    / 端午 / 中秋 / 國慶補假
+  - 邏輯：weekday() >= 5 略過週末之後、再查 _HOLIDAY_DATES 全日休市
+  - 半日盤（_HALF_DAY_DATES）仍維持 13:00 收盤、邏輯與全日休市互斥
+  - 新測試 test_market_hours.py：加 9 個 holiday 邊界 case
+  - 舊測試调整：6/19 是端午節（_HOLIDAY_DATES）、不能用來驗證半日盤邏輯
+    → 改用 7/3 週五非假日非封關日
+
+【修法 2】StockTool.py: console 加 log file 雙保險
+  - 這些訊息 *實際有* 進 queue + 寫到 console Text widget
+  - 但 GUI scrollbar 在背景 thread 快速 insert 時不一定自動 see end → user 看不到
+  - 修法：(a) 每則 log 同步寫到 ./cache/console/console_YYYY-MM-DD.log
+         (b) _poll_log_queue 用 update_idletasks() + see("end") 強化 scroll
+         (c) console widget height 10 → 16
+         (d) 主畫面加「📄 開啟 console log 檔」按鈕、一鍵 open
+         (e) atexit 註冊關檔
+
+【驗證】646 + 9 + 6 = 661 passed（原本 646 + 9 holiday test + 6 console-log test）
+【遗留 pre-existing fail】(跟本版無關)
+  - test_data_date_column.py 1 個：date 變數月表跳 date
+  - test_etf_weekend_fallback.py 1 個：DB stale data
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -45,8 +78,8 @@ Python 版本: 3.8+
 【驗證】608 passed（原本 600 + 8 新增 = 608）
 
 【version 同步】
-- VERSION = "v1.1.3-v1.0-complete" → "v1.1.4-print-to-logger" (stocktool/config.py)
-- User-Agent: v1.1.3-no-double-score → v1.1.4-print-to-logger (etf.py 兩處)
+- VERSION = "v1.1.4-print-to-logger" → "v1.1.5-holiday-console-log" (stocktool/config.py)
+- User-Agent: "v1.1.4-print-to-logger" → "v1.1.5-holiday-console-log" (StockTool.py fetch 4 處)
 - App title / 啟動 log 自動改
 
 【待辦（下一版）】第二階段：etf.py / backtest.py / StockTool.py 殘留的 print()
@@ -2987,6 +3020,7 @@ import os
 import re
 import json
 import time
+import atexit
 import queue
 import threading
 import warnings
@@ -3025,6 +3059,7 @@ from stocktool.config import (
     DEFAULT_CONFIG,
     HISTORY_DIR,
     _HALF_DAY_DATES,
+    _HOLIDAY_DATES,
     load_config,
     save_config,
     StrategyConfig,
@@ -3353,6 +3388,27 @@ class StrategyGUI(tk.Tk):
         self.log_queue = queue.Queue()
         self.logger = GuiLogger(self.log_queue)
 
+        # 【v1.1.5-console-log-file】2026-07-02 10:06 William 反映：
+        # 「整批失敗訊息還是沒顯示在 console」— 實際有進 queue、但 console scrollbar 沒自動到尾
+        # 雙保險：每則 log 同步寫一份到 daily log file（即使 console 視覺沒看到、也能從 file trace）
+        # 位置：./cache/console/console_YYYY-MM-DD.log
+        try:
+            os.makedirs("cache/console", exist_ok=True)
+            self._console_log_path = (
+                f"cache/console/console_{datetime.now().strftime('%Y-%m-%d')}.log"
+            )
+            self._console_log_file = open(self._console_log_path, "a", encoding="utf-8")
+            self._console_log_file.write(f"\n=== App 啟動 {datetime.now().isoformat()} ===\n")
+            self._console_log_file.flush()
+            self.logger.log(f"📄 console log 寫入：{self._console_log_path}")
+            # App 結束時 flush + close file
+            atexit.register(self._close_console_log)
+        except Exception as e:
+            # log file 開失敗不影響 GUI
+            self._console_log_path = None
+            self._console_log_file = None
+            print(f"[WARN] 開 console log file 失敗：{e}")
+
         saved_config = load_config()
         self.cfg = StrategyConfig()
         self.cfg.update_from_dict(saved_config)
@@ -3631,6 +3687,10 @@ class StrategyGUI(tk.Tk):
         self.clear_btn = ttk.Button(btn_frame, text="🗑 清除控制台", command=self._on_clear_console)
         self.clear_btn.pack(fill="x", pady=2)
 
+        # 【v1.1.5-console-log-file】加開 log file 按鈕（雙保險）
+        # 若 user 覺得 console 看不到某些訊息、可以直接開 log file 看
+        ttk.Button(btn_frame, text="📄 開啟 console log 檔", command=self._on_open_console_log).pack(fill="x", pady=2)
+
         # 回測模擬 tab 的按鈕（階段 C 實作執行回測、目前先 disabled）
         bt_btn_frame = ttk.Frame(bt_left)
         bt_btn_frame.pack(fill="x", pady=10)
@@ -3645,14 +3705,14 @@ class StrategyGUI(tk.Tk):
         # V0.9.5-tab-split-fix3：notebook 已建好、只要確保 layout 完整
         self.notebook.pack(fill="both", expand=True)
 
-        # 全域 console 放下（grid row=1、固定 180px）
-        console_container = ttk.LabelFrame(self, text="📝 執行記錄 (Program Console) — 全域", padding=2)
+        # 全域 console 放下（grid row=1、固定 220px）【v1.1.5-console-log-file 加高到 16 行可見】
+        console_container = ttk.LabelFrame(self, text="📝 執行記錄 (Program Console) — 全域（同步寫到 cache/console/console_YYYY-MM-DD.log）", padding=2)
         console_container.grid(row=1, column=0, sticky="ew", padx=8, pady=(4, 8))
         console_container.grid_propagate(False)
-        console_container.configure(height=180)
+        console_container.configure(height=220)
         console_frame = ttk.Frame(console_container)
         console_frame.pack(fill="both", expand=True)
-        self.console = tk.Text(console_frame, height=10, wrap="word")
+        self.console = tk.Text(console_frame, height=16, wrap="word")
         console_scrollbar_y = ttk.Scrollbar(console_frame, orient="vertical", command=self.console.yview)
         console_scrollbar_x = ttk.Scrollbar(console_frame, orient="horizontal", command=self.console.xview)
         self.console.configure(yscrollcommand=console_scrollbar_y.set, xscrollcommand=console_scrollbar_x.set)
@@ -4207,13 +4267,60 @@ class StrategyGUI(tk.Tk):
                     # backward compat: 舊版直接傳 str
                     msg_text = str(msg)
                 self.console.insert("end", msg_text + "\n")
-                self.console.see("end")
+                # 【v1.1.5-console-log-file】同步寫到 daily log file、雙保險
+                # 即使 console 視覺上看不到、所有 log 都留一份可 trace
+                if getattr(self, "_console_log_file", None):
+                    try:
+                        # 加上時間戳記、方便 user 對「什麼時候印的」
+                        ts = datetime.now().strftime("%H:%M:%S")
+                        self._console_log_file.write(f"{ts} {msg_text}\n")
+                        self._console_log_file.flush()
+                    except Exception:
+                        pass  # 寫 file 失敗不影響 GUI
+                # 【v1.1.5-console-see-fix】強化 scroll: 強制 Tk 處理 pending insert 後再 see end
+                # 根因：background thread 快速累積 queue 時、單純 see("end") 有時不會同步生效
+                # 修法：update_idletasks() 把 pending 事件 flush 完、see 才會真的捲到底
+                try:
+                    self.console.update_idletasks()
+                    self.console.see("end")
+                except Exception:
+                    self.console.see("end")
         except queue.Empty:
             pass
         self.after(120, self._poll_log_queue)
 
     def _on_clear_console(self):
         self.console.delete("1.0", "end")
+
+    def _close_console_log(self):
+        """【v1.1.5-console-log-file】atexit 註冊：app 結束時關閉 log file"""
+        f = getattr(self, "_console_log_file", None)
+        if f:
+            try:
+                f.write(f"\n=== App 結束 {datetime.now().isoformat()} ===\n")
+                f.flush()
+                f.close()
+            except Exception:
+                pass
+
+    def _on_open_console_log(self):
+        """【v1.1.5-console-log-file】用系統預設編輯器開 console log file
+        用途：若 console 視覺看不到某些訊息、可開 log file 看完整 trace"""
+        import subprocess
+        import platform
+        path = getattr(self, "_console_log_path", None)
+        if not path or not os.path.exists(path):
+            messagebox.showinfo("無 log 檔", "console log 檔不存在（可能今日還沒寫）")
+            return
+        try:
+            if platform.system() == "Windows":
+                os.startfile(path)  # noqa
+            elif platform.system() == "Darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception as e:
+            messagebox.showerror("開啟失敗", f"無法開啟：{e}\n路徑：{path}")
 
     # ==========================================================
     # V0.9.4 買賣記錄 Tab（不動 V0.9.3 上面所有 method）

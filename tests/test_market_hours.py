@@ -116,14 +116,15 @@ def test_週日_下午3點_不算盤中():
 
 
 def test_週五_下午3點_不算盤中():
-    """週五 15:00 不算盤中（盤後）"""
-    now = datetime(2026, 6, 19, 15, 0, 0)  # 週五 15:00
+    """週五 15:00 不算盤中（盤後）
+    用 2026-07-03 週五（非假日、避開 228 補假、端午、228 等）"""
+    now = datetime(2026, 7, 3, 15, 0, 0)  # 週五 15:00
     assert st._is_market_hours(now) is False, "週五 15:00 應算盤後（雖是平日但已收盤）"
 
 
 def test_週五_中午12點_算盤中():
-    """週五 12:00 算盤中（平日盤中）"""
-    now = datetime(2026, 6, 19, 12, 0, 0)  # 週五 12:00
+    """週五 12:00 算盤中（平日盤中、非假日）"""
+    now = datetime(2026, 7, 3, 12, 0, 0)  # 週五 12:00（非假日）
     assert st._is_market_hours(now) is True, "週五 12:00 應算盤中"
 
 
@@ -179,8 +180,90 @@ def test_半日盤清單包含_2026封關日():
 
 def test_平日_13點05分_還算盤中():
     """【V0.9.5-cache-info 守住】非封關日 13:05 仍算盤中（13:30 才收盤）
-    反向驗證：確保半日盤邏輯沒把平日也誤判為早收盤"""
-    now = datetime(2026, 6, 19, 13, 5, 0)  # 週五 13:05（非封關日）
+    反向驗證：確保半日盤邏輯沒把平日也誤判為早收盤
+    用 2026-07-03 週五（非假日、避開端午節）"""
+    now = datetime(2026, 7, 3, 13, 5, 0)  # 週五 13:05（非假日非封關日）
     assert st._is_market_hours(now) is True, (
         "非封關日 13:05 仍應算盤中（13:30 才收盤），半日盤邏輯誤判"
+    )
+
+
+# ==========================================================
+# 【v1.1.5-holiday-exclude】國定假日 / 補假日 全日不開盤
+# ==========================================================
+
+def test_假日清單存在_且_包含2026元旦():
+    """【v1.1.5-holiday-exclude】_HOLIDAY_DATES 必須存在且含 2026 元旦"""
+    assert hasattr(st, "_HOLIDAY_DATES"), "❌ _HOLIDAY_DATES 不存在"
+    assert "2026-01-01" in st._HOLIDAY_DATES, (
+        f"2026-01-01 元旦應在 _HOLIDAY_DATES，實際: {st._HOLIDAY_DATES}"
+    )
+
+
+def test_元旦_平日_整天都不算盤中():
+    """【v1.1.5-holiday-exclude】元旦 00:00 / 09:00 / 12:00 / 13:30 都不算盤中
+    重點：09:00 也算盤前、不是盤中（避免 App 開啟誤判為「要 refresh」）"""
+    for hour in (0, 9, 12, 13, 30):
+        now = datetime(2026, 1, 1, hour, 0, 0) if hour < 24 else datetime(2026, 1, 1, 13, 30, 0)
+        assert st._is_market_hours(now) is False, (
+            f"元旦 (2026-01-01) {hour}:00 應不算盤中（假日全日休市）"
+        )
+
+
+def test_228補假_平日_整天不算盤中():
+    """【v1.1.5-holiday-exclude】228 補假 2026-02-27（週五）整天不算盤中
+    重點：平日 + 09:30 + 在 _HOLIDAY_DATES 內 → 必須 False"""
+    now = datetime(2026, 2, 27, 9, 30, 0)  # 補假 週五 09:30
+    assert st._is_market_hours(now) is False, (
+        "228 補假 (週五) 09:30 應不算盤中（雖是平日但全日休市）"
+    )
+
+
+def test_春節_平日_整天不算盤中():
+    """【v1.1.5-holiday-exclude】春節 2026-02-17 (週二) 整天不算盤中"""
+    now = datetime(2026, 2, 17, 10, 30, 0)  # 春節初一週二 10:30
+    assert st._is_market_hours(now) is False, (
+        "春節初一 (週二) 10:30 應不算盤中（全日休市）"
+    )
+
+
+def test_勞動節_平日_整天不算盤中():
+    """【v1.1.5-holiday-exclude】勞動節 2026-05-01（週五）整天不算盤中"""
+    now = datetime(2026, 5, 1, 11, 0, 0)  # 週五 11:00
+    assert st._is_market_hours(now) is False, (
+        "勞動節 (週五) 11:00 應不算盤中（全日休市）"
+    )
+
+
+def test_端午節_平日_整天不算盤中():
+    """【v1.1.5-holiday-exclude】端午節 2026-06-19（週五）整天不算盤中"""
+    now = datetime(2026, 6, 19, 10, 0, 0)  # 週五 10:00
+    assert st._is_market_hours(now) is False, (
+        "端午節 (週五) 10:00 應不算盤中（全日休市）"
+    )
+
+
+def test_平日非假日_09點30分_算盤中():
+    """【v1.1.5-holiday-exclude 守住】平日且非假日的 09:30 仍算盤中
+    反向驗證：確保假日邏輯沒誤判一般平日"""
+    now = datetime(2026, 7, 2, 9, 30, 0)  # 週四 09:30（非假日）
+    assert st._is_market_hours(now) is True, (
+        "非假日平日 09:30 應算盤中（假日邏輯誤判）"
+    )
+
+
+def test_平日非假日_13點05分_還算盤中():
+    """【v1.1.5-holiday-exclude 守住】非假日 13:05 仍算盤中"""
+    now = datetime(2026, 7, 2, 13, 5, 0)  # 週四 13:05（非假日）
+    assert st._is_market_hours(now) is True, (
+        "非假日 13:05 應算盤中（假日邏輯誤判為「13:00 收盤」）"
+    )
+
+
+def test_半日盤跟全日假不會同日_避免邏輯衝突():
+    """【v1.1.5-holiday-exclude 守住】_HALF_DAY_DATES 跟 _HOLIDAY_DATES 不可同日
+    半日盤是「有半天交易」、全日假是「整天休市」、邏輯互斥"""
+    overlap = st._HALF_DAY_DATES & st._HOLIDAY_DATES
+    assert not overlap, (
+        f"_HALF_DAY_DATES 跟 _HOLIDAY_DATES 有重複：{overlap}（半日盤 ≠ 全日休市）"
     )

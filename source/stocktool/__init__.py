@@ -30,6 +30,7 @@ from .config import (
     HISTORY_DIR,
     VERSION,
     _HALF_DAY_DATES,
+    _HOLIDAY_DATES,
     load_config,
     save_config,
     StrategyConfig,

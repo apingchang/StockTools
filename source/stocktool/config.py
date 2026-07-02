@@ -28,7 +28,7 @@ warnings.filterwarnings("ignore")
 # ==========================================================
 # 版本常數（v1.0 中央管理）
 # ==========================================================
-VERSION = "v1.1.4-print-to-logger"
+VERSION = "v1.1.5-holiday-console-log"
 
 
 # ==========================================================
@@ -347,6 +347,37 @@ _HALF_DAY_DATES = {
 }
 
 
+# ==========================================================
+# 全日休市清單（v1.1.5-holiday-exclude）
+# ==========================================================
+
+# 【v1.1.5-holiday-exclude 新增】2026-07-02 10:06 William 要求：
+#   「盤中時段要排除假日」
+#   之前 _is_market_hours 已經排除週末、但平日遇到國定假日（228、勞動節、端午…）
+#   或政府公告補假日還是會誤判為「盤中 → 強制 refresh」→ 浪費 API 額度、還可能觸發 TWSE 整批被擋
+#
+# 來源：勞動部「行事曆」/ 行政院人事總處公告
+# 半日盤不在此清單（半日盤是 13:00 收盤、不是「全日休市」、已在 _HALF_DAY_DATES 處理）
+_HOLIDAY_DATES = {
+    # ===== 2026 年 =====
+    "2026-01-01",  # 元旦（週四）
+    "2026-02-16",  # 農曆除夕（週一）
+    "2026-02-17",  # 春節初一（週二）
+    "2026-02-18",  # 春節初二（週三）
+    "2026-02-19",  # 春節初三（週四）
+    "2026-02-20",  # 春節初四（週五）
+    "2026-02-27",  # 228 和平紀念日補假（2/28 週六、補 2/27 週五）
+    "2026-04-03",  # 兒童節補假（4/4 週六、補 4/3 週五）
+    "2026-04-06",  # 清明節補假（4/5 週日、補 4/6 週一）
+    "2026-05-01",  # 勞動節（週五）
+    "2026-06-19",  # 端午節（週五）
+    "2026-09-25",  # 中秋節（週五）
+    "2026-10-09",  # 國慶日補假（10/10 週六、補 10/9 週五）
+    # 颱風假等臨時休市需手動加（若 TWSE 公告會在前一晚公布）
+    # 每年加新日期之前先查證：https://www.dgpa.gov.tw/ (行政院人事總處) 或 TWSE 市場開休市日程
+}
+
+
 def _is_market_hours(now: Optional[datetime] = None) -> bool:
     """判斷是否在台股盤中時段
 
@@ -359,11 +390,16 @@ def _is_market_hours(now: Optional[datetime] = None) -> bool:
     - 半日盤（過年封關日等）：13:00 收盤、不是 13:30
     - 依據 _HALF_DAY_DATES 清單判斷
 
+    v1.1.5-holiday-exclude 新規則（William 2026-07-02 10:06）：
+    - 國定假日 / 補假日 全日不開盤 → 用前一交易日收盤價、強制 refresh 邏輯不觸發
+    - 依據 _HOLIDAY_DATES 清單判斷
+    - 注意：_HALF_DAY_DATES 跟 _HOLIDAY_DATES 不能同日（半日盤還是有半天交易、半日盤日期不在 _HOLIDAY_DATES）
+
     Returns
     -------
     bool
         True = 盤中（強制 refresh 股價）
-        False = 盤前/盤後/週末（一天只 refresh 一次、靠 cache 判斷）
+        False = 盤前/盤後/週末/國定假日（一天只 refresh 一次、靠 cache 判斷）
 
     用途：get_or_fetch 內判斷「price 類 cache」是否要走強制 refresh 路徑
     """
@@ -371,8 +407,12 @@ def _is_market_hours(now: Optional[datetime] = None) -> bool:
     # 週末（週六=5、週日=6）不開盤
     if now.weekday() >= 5:
         return False
+    # 國定假日 / 補假日 全日不開盤（v1.1.5-holiday-exclude）
+    today_str = now.strftime("%Y-%m-%d")
+    if today_str in _HOLIDAY_DATES:
+        return False
     # 半日盤 → 13:00 收盤；一般交易日 → 13:30 收盤
-    is_half_day = now.strftime("%Y-%m-%d") in _HALF_DAY_DATES
+    is_half_day = today_str in _HALF_DAY_DATES
     if is_half_day:
         market_close = now.replace(hour=13, minute=0, second=0, microsecond=0)
     else:
