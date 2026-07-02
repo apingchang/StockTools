@@ -197,3 +197,80 @@ def test_console_log_write_strategy_in_poll_loop():
     assert flush_pos > 0, "❌ file.flush 不存在（App crash 會漏 buffer）"
     assert file_write_pos < flush_pos, "❌ write 必須在 flush 之前"
     print("✅ console → file → flush 順序正確")
+
+
+# ====================================================
+# 【場景 4】v1.1.5b AST 守護：fetch_prices 內部 helper 都傳 logger
+# ====================================================
+# 場景：William 2026-07-02 21:20 截圖反映
+#   - App 標題 v1.1.5-holiday-console-log（重啟生效）
+#   - App console 有「📡 TWSE MIS 即時股價、2380 檔...」訊息
+#   - 但 60 條「⚠️ TWSE tse 整批失敗」只進 PyCharm Run 視窗
+# 根因：fetch_prices line 1189 呼叫 _fetch_twse_realtime_batch(...) 沒傳 logger
+#   → 該函式 logger=None → _log_print(None, ...) fallback print()
+# 修法：補上 logger=logger + AST 守護防止再漏
+
+def test_fetch_prices_calls_twse_realtime_with_logger():
+    """fetch_prices 內呼叫 _fetch_twse_realtime_batch 必須傳 logger
+    守住 v1.1.5b-fetch-missing-logger bug 不再發生"""
+    import inspect
+    import ast
+    from stocktool import fetch_market
+
+    src = inspect.getsource(fetch_market.fetch_prices)
+    tree = ast.parse(src)
+
+    # 找所有 _fetch_twse_realtime_batch( 呼叫
+    calls_without_logger = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func_name = None
+            if isinstance(node.func, ast.Name):
+                func_name = node.func.id
+            elif isinstance(node.func, ast.Attribute):
+                func_name = node.func.attr
+            if func_name == "_fetch_twse_realtime_batch":
+                # 檢查 kwargs 與 args 內有沒有 logger / logger=logger
+                has_logger_arg = any(
+                    (isinstance(kw.arg, str) and "logger" in kw.arg)
+                    for kw in node.keywords
+                )
+                has_logger_pos = any(
+                    isinstance(arg, ast.Name) and "logger" in arg.id.lower()
+                    for arg in node.args[1:]  # 跳過 stock_ids 第一個參數
+                )
+                if not (has_logger_arg or has_logger_pos):
+                    calls_without_logger.append(node.lineno)
+
+    assert not calls_without_logger, (
+        f"❌ fetch_prices 內 _fetch_twse_realtime_batch() 沒傳 logger 的位置：{calls_without_logger}\n"
+        f"   修法：呼叫時加 logger=logger 參數、避免內部 fallback print() 進 PyCharm Run 視窗"
+    )
+    print("✅ fetch_prices 內 _fetch_twse_realtime_batch() 都傳了 logger")
+
+
+def test_no_print_calls_in_fetch_prices():
+    """fetch_prices 內不應有直接 print() 呼叫（除了 _log_print 內的合法 fallback）
+    守住以後新增 print() 會被測試擋下來"""
+    import inspect
+    import ast
+    from stocktool import fetch_market
+
+    src = inspect.getsource(fetch_market.fetch_prices)
+    tree = ast.parse(src)
+
+    # 找 _log_print 以外的 print() 呼叫
+    direct_print_calls = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func_name = None
+            if isinstance(node.func, ast.Name):
+                func_name = node.func.id
+            if func_name == "print":
+                direct_print_calls.append(node.lineno)
+
+    assert not direct_print_calls, (
+        f"❌ fetch_prices 內不該有直接 print() 呼叫：{direct_print_calls}\n"
+        f"   應統一改用 _log_print(logger, ...)"
+    )
+    print("✅ fetch_prices 內沒有直接 print()（都用 _log_print）")

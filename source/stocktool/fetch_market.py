@@ -1186,7 +1186,13 @@ def fetch_prices(session: requests.Session, cfg: StrategyConfig, logger: GuiLogg
 
     # Step 3: TWSE MIS 即時 API 抓全部（上市上櫃涵蓋、~30 批 × 0.1s ~3s）
     _log_print(logger, f"📡 TWSE MIS 即時股價、{len(all_codes)} 檔...")
-    realtime_df = _fetch_twse_realtime_batch(all_codes, progress_callback=None)
+    # 【v1.1.5b-fetch-missing-logger】2026-07-02 21:18 William 截圖反映：
+    # 「整批失敗」訊息只出現在 PyCharm Run 視窗、沒進 App program console
+    # 根因：_fetch_twse_realtime_batch 預設 logger=None、但這裡沒傳
+    # → 函式內 _log_print(None, ...) fallback print() 進 PyCharm Run 視窗
+    # → fetch_prices 收到的 logger（負責 line 1188 訊息）沒有傳下去
+    # 修法：把 fetch_prices 的 logger 傳下去
+    realtime_df = _fetch_twse_realtime_batch(all_codes, progress_callback=None, logger=logger)
     # realtime_df 欄位: 股票代號 / 現價 / 成交量_張 / data_date_raw (西元 "20260626")
 
     # Step 4: 合併

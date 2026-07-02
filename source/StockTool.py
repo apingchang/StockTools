@@ -1,12 +1,39 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1.5-holiday-console-log (2026-07-02 10:30)  ║
+║  台灣股市量化選股系統 v1.1.5b-fetch-missing-logger (2026-07-02 21:25) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1.5-holiday-console-log
-最後更新: 2026-07-02 21:05 (Asia/Taipei)
+Version: v1.1.5b-fetch-missing-logger
+最後更新: 2026-07-02 21:26 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+════════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
+【v1.1.5b fetch-missing-logger】2026-07-02 21:25 (William 21:20 截圖反映「仍是 PyCharm Run」)
+════════════════════════════════════════════════════════════════════════════════
+【背景】William 2026-07-02 21:20 截圖反映：
+  - App 視窗標題 v1.1.5-holiday-console-log（重啟生效）
+  - App console 有「📡 TWSE MIS 即時股價、2380 檔」訊息
+  - 但 60 條「⚠️ TWSE tse 整批失敗」只出現在 PyCharm Run 視窗、沒進 App program console
+
+【根因】fetch_prices (line 1189) 呼叫 _fetch_twse_realtime_batch() 未傳 logger
+  - _fetch_twse_realtime_batch 預設 logger=None
+  - 函式內 closure _query_twse 使用 logger=None
+  - _log_print(None, ...) fallback print() 進 PyCharm Run 視窗
+  - v1.1.4c 修 caller chain 時漏看這個 in-function call
+
+【修法】stocktool/fetch_market.py: line 1189
+  - _fetch_twse_realtime_batch(all_codes, progress_callback=None) 
+    → _fetch_twse_realtime_batch(all_codes, progress_callback=None, logger=logger)
+
+【AST 守護】tests/test_console_log_integration.py 補 2 個 test：
+  - test_fetch_prices_calls_twse_realtime_with_logger：AST 掃 fetch_prices 內
+    所有 _fetch_twse_realtime_batch() 呼叫、必須有 logger= 關鍵字參數
+  - test_no_print_calls_in_fetch_prices：fetch_prices 內不能有直接 print() 、
+    統一走 _log_print(logger, ...)
+
+【驗證】10 個 console log integration test 全線（包含 2 個新 AST 守護）
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
@@ -78,8 +105,8 @@ Python 版本: 3.8+
 【驗證】608 passed（原本 600 + 8 新增 = 608）
 
 【version 同步】
-- VERSION = "v1.1.4-print-to-logger" → "v1.1.5-holiday-console-log" (stocktool/config.py)
-- User-Agent: "v1.1.4-print-to-logger" → "v1.1.5-holiday-console-log" (StockTool.py fetch 4 處)
+- VERSION = "v1.1.5-holiday-console-log" → "v1.1.5b-fetch-missing-logger" (stocktool/config.py)
+- User-Agent: "v1.1.5-holiday-console-log" → "v1.1.5b-fetch-missing-logger"
 - App title / 啟動 log 自動改
 
 【待辦（下一版）】第二階段：etf.py / backtest.py / StockTool.py 殘留的 print()
