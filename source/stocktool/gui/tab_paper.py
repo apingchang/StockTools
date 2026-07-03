@@ -23,6 +23,7 @@ import pandas as pd
 from .. import paper_trading as pt
 from .. import paper_excel
 from .. import paper_engine as pe
+from .dialog_paper import PortfolioEditorDialog
 
 
 class PaperTradingTab:
@@ -128,6 +129,7 @@ class PaperTradingTab:
         # 組合操作按鈕
         op_frame = ttk.Frame(parent)
         op_frame.pack(fill="x", pady=(0, 6))
+        ttk.Button(op_frame, text="✎ 編輯", width=7, command=self._on_edit).pack(side="left", padx=1)
         ttk.Button(op_frame, text="⏸ 暫停", width=7, command=self._on_pause).pack(side="left", padx=1)
         ttk.Button(op_frame, text="▶ 繼續", width=7, command=self._on_resume).pack(side="left", padx=1)
         ttk.Button(op_frame, text="🗑 刪除", width=7, command=self._on_delete).pack(side="left", padx=1)
@@ -407,49 +409,27 @@ class PaperTradingTab:
             self.new_excel_var.set(path)
 
     def _on_create_portfolio(self):
-        name = self.new_name_var.get().strip()
-        if not name:
-            messagebox.showwarning("提醒", "請輸入組合名稱")
-            return
-
-        excel_path = self.new_excel_var.get().strip()
-        stock_pool: List[str] = []
-        if excel_path:
-            if not os.path.exists(excel_path):
-                messagebox.showerror("錯誤", f"Excel 不存在:\n{excel_path}")
-                return
-            stock_pool, warns = paper_excel.parse_excel_to_stock_pool(excel_path)
-            for w in warns:
-                self._log(w)
-            if not stock_pool:
-                if not messagebox.askyesno("確認", "Excel 解析後沒有任何股票代號、仍要建立嗎？"):
-                    return
-
-        try:
-            initial_cash = float(self.new_cash_var.get())
-            max_holdings = int(self.new_max_var.get())
-        except ValueError:
-            messagebox.showerror("錯誤", "總資金/持倉上限格式錯誤")
-            return
-
-        strategy = self.new_strategy_var.get()
-        p = pt.PaperPortfolio(
-            name=name,
-            excel_file=excel_path or None,
-            stock_pool=stock_pool,
-            initial_cash=initial_cash,
-            max_holdings=max_holdings,
-            strategy_mode=strategy,
+        """【V1.2.0 修正】改用對話框取代內嵌欄位、可設定完整買入賣出參數"""
+        cfg = getattr(self.app, "cfg", None)
+        dlg = PortfolioEditorDialog(
+            self.frame, title="新增組合",
+            portfolio=None, cfg=cfg, app=self.app,
         )
+        result = dlg.show()
+        if result is None:
+            return
         try:
-            pid = pt.create_portfolio(self.db_path, p)
+            if result.id is None:
+                pid = pt.create_portfolio(self.db_path, result)
+            else:
+                pt.update_portfolio(self.db_path, result)
+                pid = result.id
         except Exception as e:
-            messagebox.showerror("錯誤", f"建立失敗: {e}")
+            messagebox.showerror("錯誤", f"儲存失敗: {e}")
             return
 
-        self._log(f"✅ 已建立組合「{name}」(id={pid})，股票池 {len(stock_pool)} 檔")
+        self._log(f"✅ 已建立組合「{result.name}」(id={pid})、股票池 {len(result.stock_pool)} 檔")
         self._refresh_portfolio_list()
-        self.new_name_var.set("")
 
     def _refresh_portfolio_list(self):
         if self.portfolio_listbox is None:
@@ -590,6 +570,31 @@ class PaperTradingTab:
             return
         pt.update_portfolio_status(self.db_path, self.selected_portfolio_id, "active")
         self._log(f"▶ 組合 {self.selected_portfolio_id} 已繼續")
+        self._refresh_portfolio_list()
+        self._refresh_detail()
+
+    def _on_edit(self):
+        """【V1.2.0】編輯組合參數"""
+        if not self.selected_portfolio_id:
+            messagebox.showinfo("提醒", "請先選一個組合")
+            return
+        p = pt.get_portfolio(self.db_path, self.selected_portfolio_id)
+        if not p:
+            return
+        cfg = getattr(self.app, "cfg", None)
+        dlg = PortfolioEditorDialog(
+            self.frame, title=f"編輯組合 — {p.name}",
+            portfolio=p, cfg=cfg, app=self.app,
+        )
+        result = dlg.show()
+        if result is None:
+            return
+        try:
+            pt.update_portfolio(self.db_path, result)
+        except Exception as e:
+            messagebox.showerror("錯誤", f"儲存失敗: {e}")
+            return
+        self._log(f"✎ 組合「{result.name}」已更新")
         self._refresh_portfolio_list()
         self._refresh_detail()
 

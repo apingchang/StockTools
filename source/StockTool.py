@@ -4,9 +4,26 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.2.0-paper-trading
-最後更新: 2026-07-03 20:56 (Asia/Taipei)
+最後更新: 2026-07-03 23:18 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+【v1.2.0 paper-trading-stage5】2026-07-03 23:30 (William 23:12 需求「買賣條件要可設定或用回測參數」)
+【背景】William 2026-07-03 23:12 反映：
+  - 之前 Tab 只露出「總資金 / 持倉上限 / 策略」三個欄位
+  - 進場訊號門檻 / 停損 / 停利 / 持有天數等藏 DB、沒地方設
+  - 希望「手動設」或「採用回測參數一鍵帶入」
+【實作】
+  - 新增 stocktool/paper_config.py — 回測參數 → 模擬買賣參數對應表
+    * stop_loss 負數 (-0.03) → paper 正值 (3.0) %
+    * 複用 cfg.capital/topk/hold_days/min_rev_yoy/min_eps_yoy/simple_max_pe
+  - 新增 stocktool/gui/dialog_paper.py — PortfolioEditorDialog
+    * 完整買入/賣出參數欄位
+    * 「📥 採用回測參數」一鍵帶入
+    * 「🔄 重設預設值」一鍵還原
+    * 同時支援「新增」與「編輯」
+  - tab_paper.py — 內嵌欄位改為對話框、加「✎ 編輯」按鈕
+  - tests/test_paper_config.py 4 個新測試
 
 ════════════════════════════════════════════════════════════════════════════════
 【v1.2.0 paper-trading-stage3+4】2026-07-03 21:30 (William 20:32 需求「模擬買賣 Tab」)
