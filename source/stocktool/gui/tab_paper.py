@@ -462,8 +462,20 @@ class PaperTradingTab:
         if not self.selected_portfolio_id:
             messagebox.showinfo("提醒", "請先選一個組合")
             return
-        messagebox.showinfo("提醒", "補跑功能 v1.1 實作（目前請用『推進一天』手動跑）")
-        # TODO: 用真實歷史股價 + 逐日推進
+        self._log("⏩ 開始補跑到今天…")
+        from .. import paper_catchup
+        try:
+            session = getattr(self.app, "session", None)
+            cfg = getattr(self.app, "cfg", None)
+            result = paper_catchup.catch_up_portfolio(
+                self.db_path, self.selected_portfolio_id,
+                end_date=None, session=session, cfg=cfg, logger=self._logger(),
+            )
+            self._log(f"✅ 補跑完成：BUY {result.total_buys} / SELL {result.total_sells} / 跳過 {len(result.skipped_dates)} / 錯誤 {len(result.errors)}")
+            self._refresh_detail()
+        except Exception as e:
+            self._log(f"❌ 補跑失敗: {e}")
+            messagebox.showerror("補跑失敗", str(e))
 
     def _advance_one_day_for(self, portfolio_id: int):
         """對一個組合推進一天（用「當前可得價」模擬）"""

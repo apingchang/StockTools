@@ -161,17 +161,21 @@ def test_existing_tabs_unchanged():
     print("✅ 買賣記錄、手動選股、ETF 三個 tab 仍在")
 
 
-def test_tabs_count_is_5():
-    """應該有 5 個 tab（系統選股、回測模擬、買賣記錄、手動選股、ETF）"""
+def test_tabs_count_is_6():
+    """應該有 6 個 tab
+
+    【V1.2.0-paper-trading】2026-07-03：加模擬買賣 Tab、原 5 個 → 6 個
+    6 個 tab：系統選股、ETF、手動選股、買賣記錄、回測模擬、模擬買賣
+    """
     with open(STOCKTOOL_PY, "r", encoding="utf-8") as f:
         content = f.read()
 
     notebook_adds = re.findall(r"self\.notebook\.add\(", content)
-    assert len(notebook_adds) == 5, (
-        f"❌ 預期 5 個 tab、實際 {len(notebook_adds)} 個\n"
-        f"應為：系統選股、回測模擬、買賣記錄、手動選股、ETF"
+    assert len(notebook_adds) == 6, (
+        f"❌ 預期 6 個 tab、實際 {len(notebook_adds)} 個\n"
+        f"應為：系統選股、ETF、手動選股、買賣記錄、回測模擬、模擬買賣"
     )
-    print(f"✅ 5 個 tab 全到位")
+    print(f"✅ 6 個 tab 全到位（V1.2.0 加了模擬買賣）")
 
 
 def test_phase2_param_split():

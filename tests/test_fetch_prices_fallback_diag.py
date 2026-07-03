@@ -121,8 +121,8 @@ def test_version_bumped_past_v1_1_2():
         f"改 VERSION 到新版（如 v1.1.3-xxx 或 v1.1.4-xxx）"
     )
     # 守住是 v1.1.3+ 系列（持續加入 v1.1.5/v1.1.5b/v1.1.5c 等）
-    assert VERSION.startswith("v1.1."), (
-        f"❌ VERSION 應是 v1.1.x 系列、實 {VERSION}"
+    assert (VERSION.startswith("v1.1.") or VERSION.startswith("v1.2.")), (
+        f"❌ VERSION 應是 v1.1.x 或 v1.2.x、實 {VERSION}"
     )
     print(f"✅ VERSION = {VERSION}（已更新到 v1.1.x+）")
 

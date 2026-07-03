@@ -4,7 +4,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.2.0-paper-trading
-最後更新: 2026-07-03 20:42 (Asia/Taipei)
+最後更新: 2026-07-03 20:48 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -3257,6 +3257,7 @@ from stocktool.pipeline import (
 from stocktool.gui.calendar import _CalendarDialog
 # 【V1.2.0-paper-trading】模擬買賣 Tab
 from stocktool.gui.tab_paper import PaperTradingTab
+from stocktool.paper_scheduler import PaperScheduler
 
 
 
@@ -3595,6 +3596,10 @@ class StrategyGUI(tk.Tk):
         self.paper_tab_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.paper_tab_frame, text="📈 模擬買賣")
         self.paper_tab = PaperTradingTab(self, self.paper_tab_frame)
+
+        # 【V1.2.0-paper-trading】14:00 自動排程
+        self.paper_scheduler = PaperScheduler(self)
+        self.paper_scheduler.start()
 
         # 綁定 Tab 切換 → 切到買賣記錄時自動 refresh
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
