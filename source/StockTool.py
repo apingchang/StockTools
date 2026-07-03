@@ -3,13 +3,30 @@
 ║  台灣股市量化選股系統 v1.1.5c-force-refresh-shared (2026-07-02 22:18) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.1.5c-force-refresh-shared
-最後更新: 2026-07-02 22:18 (Asia/Taipei)
+Version: v1.2.0-paper-trading
+最後更新: 2026-07-03 20:42 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
+【v1.2.0 paper-trading-stage1+2】2026-07-03 21:00 (William 20:32 需求「模擬買賣 Tab」)
+【背景】William 2026-07-03 20:32 提出新需求：
+  - 在現有 App 中新增「模擬買賣」Tab
+  - 多組投資組合並存，每組從 Excel 匯入股票池
+  - 每組可用不同買賣參數，總投資金額 / 持倉上限為每組獨立
+  - 不做當沖、可加碼、可換手（加碼限 ≥5日、換手隔日才可進場）
+  - 從「按下執行」當下開始，每天 14:00 自動跑（盤後）
+  - AI Meta-Strategy 組合：regime-aware 動態加權 + reasoning log
+【實作內容】
+  - 新增 stocktool/paper_trading.py (核心 DB + CRUD + 費用計算)
+  - 新增 stocktool/paper_engine.py (規則版 + AI 版 買賣引擎)
+  - 新增 stocktool/paper_excel.py (Excel fuzzy 解析，只取股票代號)
+  - 新增 stocktool/gui/tab_paper.py (Tab 6 UI：左組合管理、右詳情)
+  - portfolio.db 加 4 張表: sim_portfolios / sim_holdings / sim_trades / sim_daily_snapshot
+  - StockTool.py 加 Tab 6 +  import
+  - 共用既有 fetch_market._fetch_twse_realtime_batch 抓當日價
+
 【v1.1.5c force-refresh-shared】2026-07-02 22:18 (William 22:14 「系統選股 tab 加重新抓股價」)
 ════════════════════════════════════════════════════════════════════════════════
 【背景】William 2026-07-02 22:14 反映：
@@ -3238,6 +3255,8 @@ from stocktool.pipeline import (
     run_pipeline,
 )
 from stocktool.gui.calendar import _CalendarDialog
+# 【V1.2.0-paper-trading】模擬買賣 Tab
+from stocktool.gui.tab_paper import PaperTradingTab
 
 
 
@@ -3445,7 +3464,7 @@ def _make_treeview_click_sort(tree, cols, skip_col=None, skip_cols=None):
 class StrategyGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f"StockTool {VERSION} (Multi-Factor + Top10 Backtest + Portfolio + ETF + goodinfo)")
+        self.title(f"StockTool {VERSION} (Multi-Factor + Top10 Backtest + Portfolio + ETF + Paper Trading + goodinfo)")
 
         self.log_queue = queue.Queue()
         self.logger = GuiLogger(self.log_queue)
@@ -3571,6 +3590,11 @@ class StrategyGUI(tk.Tk):
         self.backtest_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.backtest_tab, text="🧪 回測模擬")
         self._build_backtest_tab(self.backtest_tab)
+
+        # 【V1.2.0-paper-trading】Tab 6：模擬買賣
+        self.paper_tab_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.paper_tab_frame, text="📈 模擬買賣")
+        self.paper_tab = PaperTradingTab(self, self.paper_tab_frame)
 
         # 綁定 Tab 切換 → 切到買賣記錄時自動 refresh
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
