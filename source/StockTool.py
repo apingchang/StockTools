@@ -4,7 +4,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.2.0-paper-trading
-最後更新: 2026-07-03 23:18 (Asia/Taipei)
+最後更新: 2026-07-04 01:00 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
@@ -3623,9 +3623,8 @@ class StrategyGUI(tk.Tk):
         self.notebook.add(self.paper_tab_frame, text="📈 模擬買賣")
         self.paper_tab = PaperTradingTab(self, self.paper_tab_frame)
 
-        # 【V1.2.0-paper-trading】14:00 自動排程
+        # 【V1.2.0-paper-trading stage 6】14:00 自動排程 — 只實例化、稍後啟動
         self.paper_scheduler = PaperScheduler(self)
-        self.paper_scheduler.start()
 
         # 綁定 Tab 切換 → 切到買賣記錄時自動 refresh
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
@@ -3846,6 +3845,9 @@ class StrategyGUI(tk.Tk):
         self.console.pack(side="left", fill="both", expand=True)
         console_scrollbar_y.pack(side="right", fill="y")
         console_scrollbar_x.pack(side="bottom", fill="x")
+
+        # 【V1.2.0-paper-trading stage 6】console 建好後才啟動排程、否則首則 log 會被 pump 吃掉
+        self.paper_scheduler.start()
 
     def _build_tab_layout(self, parent):
         """【V0.9.5-tab-split Phase 3】建一個標準的「左 params + 右 results」tab layout
@@ -4393,6 +4395,17 @@ class StrategyGUI(tk.Tk):
                 else:
                     # backward compat: 舊版直接傳 str
                     msg_text = str(msg)
+                # 【V1.2.0 stage 6】console 可能還沒建好（pump loop 啟動比 _build_ui 早）
+                if not getattr(self, "console", None):
+                    # console 還沒 ready、訊息先寫 file（雙保險）
+                    if getattr(self, "_console_log_file", None):
+                        try:
+                            ts = datetime.now().strftime("%H:%M:%S")
+                            self._console_log_file.write(f"{ts} {msg_text}\n")
+                            self._console_log_file.flush()
+                        except Exception:
+                            pass
+                    continue
                 self.console.insert("end", msg_text + "\n")
                 # 【v1.1.5-console-log-file】同步寫到 daily log file、雙保險
                 # 即使 console 視覺上看不到、所有 log 都留一份可 trace
