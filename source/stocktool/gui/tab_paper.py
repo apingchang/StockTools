@@ -18,6 +18,8 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 from datetime import datetime
 from typing import List, Dict, Optional
 
+import pandas as pd
+
 from .. import paper_trading as pt
 from .. import paper_excel
 from .. import paper_engine as pe
@@ -196,6 +198,8 @@ class PaperTradingTab:
         chart_tab = ttk.Frame(self.detail_notebook)
         self.detail_notebook.add(chart_tab, text="📈 權益曲線")
         self._build_chart_tab(chart_tab)
+        # 切到權益曲線 tab 時重繪
+        self.detail_notebook.bind("<<NotebookTabChanged>>", self._on_detail_tab_changed)
 
     def _build_holdings_tab(self, parent):
         cols = ("代號", "名稱", "股數", "均成本", "現價", "市值", "報酬率", "持有天", "進場理由")
@@ -235,17 +239,164 @@ class PaperTradingTab:
         sb.pack(side="right", fill="y")
         self.trades_tree.config(yscrollcommand=sb.set)
 
-        ttk.Button(parent, text="🔄 重新整理", command=self._refresh_trades).pack(pady=4)
+        btn_frame = ttk.Frame(parent)
+        btn_frame.pack(fill="x", pady=4)
+        ttk.Button(btn_frame, text="🔄 重新整理", command=self._refresh_trades).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="💾 匯出 Excel", command=self._export_trades_excel).pack(side="left", padx=4)
 
     def _build_chart_tab(self, parent):
-        """權益曲線（先放 placeholder、之後用 matplotlib 畫）"""
-        self.chart_text = tk.Text(parent, wrap="word", font=("Consolas", 9))
-        self.chart_text.pack(fill="both", expand=True)
-        self.chart_text.insert("end", "（權益曲線尚未實作、之後用 matplotlib）\n")
+        """權益曲線（matplotlib）"""
+        try:
+            import matplotlib
+            matplotlib.use("TkAgg")
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+            self._matplotlib_available = True
+            self.fig = Figure(figsize=(10, 6), dpi=100)
+            self.ax = self.fig.add_subplot(111)
+            self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
+            self.canvas.get_tk_widget().pack(fill="both", expand=True)
+
+            btn_frame = ttk.Frame(parent)
+            btn_frame.pack(fill="x")
+            ttk.Button(btn_frame, text="🔄 重繪", command=self._draw_equity_curve).pack(side="left", padx=4)
+            ttk.Button(btn_frame, text="💾 存為 PNG", command=self._save_chart_png).pack(side="left", padx=4)
+        except ImportError:
+            self._matplotlib_available = False
+            self.chart_text = tk.Text(parent, wrap="word", font=("Consolas", 9))
+            self.chart_text.pack(fill="both", expand=True)
+            self.chart_text.insert("end", "（matplotlib 未裝、權益曲線無法顯示）\n")
+
+    def _draw_equity_curve(self):
+        if not getattr(self, "_matplotlib_available", False):
+            return
+        if not self.selected_portfolio_id:
+            return
+        df = pt.list_snapshots(self.db_path, self.selected_portfolio_id)
+        if df is None or df.empty:
+            self.ax.clear()
+            self.ax.text(0.5, 0.5, "（無快照資料、請先跑一次模擬）",
+                         ha="center", va="center", transform=self.ax.transAxes)
+            self.canvas.draw()
+            return
+
+        self.ax.clear()
+        # 主軸：總資產
+        dates = pd.to_datetime(df["trade_date"])
+        self.ax.plot(dates, df["total_value"], "b-", label="總資產", linewidth=2)
+        self.ax.plot(dates, df["cash"], "g--", label="現金", alpha=0.6)
+        self.ax.set_xlabel("日期")
+        self.ax.set_ylabel("總資產 (TWD)", color="b")
+        self.ax.tick_params(axis="y", labelcolor="b")
+        self.ax.grid(True, alpha=0.3)
+
+        # 副軸：累積報酬率
+        ax2 = self.ax.twinx()
+        cum = df["cumulative_return_pct"].fillna(0)
+        ax2.plot(dates, cum, "r-", label="累積報酬率 (%)", alpha=0.6)
+        ax2.set_ylabel("累積報酬率 (%)", color="r")
+        ax2.tick_params(axis="y", labelcolor="r")
+
+        # 大盤對比（如果有）
+        if "benchmark_return_pct" in df.columns and df["benchmark_return_pct"].notna().any():
+            bench = df["benchmark_return_pct"].fillna(0)
+            ax2.plot(dates, bench, "gray", linestyle="--", label="加權指數 (%)", alpha=0.5)
+
+        self.ax.set_title(f"📈 權益曲線 - {self._portfolios_cache.get(self.selected_portfolio_id, None) and self._portfolios_cache[self.selected_portfolio_id].name or ''}")
+        self.fig.autofmt_xdate()
+        self.fig.tight_layout()
+        self.canvas.draw()
+
+    def _save_chart_png(self):
+        if not getattr(self, "_matplotlib_available", False):
+            return
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(
+            title="存權益曲線",
+            defaultextension=".png",
+            filetypes=[("PNG", "*.png"), ("All", "*.*")],
+        )
+        if path:
+            try:
+                self.fig.savefig(path, dpi=150, bbox_inches="tight")
+                self._log(f"💾 已存：{path}")
+            except Exception as e:
+                self._log(f"❌ 存檔失敗: {e}")
+
+    def _export_trades_excel(self):
+        if not self.selected_portfolio_id:
+            messagebox.showinfo("提醒", "請先選一個組合")
+            return
+        try:
+            trades = pt.list_trades(self.db_path, self.selected_portfolio_id, limit=99999)
+            snapshots = pt.list_snapshots(self.db_path, self.selected_portfolio_id)
+            holdings = pt.list_holdings(self.db_path, self.selected_portfolio_id)
+            p = pt.get_portfolio(self.db_path, self.selected_portfolio_id)
+            if not p:
+                return
+
+            # 轉成 DataFrame
+            import pandas as pd
+            trades_df = pd.DataFrame([t.to_dict() for t in trades]) if trades else pd.DataFrame()
+            snap_df = snapshots if not snapshots.empty else pd.DataFrame()
+            holdings_df = pd.DataFrame([h.to_dict() for h in holdings]) if holdings else pd.DataFrame()
+
+            from tkinter import filedialog
+            from datetime import datetime
+            default_name = f"模擬買賣_{p.name}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+            path = filedialog.asksaveasfilename(
+                title="匯出模擬買賣記錄",
+                initialfile=default_name,
+                defaultextension=".xlsx",
+                filetypes=[("Excel", "*.xlsx")],
+            )
+            if not path:
+                return
+
+            with pd.ExcelWriter(path, engine="openpyxl") as writer:
+                # 組合設定
+                info_df = pd.DataFrame([{
+                    "組合名稱": p.name,
+                    "策略模式": p.strategy_mode,
+                    "總資金": p.initial_cash,
+                    "持倉上限": p.max_holdings,
+                    "買入門檻": p.buy_score_threshold,
+                    "停損%": p.sell_stop_loss_pct,
+                    "停利%": p.sell_take_profit_pct,
+                    "最大持有天": p.sell_max_hold_days,
+                    "狀態": p.status,
+                    "啟動時間": p.started_at,
+                    "最後執行": p.last_run_date,
+                }])
+                info_df.to_excel(writer, sheet_name="組合設定", index=False)
+
+                if not holdings_df.empty:
+                    holdings_df.to_excel(writer, sheet_name="持倉現況", index=False)
+                if not trades_df.empty:
+                    trades_df.to_excel(writer, sheet_name="買賣紀錄", index=False)
+                if not snap_df.empty:
+                    snap_df.to_excel(writer, sheet_name="每日快照", index=False)
+
+            self._log(f"💾 已匯出：{path}")
+            messagebox.showinfo("匯出成功", f"已存：\n{path}")
+        except Exception as e:
+            self._log(f"❌ 匯出失敗: {e}")
+            messagebox.showerror("匯出失敗", str(e))
 
     # ==========================================================
     # 事件處理
     # ==========================================================
+
+    def _on_detail_tab_changed(self, event=None):
+        # 切到權益曲線 tab 時重繪
+        try:
+            current = self.detail_notebook.index(self.detail_notebook.select())
+            if current == 2:  # 權益曲線 tab
+                if getattr(self, "_matplotlib_available", False):
+                    self._draw_equity_curve()
+        except Exception:
+            pass
 
     def _on_browse_excel(self):
         path = filedialog.askopenfilename(
@@ -380,6 +531,11 @@ class PaperTradingTab:
 
         self._refresh_holdings()
         self._refresh_trades()
+        if getattr(self, "_matplotlib_available", False):
+            try:
+                self._draw_equity_curve()
+            except Exception:
+                pass
 
     def _refresh_holdings(self):
         if not self.holdings_tree or not self.selected_portfolio_id:

@@ -4,11 +4,20 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.2.0-paper-trading
-最後更新: 2026-07-03 20:48 (Asia/Taipei)
+最後更新: 2026-07-03 20:56 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
 ════════════════════════════════════════════════════════════════════════════════
+【v1.2.0 paper-trading-stage3+4】2026-07-03 21:30 (William 20:32 需求「模擬買賣 Tab」)
+【階段 3】
+  - paper_catchup.py 補跑到今天（用真實歷史 cache 抓價）
+  - paper_scheduler.py 14:00 自動排程（App 開著時自動 catch_up_all_active）
+【階段 4】
+  - tab_paper.py 權益曲線（matplotlib 雙軸：總資產 + 累積報酬率）
+  - tab_paper.py 匯出 Excel（組合設定 / 持倉 / 買賣紀錄 / 每日快照）
+  - 裝 matplotlib 3.11.0
+
 ════════════════════════════════════════════════════════════════════════════════
 【v1.2.0 paper-trading-stage1+2】2026-07-03 21:00 (William 20:32 需求「模擬買賣 Tab」)
 【背景】William 2026-07-03 20:32 提出新需求：

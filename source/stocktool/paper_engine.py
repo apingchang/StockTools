@@ -299,14 +299,14 @@ def evaluate_portfolio_one_day(
     elif cash <= 0:
         log(f"  [BUY] 現金不足 {cash:.0f}")
     else:
-        # 每檔可用現金 = cash / slots
-        per_slot_cash = cash / slots if slots > 0 else 0
-
+        # 每檔可用現金 = cash / slots（【V1.2.0 修正】在 loop 內重算、反映前次買入後 cash 減少）
         for sig in signals:
             if slots <= 0:
                 break
             if sig.score < p.buy_score_threshold:
                 break  # 後面分數更低、不用看
+
+            per_slot_cash = cash / slots if slots > 0 else 0
 
             info = stock_data[sig.code]
             price = float(info.get("price") or 0)
@@ -616,13 +616,13 @@ def evaluate_ai_portfolio_one_day(
 
     slots = max(0, p.max_holdings - len(holdings))
     if slots > 0 and cash > 0:
-        per_slot_cash = cash / slots
         for ai_score, code, ai_reason, ai_conf, info in scored:
             if slots <= 0:
                 break
             if ai_score < p.ai_threshold:
                 break
 
+            per_slot_cash = cash / slots
             price = float(info.get("price") or 0)
             if per_slot_cash < price * 100:
                 continue
