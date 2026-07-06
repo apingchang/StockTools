@@ -200,6 +200,20 @@ def _run_selection_only(cfg: StrategyConfig, logger: GuiLogger):
 
     df_sel = df_sel.sort_values("Score", ascending=False).reset_index(drop=True)
     df_sel = _apply_strong_filter(df_sel, cfg, logger)
+
+    # 【V1.2.0-system-select-topn】2026-07-06 William 反映：
+    #   系統選股結果 UI 顯示「選股檔數 (TopN)」設定 20、但結果出現 50 檔
+    #   原本只跑強勢股過濾、沒套用 TopN 限制 → TopN 參數形同虛設
+    #   修法：在 _apply_strong_filter 之後 head(cfg.top_n_for_tech)
+    #   注意：run_pipeline() 在抓取歷史日K 階段另外還會再用一次 top_n_for_tech，
+    #         那邊是「限制抓日K 的股票範圍」、這邊是「限制 UI 顯示結果檔數」
+    #         兩個用法不同但都用同一個參數（符合使用者預期「TopN = 我要選幾檔」）
+    if len(df_sel) > cfg.top_n_for_tech:
+        logger.log(
+            f"   📊 TopN 限縮：{len(df_sel)} → {cfg.top_n_for_tech} 檔 "
+            f"(套用「選股檔數 (TopN)」參數)"
+        )
+        df_sel = df_sel.head(cfg.top_n_for_tech).reset_index(drop=True)
     logger.log(f"✅ 篩選完成，共 {len(df_sel)} 檔候選")
     return df_sel
 

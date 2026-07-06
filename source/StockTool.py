@@ -1,12 +1,40 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.1.5c-force-refresh-shared (2026-07-02 22:18) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-system-topn (2026-07-06 15:02) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading
-最後更新: 2026-07-04 01:00 (Asia/Taipei)
+Version: v1.2.0-paper-trading-system-topn
+最後更新: 2026-07-06 15:12 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+【v1.2.0 paper-trading-system-topn】2026-07-06 15:02 (William 14:54 反映「TopN=20 結果出現 50 檔」)
+【背景】William 2026-07-06 14:54 反映：
+  - 系統選股 UI 設定「選股檔數 (TopN)」= 20
+  - 但結果 Treeview 顯示約 50 檔（強勢股過濾後剩下的所有股票）
+  - 原本 _run_selection_only 只套 _apply_strong_filter、沒套用 TopN 限縮
+  - top_n_for_tech 只在 run_pipeline 抓取歷史日K 時有用（限制抓日K 的股票範圍）
+  - 系統選股完全沒套 → TopN 參數形同虛設
+
+【修法】stocktool/pipeline.py:_run_selection_only（line 200-216）
+  - _apply_strong_filter 之後加 head(cfg.top_n_for_tech) 限縮
+  - 多 log 一行「TopN 限縮：N → M 檔」
+  - 維持原本 Score 降序（前 N 高的保留）
+
+【William 額外要求 15:02】
+  - 回測模擬時 Excel 中讀到少檔就用多少檔去模擬（已驗證、現狀就是這樣）
+  - pipeline.py:421 excel 模式 tech_codes = load_stock_list_from_excel(...) 不套 head()
+  - 保持現狀、不需改動
+
+【新測試】tests/test_selection_only_top_n_limit.py (6 個全線)
+  - test_強勢股過濾後大於_topn_會被限縮：50 → head(20) → 20 檔 (核心 bug)
+  - test_強勢股過濾後小於_topn_不變：10 → head(20) → 10 檔
+  - test_強勢股過濾後等於_topn_不變：20 → head(20) → 20 檔、不 log 限縮
+  - test_強勢股過濾後無股票_fallback_仍套用_topn：fallback 50 → head(20) → 20 檔
+  - test_topn_1_只留_1_檔：極端值測試
+  - test_結果維持_score_降序：限縮後仍維持原 Score 降序
+
+【驗證】全 test suite 跑完 704 pass + 7 pre-existing fail（與本改無關、修改前就 fail）
 
 【v1.2.0 paper-trading-stage5】2026-07-03 23:30 (William 23:12 需求「買賣條件要可設定或用回測參數」)
 【背景】William 2026-07-03 23:12 反映：
