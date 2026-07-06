@@ -1,12 +1,48 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v4 (2026-07-06 18:54) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v5 (2026-07-06 18:54) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v4
-最後更新: 2026-07-06 22:15 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v5
+最後更新: 2026-07-06 23:00 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+【v1.2.0 paper-trading-kb-focus-v5】2026-07-06 22:42 (William 22:42 反映「舊 highlight 沒取消 / down key scroll 不到最後」)
+【背景】William 2026-07-06 22:42 反映兩個問題：
+  1. mouse 移動時新位置有 highlight、但舊位置 highlight bar 沒有被取消
+  2. down key 向下 scroll 沒辦法到達最後一個 item
+  3. 三個 tab（系統選股/ETF/手動選股/回測）都一樣
+
+【v4 失敗根因】
+  - 用 selection_set(iid) 為 single source of truth、但 Linux ttk 某些主題
+    selection_set 多次呼叫後、舊的 selected 還在、新的又被加上去
+    → 導致 highlight 跟 focus 不同步（舊位置 highlight 沒取消）
+  - tree.see() 跟 Treeview 預設 Up/Down 內部 scroll 衝突、scroll 不到最後一個 item
+  - click handler 加 selection_remove 反而讓 selected state 變成系統藍色
+
+【v5 簡單設計（回到 hover_<price> tag 系統）】
+  1. Hover handler 先 _clear_hover 取消舊 row 的 hover_<price> tag
+     → 舊位置 highlight 立刻被取消（William 22:42 問題 1 解決）
+  2. 恢復舊 row 為 (checked/unchecked, price_*) tag
+     → 價格顏色不被破壞
+  3. <Enter> 自動 focus_set + focus(children[0])
+     → keyboard focus 永遠在 tree、Up/Down 自動切 focus + scroll
+  4. 不綁 <Up>/<Down>、Treeview browse mode 預設會處理
+  5. <<TreeviewSelect>> 監聽 selection 變化、<<TreeviewSelect>> handler
+     _on_tree_select_sync_hover 先清舊、再設新
+  6. click handler 不 selection_set、browse mode 自動設
+  7. _focus_tab_tree_on_change 設 hover_<price> tag、不 selection_set
+
+【新測試】tests/test_keyboard_space_toggle.py 重寫為 v5 邏輯（51 個全綠）
+- 靜態測試 (15 個)：4 個 tree 都有 hover_<price> tag 註冊、_select_hover_iids 追蹤、
+  _ms_clear_hover / _etf_clear_hover_new 取消舊 hover、_on_tree_enter_focus 設 focus(children[0])、
+  不應有 selection_set / _on_tree_key_move / _set_row_tag_normal
+- 行為測試 (5 個)：_on_select_tree_hover 移動時清舊、_ms_tree_hover 移動時清舊、
+  _on_tree_select_sync_hover 清舊 + 設新、_on_tree_enter_focus 設 focus、
+  _focus_tab_tree_on_change 4 種 tree 都設 hover_<price> tag
+
+【驗證】全 test suite 跑完 751 pass + 7 pre-existing fail（與本改無關、無 regression）
 
 【v1.2.0 paper-trading-kb-focus-v4】2026-07-06 21:55 (William 21:55 反映「仍要 click / 高亮白色 / 同步 / scroll 不到最後」)
 【背景】William 2026-07-06 21:55 反映四個問題：
@@ -4675,13 +4711,12 @@ class StrategyGUI(tk.Tk):
             self.logger.log(f"⚠️ Tab 切換 refresh 失敗：{e}")
 
     def _focus_tab_tree_on_change(self, current_tab_idx: int):
-        """【V1.2.0-kb-focus-v4】2026-07-06 21:55 Tab 切換時、focus 該 tab 的結果 tree
+        """【V1.2.0-kb-focus-v5】2026-07-06 22:42 Tab 切換時、focus 該 tab 的結果 tree
 
-        v4 簡單設計：
-          - tree.focus_set()        讓 key events 送到 tree
-          - tree.selection_set(c0)  selection = 第一個 row、selected 顏色立刻顯示
-          - tree.focus(c0)          設鍵盤 focus rectangle
-          - tree.see(c0)            scroll 確保可見
+        v5 簡單設計：
+          - tree.focus_set()       讓 key events 送到 tree
+          - tree.focus(c0)         設鍵盤 focus rectangle（讓 Up/Down 可以 scroll）
+          - 設 hover_<price> tag   讓該 row 顯示黃色 highlight
           - after_idle 再做一次（避免 notebook 內部事件覆蓋）
         """
         tab_tree_map = {
@@ -4702,9 +4737,11 @@ class StrategyGUI(tk.Tk):
         first_iid = children[0]
         try:
             tree.focus_set()
-            tree.selection_set(first_iid)
             tree.focus(first_iid)
-            tree.see(first_iid)
+            # 設 hover_<price> tag、讓該 row 顯示黃色 highlight
+            price_tag = self._get_price_tag_for_tree(tree, first_iid)
+            hover_kind = price_tag.replace("price_", "") if price_tag.startswith("price_") else "zero"
+            tree.item(first_iid, tags=(f"hover_{hover_kind}",))
         except tk.TclError:
             pass
 
@@ -4717,66 +4754,101 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _after_idle_focus_tree(self, tree, first_iid):
-        """【V1.2.0-kb-focus-v4】after_idle 再 focus 一次"""
+        """【V1.2.0-kb-focus-v5】after_idle 再 focus 一次"""
         try:
             if first_iid and first_iid in tree.get_children():
                 tree.focus_set()
-                tree.selection_set(first_iid)
                 tree.focus(first_iid)
-                tree.see(first_iid)
+                # 設 hover_<price> tag
+                price_tag = self._get_price_tag_for_tree(tree, first_iid)
+                hover_kind = price_tag.replace("price_", "") if price_tag.startswith("price_") else "zero"
+                tree.item(first_iid, tags=(f"hover_{hover_kind}",))
         except tk.TclError:
             pass
 
     def _on_tree_enter_focus(self, event):
-        """【V1.2.0-kb-focus-v4】2026-07-06 21:55 William 反映
+        """【V1.2.0-kb-focus-v5】2026-07-06 22:42 William 反映
 
-        William 21:55 反映：
-          - 開機第一次要 mouse move + click 後 up/down 才會 scroll
-          - 被 click 的 item 自會變成高亮白色
-          - 用 key scroll 後 mouse 移動是從 cursor 位置開始、而不是 up/down 移動後的位置
+        William 22:42 反映：
+          - 開機後仍要 mouse move + click 後 up/down 才能 scroll
+          - mouse 移動時新位置有 highlight、舊位置 highlight 沒取消
           - down key 向下 scroll 沒辦法到達最後一個 item
 
-        根因 v3：
-          - notebook 切換後 keyboard focus 被 notebook 內部事件搶走
-          - tree.focus() / focus_set() 不夠強、無法讓 Treeview 接收 Up/Down 按鍵
-          - Treeview <Up>/<Down> 內建只 scroll viewport、預設不切 focus
+        根因 v4：
+          - selection_set(iid) 跟 Treeview 預設 selected state 衝突、舊的 selected
+            還在、新的又被加上去、導致 highlight 跟 focus 不同步
+          - Treeview <Up>/<Down> 預設會切 focus、但 focus 是空字串時不 scroll
+          - 滑鼠 hover 進 Treeview 時、tree.focus() 沒設、鍵盤 focus 還在 notebook 上
 
-        v4 簡單修法（最終）：
-          - bind <Enter> 事件到 4 個 Treeview、滑鼠進入 Treeview 區域時自動 focus_set
-          - 這樣 keyboard focus 永遠在 Treeview 上、Up/Down 按鍵自動會切 focus + scroll
-          - 用 tree.selection_set(iid) 把 hover = selected、selected state 黃色統一視覺
-          - 不用 hover_* tag、讓 Treeview 預設 selected 顏色取代它
-          - style.map(background=[("selected", "#fff3a0")]) 把 selected 顏色固定為黃色
+        v5 簡單修法：
+          - bind <Enter> 時自動 focus_set() + 設 focus(children[0]) 確保 keyboard focus 在 tree
+          - 樹子區內任一 row、且 focus 已經有值時、Treeview <Up>/<Down> 會自動 scroll + 切 focus
+          - hover 回到 hover_<price> tag 系統、清楚離開舊 row、進新 row
         """
         tree = event.widget
         try:
             tree.focus_set()
+            # 如果 focus 還沒設、設到第一個 row（讓 Up/Down 能 scroll 從此開始）
+            if not tree.focus():
+                children = tree.get_children()
+                if children:
+                    tree.focus(children[0])
         except tk.TclError:
             pass
 
     def _on_tree_select_sync_hover(self, event):
-        """【V1.2.0-kb-focus-v4】<<TreeviewSelect>> 事件：
+        """【V1.2.0-kb-focus-v5】<<TreeviewSelect>> 事件：
 
-        用途：當 Treeview selection 變化時（hover / click / 鍵盤）、同步 hover_<price> tag
-              讓「hover = selected」、selected state 黃色 + hover_<price> 雙重視覺
-
-        注意：
-          - v4 設計：selection_set(iid) 是 single source of truth
-          - style.map 已把 selected 顏色設成黃色
-          - 我們同步設定 hover_<price> tag 作為視覺備援（避免某些 Linux 主題不支援 style.map）
+        用途：當 Treeview selection 變化時（click / 鍵盤 Up/Down）、同步 hover_<price> tag
+        重要變更 v5：
+          - 不依賴 style.map、設 hover_<price> tag 保證黃色 highlight
+          - 先清舊 row 的 hover_* tag、恢復成 checked/unchecked + price_*
+          - 再設新 row 為 hover_<price> tag
         """
         tree = event.widget
         selection = tree.selection()
         if not selection:
             return
-        iid = selection[0]
-        if iid not in tree.get_children():
+        new_iid = selection[0]
+        if new_iid not in tree.get_children():
             return
-        # 取得 price tag 推導 hover_<kind>
-        price_tag = self._get_price_tag_for_tree(tree, iid)
+
+        # 1. 清舊 row 的 hover_* tag、恢復成 checked/unchecked + price_*
+        for iid in tree.get_children():
+            if iid == new_iid:
+                continue
+            tags = tree.item(iid, "tags")
+            if any(t.startswith("hover_") for t in tags):
+                self._set_row_tag_normal(tree, iid)
+
+        # 2. 設新 row 為 hover_<price> tag
+        price_tag = self._get_price_tag_for_tree(tree, new_iid)
         hover_kind = price_tag.replace("price_", "") if price_tag.startswith("price_") else "zero"
         try:
-            tree.item(iid, tags=(f"hover_{hover_kind}",))
+            tree.item(new_iid, tags=(f"hover_{hover_kind}",))
+        except tk.TclError:
+            pass
+
+    def _set_row_tag_normal(self, tree, iid):
+        """【V1.2.0-kb-focus-v5】把 row 從 hover_* tag 恢復成 checked/unchecked + price tag"""
+        if iid not in tree.get_children():
+            return
+        # 判斷是哪個 tree、決定 checked_dict
+        if tree is self._ms_tree:
+            checked_dict = self._ms_checked
+        elif tree is self._etf_tree:
+            checked_dict = self._etf_checked
+        else:
+            if tree is self.select_tree:
+                checked_dict = self._select_checked
+            else:
+                if not hasattr(self, "_bt_checked"):
+                    self._bt_checked = {}
+                checked_dict = self._bt_checked
+        checked = checked_dict.get(iid, False)
+        price_tag = self._get_price_tag_for_tree(tree, iid)
+        try:
+            tree.item(iid, tags=("checked" if checked else "unchecked", price_tag))
         except tk.TclError:
             pass
 
@@ -6231,11 +6303,8 @@ class StrategyGUI(tk.Tk):
             return
         # 【V1.2.0-keyboard-toggle-fix】點 cell 時設鍵盤焦點、後續 ↑/↓/Space 才能動
         self._ms_tree.focus(item_id)
-        # 【V1.2.0-kb-focus-v4】用 selection_set 取代 selection_remove、讓 selected 顏色顯示為黃色
-        try:
-            self._ms_tree.selection_set(item_id)
-        except tk.TclError:
-            pass
+        # 【V1.2.0-kb-focus-v5】Treeview browse mode click 會自動 selection_set、會觸發
+        # <<TreeviewSelect>> 事件、我們在那個 handler 同步 hover_<price> tag
         current = self._ms_checked.get(item_id, False)
         self._ms_checked[item_id] = not current
         vals = list(self._ms_tree.item(item_id, "values"))
@@ -6249,25 +6318,30 @@ class StrategyGUI(tk.Tk):
 
 
     def _ms_tree_hover(self, event):
-        """【V1.2.0-kb-focus-v4】手動選股 hover：selection_set(iid) + focus(iid)
-        讓 selected = hover、依靠 Treeview 預設 selected state 黃色 highlight
-        """
+        """【V1.2.0-kb-focus-v5】手動選股 hover：取消舊 hover tag + 設新 hover tag"""
         region = self._ms_tree.identify("region", event.x, event.y)
         if region != "cell":
+            self._ms_clear_hover()
             return
         iid = self._ms_tree.identify_row(event.y)
         if not iid:
+            self._ms_clear_hover()
             return
+        if iid == self._ms_hover_iid:
+            return
+        # 離開舊列
+        self._ms_clear_hover()
+        # 進新列
+        self._ms_hover_iid = iid
+        price_tag = getattr(self, "_ms_price_tags", {}).get(iid, "price_zero")
         try:
-            self._ms_tree.selection_set(iid)
-            self._ms_tree.focus(iid)
-            self._ms_tree.see(iid)
+            self._ms_tree.item(iid, tags=(f'hover_{price_tag[6:]}',))
         except tk.TclError:
             pass
 
     def _ms_tree_leave(self, event):
-        """【V1.2.0-kb-focus-v4】離開 Treeview 不清 hover、保留 selected row 高亮"""
-        pass
+        """【V1.2.0-kb-focus-v5】離開 Treeview 清掉 hover highlight"""
+        self._ms_clear_hover()
 
     def _ms_clear_hover(self):
         if not self._ms_hover_iid:
@@ -6314,39 +6388,41 @@ class StrategyGUI(tk.Tk):
         """【Fix12 廢棄】改成 _etf_tree_hover_combined"""
 
     def _etf_tree_hover_combined(self, event):
-        """【V0.9.5-tab-split-phase3-C Fix12 + V1.2.0-kb-focus-v4】
+        """【V0.9.5-tab-split-phase3-C Fix12 + V1.2.0-kb-focus-v5】
         ETF Treeview hover：
-        - 移到 cell（任意欄） → 該列 highlight 黃色（用 selection_set(iid) + focus + see）
+        - 移到 cell（任意欄） → 該列 highlight 黃色（用 hover_<price> tag）
         - 移到「ETF數」欄（column #6） → popup 顯示包含此股的 ETF 列表
         - 移到「今日異動」欄（column #7） → popup 顯示異動明細
-        - 移到非 cell 區（捲軸/header） → 保留 selection、只關 popup
+        - 移到非 cell 區（捲軸/header） → 清掉 hover + 關 popup
 
-        v4 變更：hover 不再手動設 hover_<price> tag、改用 selection_set(iid) 統一 selected 視覺
+        v5 變更：回到 hover_<price> tag 系統、清楚離開舊 row、進新 row
         """
         region = self._etf_tree.identify("region", event.x, event.y)
         if region != "cell":
+            self._etf_clear_hover_new()
             self._close_etf_popup()
             return
         iid = self._etf_tree.identify_row(event.y)
         if not iid:
+            self._etf_clear_hover_new()
             self._close_etf_popup()
             return
 
         column = self._etf_tree.identify_column(event.x)
 
-        # v4：hover 同步 selection（讓 Treeview 預設 selected 顏色生效）
+        # v5：先取消舊 hover tag、再設新 hover_<price> tag
         if iid != getattr(self, "_etf_hover_iid_new", None):
+            self._etf_clear_hover_new()
             self._etf_hover_iid_new = iid
+            price_tag = getattr(self, "_etf_price_tags", {}).get(iid, "price_zero")
             try:
-                self._etf_tree.selection_set(iid)
-                self._etf_tree.focus(iid)
-                self._etf_tree.see(iid)
+                self._etf_tree.item(iid, tags=(f'hover_{price_tag[6:]}',))
             except tk.TclError:
                 pass
         # 同步舊版的 _etf_hover_iid（讓 _clear_etf_hover 也能運作）
         self._etf_hover_iid = iid
 
-        # Popup（v4 改 column：加「漲跌價」欄後往右移一欄）
+        # Popup（v5 改 column：加「漲跌價」欄後往右移一欄）
         if column == "#6":
             self._show_etf_popup(iid, event.x_root, event.y_root, mode="etf_list")
         elif column == "#7":
@@ -6358,9 +6434,10 @@ class StrategyGUI(tk.Tk):
         """【Fix12 廢棄】"""
 
     def _etf_tree_leave_combined(self, event):
-        """【V0.9.5-tab-split-phase3-C Fix12 + V1.2.0-kb-focus-v4】
-        離開 Treeview → 保留 selection、只關 popup
+        """【V0.9.5-tab-split-phase3-C Fix12 + V1.2.0-kb-focus-v5】
+        離開 Treeview → 清掉 hover + 關 popup
         """
+        self._etf_clear_hover_new()
         self._close_etf_popup()
 
     def _etf_clear_hover_new(self):
@@ -6635,11 +6712,8 @@ class StrategyGUI(tk.Tk):
             return
         # 【V1.2.0-keyboard-toggle-fix】點 cell 時設鍵盤焦點、後續 ↑/↓/Space 才能動
         self._etf_tree.focus(item_id)
-        # 【V1.2.0-kb-focus-v4】用 selection_set 取代 selection_remove、讓 selected 顯示黃色
-        try:
-            self._etf_tree.selection_set(item_id)
-        except tk.TclError:
-            pass
+        # 【V1.2.0-kb-focus-v5】Treeview browse mode click 自動 selection_set、
+        # 觸發 <<TreeviewSelect>>、我們在那個 handler 同步 hover_<price> tag
         current = self._etf_checked.get(item_id, False)
         self._etf_checked[item_id] = not current
         vals = list(self._etf_tree.item(item_id, "values"))
@@ -8302,31 +8376,58 @@ class StrategyGUI(tk.Tk):
     # ══════════════════════════════════════════════════════════════
 
     def _on_select_tree_hover(self, event):
-        """【V1.2.0-kb-focus-v4】系統選股 / 回測 Treeview hover：
+        """【V1.2.0-kb-focus-v5】系統選股 / 回測 Treeview hover
 
-        設計 (v4)：
-        - 滑鼠 hover 時、主動呼叫 tree.selection_set(iid) + tree.focus(iid)
-        - 這讓 selected state 變成 hover 那個 row、跟視覺 hover 同步
-        - <<TreeviewSelect>> 事件會被觸發、我們在該 handler 裡同步 hover_<price> tag
-        - 依賴 Treeview 預設的 selected state 顏色 + style.map 設黃色
-        - 不再手動設 hover_* tag（讓 selected = hover 為 single source of truth）
+        William 2026-07-06 22:42 反映：
+          - 滑鼠移動時新位置有 highlight、但舊位置 highlight 沒被取消
+          - down key 沒辦法 scroll 到最後一個 item
+
+        v4 失敗根因：
+          - 用 selection_set(iid) 為 single source of truth、style.map selected=黃色
+          - 但 Linux ttk 某些主題 style.map 不生效、selection_set 多次呼叫後舊的 selected
+            還在、新的又被加上去、導致 highlight 跟 focus 不同步
+          - tree.see() 跟 Treeview 預設 Up/Down 內部 scroll 衝突、scroll 不到最後
+
+        v5 簡單設計：
+          - 回到 hover_* tag 系統、清楚離開舊 row、進新 row
+          - <Enter> 自動 focus_set + focus(children[0])、確保第一個 row 有 keyboard focus
+          - Treeview browse mode 下 Up/Down 會自動切 focus + scroll、不需自定 bind
+          - 不依賴 style.map、tag 系統保証 hover 顏色永遠是黃色
         """
         tree = event.widget
+        if not hasattr(self, "_select_hover_iids"):
+            self._select_hover_iids = {}
         if not hasattr(self, "_select_price_tags"):
             self._select_price_tags = {}
 
         region = tree.identify("region", event.x, event.y)
         iid = tree.identify_row(event.y) if region == "cell" else None
 
-        if iid and iid in tree.get_children():
-            # 用 selection_set 同步 hover & selected、樹將自動捲到可見
+        old_iid = self._select_hover_iids.get(id(tree))
+
+        # 移到同一列 → 不動作
+        if iid and iid == old_iid:
+            return
+
+        # 【關鍵】離開舊列：先取消 hover_* tag、恢復成 checked/unchecked + price_*
+        if old_iid and old_iid in tree.get_children():
+            checked = self._select_checked.get(old_iid, False) if tree == self.select_tree else getattr(self, "_bt_checked", {}).get(old_iid, False)
+            price_tag = self._select_price_tags.get(old_iid, "price_zero")
             try:
-                tree.selection_set(iid)
-                tree.focus(iid)
-                tree.see(iid)
+                tree.item(old_iid, tags=("checked" if checked else "unchecked", price_tag))
             except tk.TclError:
                 pass
-        # else: 移到 header 或 scrollbar、保留原本 selection（不要清掉）
+
+        # 進新列
+        if iid and iid in tree.get_children():
+            self._select_hover_iids[id(tree)] = iid
+            price_tag = self._select_price_tags.get(iid, "price_zero")
+            try:
+                tree.item(iid, tags=(f'hover_{price_tag[6:]}',))
+            except tk.TclError:
+                pass
+        else:
+            self._select_hover_iids.pop(id(tree), None)
 
     def _on_select_tree_leave(self, event):
         """【V1.2.0-kb-focus-v4】離開 Treeview 時不清 hover、讓 selected row 保持高亮"""
@@ -8381,11 +8482,8 @@ class StrategyGUI(tk.Tk):
         # 根因：Treeview 預設 click 不會設鍵盤焦點到 row、tree.focus() 永遠回空字串
         # 修法：click cell 時設 tree.focus(iid)、後續 ↑/↓/Space 才能動
         tree.focus(iid)
-        # 【V1.2.0-kb-focus-v4】用 selection_set 取代 selection_remove、讓 selected 顯示黃色
-        try:
-            tree.selection_set(iid)
-        except tk.TclError:
-            pass
+        # 【V1.2.0-kb-focus-v5】Treeview browse mode click 自動 selection_set、
+        # 觸發 <<TreeviewSelect>>、我們在那個 handler 同步 hover_<price> tag
         if tree == self.select_tree:
             checked_dict = self._select_checked
         else:

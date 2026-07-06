@@ -473,145 +473,6 @@ def test_focus_tab_tree_focus_set_and_focus_row():
 # ==========================================================
 
 
-def test_focus_tab_tree_select_tree():
-    """切到系統選股 tab → focus select_tree 第一個 row"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    tree = SimpleNamespace(
-        children=["row1", "row2"],
-        focus_set_called=[],
-        focus_called=[],
-    )
-    tree.get_children = lambda: tree.children
-    tree.focus_set = lambda: tree.focus_set_called.append(True)
-    tree.focus = lambda iid: tree.focus_called.append(iid)
-
-    app = SimpleNamespace(
-        select_tree=tree,
-        _etf_tree=None,
-        _ms_tree=None,
-        backtest_tree=None,
-    )
-
-    st.StrategyGUI._focus_tab_tree_on_change(app, 0)
-
-    assert tree.focus_set_called, "應呼叫 focus_set"
-    assert tree.focus_called == ["row1"], f"應 focus 第一個 row、實際 {tree.focus_called}"
-
-
-def test_focus_tab_tree_etf_tree():
-    """切到 ETF tab → focus _etf_tree 第一個 row"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    tree = SimpleNamespace(children=["e1"], focus_set_called=[], focus_called=[])
-    tree.get_children = lambda: tree.children
-    tree.focus_set = lambda: tree.focus_set_called.append(True)
-    tree.focus = lambda iid: tree.focus_called.append(iid)
-
-    app = SimpleNamespace(
-        select_tree=None,
-        _etf_tree=tree,
-        _ms_tree=None,
-        backtest_tree=None,
-    )
-
-    st.StrategyGUI._focus_tab_tree_on_change(app, 1)
-
-    assert tree.focus_set_called
-    assert tree.focus_called == ["e1"]
-
-
-def test_focus_tab_tree_ms_tree():
-    """切到手動選股 tab → focus _ms_tree 第一個 row"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    tree = SimpleNamespace(children=["m1", "m2", "m3"], focus_set_called=[], focus_called=[])
-    tree.get_children = lambda: tree.children
-    tree.focus_set = lambda: tree.focus_set_called.append(True)
-    tree.focus = lambda iid: tree.focus_called.append(iid)
-
-    app = SimpleNamespace(
-        select_tree=None,
-        _etf_tree=None,
-        _ms_tree=tree,
-        backtest_tree=None,
-    )
-
-    st.StrategyGUI._focus_tab_tree_on_change(app, 2)
-
-    assert tree.focus_set_called
-    assert tree.focus_called == ["m1"]
-
-
-def test_focus_tab_tree_backtest_tree():
-    """切到回測 tab → focus backtest_tree 第一個 row"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    tree = SimpleNamespace(children=["b1"], focus_set_called=[], focus_called=[])
-    tree.get_children = lambda: tree.children
-    tree.focus_set = lambda: tree.focus_set_called.append(True)
-    tree.focus = lambda iid: tree.focus_called.append(iid)
-
-    app = SimpleNamespace(
-        select_tree=None,
-        _etf_tree=None,
-        _ms_tree=None,
-        backtest_tree=tree,
-    )
-
-    st.StrategyGUI._focus_tab_tree_on_change(app, 4)
-
-    assert tree.focus_set_called
-    assert tree.focus_called == ["b1"]
-
-
-def test_focus_tab_tree_empty_no_op():
-    """tree 沒資料時（get_children 空）不應該 focus、不爆"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    tree = SimpleNamespace(children=[], focus_set_called=[], focus_called=[])
-    tree.get_children = lambda: tree.children
-    tree.focus_set = lambda: tree.focus_set_called.append(True)
-    tree.focus = lambda iid: tree.focus_called.append(iid)
-
-    app = SimpleNamespace(
-        select_tree=tree,
-        _etf_tree=None,
-        _ms_tree=None,
-        backtest_tree=None,
-    )
-
-    # 不應該爆
-    st.StrategyGUI._focus_tab_tree_on_change(app, 0)
-
-    assert not tree.focus_set_called, "空 tree 不應 focus_set"
-    assert not tree.focus_called, "空 tree 不應設 focus"
-
-
-def test_focus_tab_tree_unknown_tab_no_op():
-    """tab index 沒對應 tree 時（買賣記錄 tab 3）不應該爆"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    app = SimpleNamespace(
-        select_tree=SimpleNamespace(),
-        _etf_tree=SimpleNamespace(),
-        _ms_tree=SimpleNamespace(),
-        backtest_tree=SimpleNamespace(),
-    )
-
-    # 不應該爆
-    st.StrategyGUI._focus_tab_tree_on_change(app, 3)  # 買賣記錄 tab
-    st.StrategyGUI._focus_tab_tree_on_change(app, 99)  # 不存在
-
-
-
-
 # ==========================================================
 # 【V1.2.0-kb-focus-v4】2026-07-06 21:55 William 反映問題
 # 1. 開機第一次要 mouse move + click 後 up/down 才會 scroll
@@ -765,24 +626,6 @@ def test_style_map_selected_yellow_and_foreground_black():
     )
 
 
-def test_focus_tab_tree_uses_selection_set():
-    """_focus_tab_tree_on_change 用 selection_set 而不是 selection_remove"""
-    content = _read()
-    m = re.search(
-        r'def _focus_tab_tree_on_change\(self,\s*current_tab_idx.*?(?=\n    def |\Z)',
-        content,
-        re.DOTALL,
-    )
-    assert m, "找不到 _focus_tab_tree_on_change"
-    body = m.group(0)
-    assert "selection_set" in body, (
-        "❌ _focus_tab_tree_on_change 應呼叫 selection_set、不是 selection_remove"
-    )
-    assert "selection_remove" not in body, (
-        "❌ v4 不應該 selection_remove、selection 才是 single source of truth"
-    )
-
-
 def test_after_idle_focus_tree_function_exists():
     """_after_idle_focus_tree exists for after_idle re-focus"""
     content = _read()
@@ -791,22 +634,54 @@ def test_after_idle_focus_tree_function_exists():
     )
 
 
-def test_hover_handler_uses_selection_set_select_tree():
-    """_on_select_tree_hover 應該用 tree.selection_set()"""
+
+# ==========================================================
+# 【V1.2.0-kb-focus-v5】2026-07-06 22:42 William 反映問題
+# 1. mouse 移動時新位置有 highlight 但舊位置 highlight bar 沒有被取消
+# 2. down key 沒辦法 display 最後一個 item
+# 3. 三個 tab（系統選股/ETF/手動選股/回測）都一樣
+#
+# v5 設計（回到 hover_<price> tag 系統、不用 selection hack）：
+# - hover handler 先 _clear_hover 取消舊 tag、再設新 tag
+# - <Enter> 自動 focus_set + focus(children[0]) 確保 keyboard focus 在 tree
+# - 不綁 <Up>/<Down>、Treeview browse mode 預設會切 focus + scroll
+# - click handler 不 selection_set、靠 browse mode 自動
+# - <<TreeviewSelect>> handler 同步設 hover_<price> tag（含清舊）
+# - _set_row_tag_normal helper：恢復 row 原本的 checked/unchecked + price_* tag
+# ==========================================================
+
+
+def test_on_select_tree_hover_clears_old():
+    """_on_select_tree_hover 切 row 時必須先清舊的 hover_* tag
+
+    William 22:42 反映「mouse 移動時新位置有 highlight 但舊位置 highlight bar 沒被取消」
+    """
     content = _read()
-    m = re.search(
-        r'def _on_select_tree_hover\(self,\s*event\):.*?(?=\n    def |\Z)',
-        content,
-        re.DOTALL,
+    idx = content.find('def _on_select_tree_hover(self, event):')
+    assert idx != -1, "找不到 _on_select_tree_hover"
+    end = content.find('\n    def ', idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    # 跳過 docstring
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 必須有 _select_hover_iids 狀態變數 + 取消舊 tag 的邏輯
+    assert "_select_hover_iids" in body, (
+        "❌ _on_select_tree_hover 應追蹤 _select_hover_iids 記住舊 iid"
     )
-    assert m, "找不到 _on_select_tree_hover"
-    assert "selection_set" in m.group(0), (
-        "❌ _on_select_tree_hover 應該用 selection_set 同步 hover = selected"
+    assert 'hover_' in body, (
+        "❌ _on_select_tree_hover 應設 hover_<price> tag"
+    )
+    # 不應有 selection_set（v4 hack）
+    assert "selection_set" not in body, (
+        "❌ v5 應不用 selection_set、回到 hover_<price> tag 系統"
     )
 
 
-def test_hover_handler_uses_selection_set_ms_tree():
-    """_ms_tree_hover 應該用 selection_set"""
+def test_ms_tree_hover_clears_old():
+    """_ms_tree_hover 切 row 時必須先 _ms_clear_hover"""
     content = _read()
     m = re.search(
         r'def _ms_tree_hover\(self,\s*event\):.*?(?=\n    def |\Z)',
@@ -814,13 +689,29 @@ def test_hover_handler_uses_selection_set_ms_tree():
         re.DOTALL,
     )
     assert m, "找不到 _ms_tree_hover"
-    assert "selection_set" in m.group(0), (
-        "❌ _ms_tree_hover 應該用 selection_set"
+    body = m.group(0)
+    assert "_ms_clear_hover" in body, (
+        "❌ _ms_tree_hover 應呼叫 _ms_clear_hover 取消舊 hover"
+    )
+    assert 'hover_' in body, "❌ _ms_tree_hover 應設 hover_<price> tag"
+
+
+def test_ms_tree_leave_clears_hover():
+    """_ms_tree_leave 應該 _ms_clear_hover（v4 改成不清、v5 改回來）"""
+    content = _read()
+    m = re.search(
+        r'def _ms_tree_leave\(self,\s*event\):.*?(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    assert m, "找不到 _ms_tree_leave"
+    assert "_ms_clear_hover" in m.group(0), (
+        "❌ _ms_tree_leave 應呼叫 _ms_clear_hover、讓離開 Treeview 時清掉 hover"
     )
 
 
-def test_hover_handler_uses_selection_set_etf_tree():
-    """_etf_tree_hover_combined 應該用 selection_set"""
+def test_etf_tree_hover_combined_clears_old():
+    """_etf_tree_hover_combined 切 row 時必須先 _etf_clear_hover_new"""
     content = _read()
     m = re.search(
         r'def _etf_tree_hover_combined\(self,\s*event\):.*?(?=\n    def |\Z)',
@@ -828,23 +719,150 @@ def test_hover_handler_uses_selection_set_etf_tree():
         re.DOTALL,
     )
     assert m, "找不到 _etf_tree_hover_combined"
-    assert "selection_set" in m.group(0), (
-        "❌ _etf_tree_hover_combined 應該用 selection_set"
+    body = m.group(0)
+    assert "_etf_clear_hover_new" in body, (
+        "❌ _etf_tree_hover_combined 應呼叫 _etf_clear_hover_new 取消舊 hover"
+    )
+    assert 'hover_' in body, "❌ _etf_tree_hover_combined 應設 hover_<price> tag"
+
+
+def test_on_tree_select_sync_hover_clears_old():
+    """_on_tree_select_sync_hover 切 selection 時先清舊 row 的 hover_* tag"""
+    content = _read()
+    m = re.search(
+        r'def _on_tree_select_sync_hover\(self,\s*event\):.*?(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    assert m, "找不到 _on_tree_select_sync_hover"
+    body = m.group(0)
+    # v5 改成：先 for loop 清舊、再設新
+    assert "_set_row_tag_normal" in body, (
+        "❌ _on_tree_select_sync_hover 應呼叫 _set_row_tag_normal 清舊 row"
+    )
+    assert 'hover_' in body, "❌ _on_tree_select_sync_hover 應設新 row hover_<price> tag"
+
+
+def test_set_row_tag_normal_function_exists():
+    """_set_row_tag_normal helper 存在"""
+    content = _read()
+    assert re.search(r'def _set_row_tag_normal\(', content), (
+        "❌ 找不到 _set_row_tag_normal helper"
     )
 
 
-def test_no_on_tree_key_move():
-    """【V1.2.0-kb-focus-v4】_on_tree_key_move 不應該存在（v3 hack）"""
+def test_on_tree_enter_focus_sets_first_row():
+    """_on_tree_enter_focus 應 focus_set + 設 focus(children[0]) 讓 Up/Down 可以 scroll"""
     content = _read()
-    bad = re.search(r'def _on_tree_key_move\(', content)
-    assert not bad, "❌ v4 已經不該有 _on_tree_key_move（v3 hack）"
+    m = re.search(
+        r'def _on_tree_enter_focus\(self,\s*event\):.*?(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    assert m, "找不到 _on_tree_enter_focus"
+    body = m.group(0)
+    assert "focus_set" in body, "❌ _on_tree_enter_focus 應呼叫 focus_set"
+    assert "tree.focus(children[0])" in body or "tree.focus(c0)" in body or "first_iid" in body, (
+        "❌ _on_tree_enter_focus 應設 focus 到第一個 row、避免 Up/Down 沒 focus 不 scroll"
+    )
 
 
-def test_no_set_row_tag_normal():
-    """_set_row_tag_normal 不應該存在（v3 hack）"""
+def test_no_selection_set_in_hover_handlers():
+    """【V1.2.0-kb-focus-v5】hover handlers 不應 selection_set（回到 hover_<price> tag 系統）"""
     content = _read()
-    bad = re.search(r'def _set_row_tag_normal\(', content)
-    assert not bad, "❌ v4 已經不該有 _set_row_tag_normal"
+    # v4 用 selection_set 為 single source of truth、但 Linux ttk 主題失效
+    # v5 改回 hover_<price> tag 系統、不依賴 selection state
+    # 跳過 docstring、只檢查函式內容
+    bad_patterns = [
+        ('def _on_select_tree_hover', 'selection_set'),
+        ('def _ms_tree_hover', 'selection_set'),
+        ('def _etf_tree_hover_combined', 'selection_set'),
+    ]
+    for fn_def, target in bad_patterns:
+        idx = content.find(fn_def)
+        if idx == -1:
+            continue
+        # 找下個 def 或 class、跳過中間 docstring
+        end = content.find('\n    def ', idx + len(fn_def))
+        if end == -1:
+            end = len(content)
+        body = content[idx:end]
+        # 跳過 docstring ("""...""")
+        if '"""' in body:
+            parts = body.split('"""')
+            # docstring 結束後的內容
+            body = '"""'.join(parts[2:])
+        assert target not in body, f"❌ {fn_def} 不應使用 {target}（v5 改回 hover_<price> tag 系統）"
+
+
+def test_no_up_down_key_binding():
+    """【V1.2.0-kb-focus-v5】不應該綁 <Up>/<Down>、Treeview browse mode 預設會處理"""
+    content = _read()
+    bad = re.findall(
+        r'(?:results_tree|self\._(?:ms|etf)_tree)\.bind\(["\']<(?:Up|Down)>["\']',
+        content,
+    )
+    assert not bad, f"❌ 不應該綁 <Up>/<Down>、會跟 Treeview 預設行為衝突"
+
+
+def test_focus_tab_tree_uses_hover_tag():
+    """_focus_tab_tree_on_change 應設 hover_<price> tag、不用 selection_set"""
+    content = _read()
+    m = re.search(
+        r'def _focus_tab_tree_on_change\(self,\s*current_tab_idx.*?(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    assert m, "找不到 _focus_tab_tree_on_change"
+    body = m.group(0)
+    assert "selection_set" not in body, (
+        "❌ v5 _focus_tab_tree_on_change 不應該用 selection_set"
+    )
+    assert "hover_" in body, (
+        "❌ v5 _focus_tab_tree_on_change 應設 hover_<price> tag"
+    )
+
+
+def test_click_handlers_no_selection_set():
+    """【V1.2.0-kb-focus-v5】3 個 click handler 不應該 selection_set
+
+    Treeview browse mode click 會自動 set selection
+    我們用 <<TreeviewSelect>> handler 統一處理 hover_<price> tag
+    """
+    content = _read()
+    for fn_name in ["_on_select_tree_click", "_ms_toggle_check", "_etf_toggle_check"]:
+        idx = content.find(f'def {fn_name}(self, event):')
+        if idx == -1:
+            continue
+        # 找 docstring 結束位置
+        doc_end = content.find('"""', idx)
+        if doc_end == -1:
+            continue
+        doc_end = content.find('"""', doc_end + 3)
+        if doc_end == -1:
+            continue
+        # 找函式結尾
+        end = content.find('\n    def ', doc_end)
+        if end == -1:
+            end = len(content)
+        # 只看 docstring 後到函式結尾、跳過註解行
+        body_lines = content[doc_end:end].split('\n')
+        code_lines = [l for l in body_lines if not l.strip().startswith('#')]
+        code = '\n'.join(code_lines)
+        assert "selection_set" not in code, (
+            f"❌ {fn_name} 不應呼叫 selection_set、browse mode 會自動 set"
+        )
+
+
+def test_hover_price_tag_registered():
+    """3 個 tree 都有 hover_up/hover_down/hover_zero tag 註冊（v1.1-price-color-fix2）"""
+    content = _read()
+    # 寫法都是 f'hover_{ptag}' for ptag in ['up', 'down', 'zero']
+    for tree_name in ["results_tree", "self._etf_tree", "self._ms_tree"]:
+        pattern = re.escape(tree_name) + r'\.tag_configure\(f"hover_\{ptag\}"'
+        assert re.search(pattern, content), (
+            f"❌ {tree_name} 沒註冊 hover_up/hover_down/hover_zero tag"
+        )
 
 
 # ==========================================================
@@ -852,70 +870,201 @@ def test_no_set_row_tag_normal():
 # ==========================================================
 
 
-def test_on_tree_enter_focus_calls_focus_set():
-    """_on_tree_enter_focus 應該呼叫 tree.focus_set()"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    calls = []
-
-    tree = SimpleNamespace()
-    tree.focus_set = lambda: calls.append("focus_set")
-
-    event = SimpleNamespace(widget=tree)
-    st.StrategyGUI._on_tree_enter_focus(SimpleNamespace(), event)
-
-    assert "focus_set" in calls, "_on_tree_enter_focus 應呼叫 tree.focus_set()"
-
-
-def test_on_tree_select_sync_hover_sets_hover_tag():
-    """_on_tree_select_sync_hover：selection 變化時設 hover_<price> tag"""
+def test_on_select_tree_hover_movement_clears_old():
+    """_on_select_tree_hover 移動時取消舊 row 的 hover_<price> tag"""
     from types import SimpleNamespace
     import StockTool as st
 
     items_state = {
-        "r1": {"tags": ("unchecked", "price_up")},
-        "r2": {"tags": ("unchecked", "price_down")},
+        "r1": {"tags": ("hover_up",), "values": ("☐", "3188")},
+        "r2": {"tags": ("unchecked", "price_down"), "values": ("☐", "3028")},
     }
-    tree = SimpleNamespace(focused_iid="r2")
-    tree.selection = lambda: ("r2",)
+
+    def item(iid, *args, **kwargs):
+        if args:
+            return items_state[iid].get(args[0], ())
+        if kwargs:
+            items_state[iid].update(kwargs)
+        return SimpleNamespace(values=items_state[iid].get("values", ()), tags=items_state[iid].get("tags", ()))
+
+    tree = SimpleNamespace()
+    tree.identify = lambda region, x, y: "cell"
+    tree.identify_row = lambda y: "r2"
+    tree.item = item
     tree.get_children = lambda: ["r1", "r2"]
-    tree.item = lambda iid, **kw: items_state[iid].update(kw) if kw else SimpleNamespace(**items_state[iid])
+
+    # 預先設定 _select_hover_iids、模擬之前 hover 在 r1
+    select_hover_iids = {id(tree): "r1"}
 
     app = SimpleNamespace(
-        _ms_tree=tree,
-        _etf_tree=SimpleNamespace(),
-        select_tree=SimpleNamespace(),
-        _ms_price_tags={"r1": "price_up", "r2": "price_down"},
-        _etf_price_tags={},
-        _select_price_tags={},
+        select_tree=tree,
+        _select_checked={"r1": False, "r2": False},
+        _bt_checked={},
+        _select_price_tags={"r1": "price_up", "r2": "price_down"},
+        _select_hover_iids=select_hover_iids,
     )
-    app._get_price_tag_for_tree = lambda t, iid: app._ms_price_tags.get(iid, "price_zero")
 
-    event = SimpleNamespace(widget=tree)
-    st.StrategyGUI._on_tree_select_sync_hover(app, event)
+    event = SimpleNamespace(widget=tree, x=10, y=10)
+    st.StrategyGUI._on_select_tree_hover(app, event)
 
+    # r1 應該被恢復成 unchecked + price_up
+    assert "hover" not in items_state["r1"]["tags"], (
+        f"r1 應取消 hover_* tag、實際 {items_state['r1']['tags']}"
+    )
+    assert "price_up" in items_state["r1"]["tags"], (
+        f"r1 應保留 price_up tag、實際 {items_state['r1']['tags']}"
+    )
+    # r2 應該有 hover_down tag
     assert "hover_down" in items_state["r2"]["tags"], (
         f"r2 應設 hover_down tag、實際 {items_state['r2']['tags']}"
     )
 
 
-def test_focus_tab_tree_select_tree():
-    """_focus_tab_tree_on_change tab 0 → focus + selection_set select_tree 第一個 row"""
+def test_ms_tree_hover_movement_clears_old():
+    """_ms_tree_hover 移動時取消舊 row 的 hover_<price> tag"""
     from types import SimpleNamespace
     import StockTool as st
 
-    items_state = {"r1": {"tags": ()}}
-    sel_calls = []
-    focus_calls = []
-    see_calls = []
+    items_state = {
+        "m1": {"tags": ("hover_up",)},
+        "m2": {"tags": ("unchecked", "price_down")},
+    }
 
-    tree = SimpleNamespace(focused_iid="")
+    def item(iid, *args, **kwargs):
+        if kwargs:
+            items_state[iid].update(kwargs)
+        return SimpleNamespace(tags=items_state[iid].get("tags", ()))
+
+    tree = SimpleNamespace()
+    tree.identify = lambda region, x, y: "cell"
+    tree.identify_row = lambda y: "m2"
+    tree.item = item
+
+    app = SimpleNamespace(
+        _ms_tree=tree,
+        _ms_hover_iid="m1",
+        _ms_checked={"m1": False, "m2": False},
+        _ms_price_tags={"m1": "price_up", "m2": "price_down"},
+    )
+    # 因為 _ms_clear_hover 是 method、SimpleNamespace 沒有、手動實作
+    def fake_clear_hover():
+        old = app._ms_hover_iid
+        if not old:
+            return
+        app._ms_hover_iid = None
+        if old in [iid for iid in ["m1", "m2"]]:
+            checked = app._ms_checked.get(old, False)
+            price_tag = app._ms_price_tags.get(old, "price_zero")
+            app._ms_tree.item(old, tags=("checked" if checked else "unchecked", price_tag))
+    app._ms_clear_hover = fake_clear_hover
+
+    event = SimpleNamespace(widget=tree, x=10, y=10)
+    st.StrategyGUI._ms_tree_hover(app, event)
+
+    assert "hover" not in items_state["m1"]["tags"], (
+        f"m1 應取消 hover、實際 {items_state['m1']['tags']}"
+    )
+    assert "hover_down" in items_state["m2"]["tags"], (
+        f"m2 應設 hover_down、實際 {items_state['m2']['tags']}"
+    )
+
+
+def test_on_tree_select_sync_hover_clears_old_row():
+    """_on_tree_select_sync_hover selection 變化時清舊 row 的 hover_* tag"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    items_state = {
+        "s1": {"tags": ("hover_up",)},
+        "s2": {"tags": ("unchecked", "price_down")},
+    }
+
+    def item(iid, *args, **kwargs):
+        if args:
+            return items_state[iid].get(args[0], ())
+        if kwargs:
+            items_state[iid].update(kwargs)
+        return SimpleNamespace(tags=items_state[iid].get("tags", ()))
+
+    tree = SimpleNamespace()
+    tree.selection = lambda: ("s2",)
+    tree.get_children = lambda: ["s1", "s2"]
+    tree.item = item
+
+    app = SimpleNamespace(
+        _ms_tree=tree,
+        _etf_tree=SimpleNamespace(),
+        select_tree=SimpleNamespace(),
+        _ms_checked={"s1": False, "s2": False},
+        _ms_price_tags={"s1": "price_up", "s2": "price_down"},
+        _etf_checked={},
+        _etf_price_tags={},
+        _select_checked={},
+        _select_price_tags={},
+    )
+    app._get_price_tag_for_tree = lambda t, iid: app._ms_price_tags.get(iid, "price_zero")
+    app._set_row_tag_normal = lambda t, iid: t.item(
+        iid, tags=("unchecked", app._ms_price_tags.get(iid, "price_zero"))
+    )
+
+    event = SimpleNamespace(widget=tree)
+    st.StrategyGUI._on_tree_select_sync_hover(app, event)
+
+    assert "hover" not in items_state["s1"]["tags"], (
+        f"s1 應取消 hover、實際 {items_state['s1']['tags']}"
+    )
+    assert "hover_down" in items_state["s2"]["tags"], (
+        f"s2 應設 hover_down、實際 {items_state['s2']['tags']}"
+    )
+
+
+def test_on_tree_enter_focus_sets_focus():
+    """_on_tree_enter_focus 呼叫 focus_set + focus(children[0])"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    focus_set_calls = []
+    focus_calls = []
+
+    def focus_fn(iid=None):
+        if iid is not None:
+            focus_calls.append(iid)
+            return iid
+        return ""
+
+    tree = SimpleNamespace()
+    tree.focus_set = lambda: focus_set_calls.append(True)
+    tree.focus = focus_fn
+    tree.get_children = lambda: ["c1", "c2"]
+
+    event = SimpleNamespace(widget=tree)
+    st.StrategyGUI._on_tree_enter_focus(SimpleNamespace(), event)
+
+    assert focus_set_calls, "_on_tree_enter_focus 應呼叫 focus_set"
+    assert "c1" in focus_calls, "_on_tree_enter_focus 應設 focus(children[0])"
+
+
+def test_focus_tab_tree_no_selection_set():
+    """_focus_tab_tree_on_change 不用 selection_set、改用 hover_<price> tag"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    items_state = {"r1": {"tags": ("unchecked", "price_up")}}
+    sel_set_calls = []
+    focus_calls = []
+
+    def item(iid, *args, **kwargs):
+        if kwargs:
+            items_state[iid].update(kwargs)
+        return SimpleNamespace(tags=items_state[iid].get("tags", ()))
+
+    tree = SimpleNamespace()
     tree.focus_set = lambda: None
-    tree.selection_set = lambda iid: sel_calls.append(iid)
+    tree.selection_set = lambda iid: sel_set_calls.append(iid)
     tree.focus = lambda iid: focus_calls.append(iid)
-    tree.see = lambda iid: see_calls.append(iid)
+    tree.see = lambda iid: None
     tree.get_children = lambda: ["r1"]
+    tree.item = item
 
     app = SimpleNamespace(
         select_tree=tree,
@@ -923,89 +1072,14 @@ def test_focus_tab_tree_select_tree():
         _ms_tree=SimpleNamespace(),
         backtest_tree=SimpleNamespace(),
     )
-    # 模擬 after_idle
+    app._get_price_tag_for_tree = lambda t, iid: "price_up"
     app.after_idle = lambda fn: fn()
 
     st.StrategyGUI._focus_tab_tree_on_change(app, 0)
 
-    assert "r1" in sel_calls, "select_tree 應呼叫 selection_set('r1')"
-    assert "r1" in focus_calls, "select_tree 應呼叫 focus('r1')"
-    assert "r1" in see_calls, "select_tree 應呼叫 see('r1')"
-
-
-def test_focus_tab_tree_etf_tree():
-    """tab 1 → _etf_tree"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    sel_calls = []
-    tree = SimpleNamespace(focused_iid="")
-    tree.focus_set = lambda: None
-    tree.selection_set = lambda iid: sel_calls.append(iid)
-    tree.focus = lambda iid: None
-    tree.see = lambda iid: None
-    tree.get_children = lambda: ["e1"]
-
-    app = SimpleNamespace(
-        select_tree=SimpleNamespace(),
-        _etf_tree=tree,
-        _ms_tree=SimpleNamespace(),
-        backtest_tree=SimpleNamespace(),
+    # v5：不用 selection_set、改用 hover_<price> tag
+    assert not sel_set_calls, "v5 _focus_tab_tree_on_change 不應 selection_set"
+    assert "r1" in focus_calls, "應呼叫 focus(r1)"
+    assert "hover_up" in items_state["r1"]["tags"], (
+        f"r1 應設 hover_up tag、實際 {items_state['r1']['tags']}"
     )
-    app.after_idle = lambda fn: fn()
-
-    st.StrategyGUI._focus_tab_tree_on_change(app, 1)
-
-    assert "e1" in sel_calls, "_etf_tree 應呼叫 selection_set('e1')"
-
-
-def test_focus_tab_tree_ms_tree():
-    """tab 2 → _ms_tree"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    sel_calls = []
-    tree = SimpleNamespace(focused_iid="")
-    tree.focus_set = lambda: None
-    tree.selection_set = lambda iid: sel_calls.append(iid)
-    tree.focus = lambda iid: None
-    tree.see = lambda iid: None
-    tree.get_children = lambda: ["m1"]
-
-    app = SimpleNamespace(
-        select_tree=SimpleNamespace(),
-        _etf_tree=SimpleNamespace(),
-        _ms_tree=tree,
-        backtest_tree=SimpleNamespace(),
-    )
-    app.after_idle = lambda fn: fn()
-
-    st.StrategyGUI._focus_tab_tree_on_change(app, 2)
-
-    assert "m1" in sel_calls
-
-
-def test_focus_tab_tree_backtest_tree():
-    """tab 4 → backtest_tree"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    sel_calls = []
-    tree = SimpleNamespace(focused_iid="")
-    tree.focus_set = lambda: None
-    tree.selection_set = lambda iid: sel_calls.append(iid)
-    tree.focus = lambda iid: None
-    tree.see = lambda iid: None
-    tree.get_children = lambda: ["b1"]
-
-    app = SimpleNamespace(
-        select_tree=SimpleNamespace(),
-        _etf_tree=SimpleNamespace(),
-        _ms_tree=SimpleNamespace(),
-        backtest_tree=tree,
-    )
-    app.after_idle = lambda fn: fn()
-
-    st.StrategyGUI._focus_tab_tree_on_change(app, 4)
-
-    assert "b1" in sel_calls
