@@ -390,25 +390,28 @@ def test_etf_tree_click_sets_focus():
     )
 
 
-def test_style_map_sets_selected_color():
-    """ttk.Style.map("Treeview", ...) 設定 selected 顏色為黃色"""
+def test_no_style_map_for_selected():
+    """【V1.2.0-kb-focus-v2】不應該覆寫 selected state 顏色
+
+    William 16:26 反映「up/down 文字變亮白色」
+    根因：Linux ttk 主題 selected state 預設會把 foreground 改白色
+    上一版用 _style.map(selected → #fff3a0) 試圖同色、但沒改 foreground → 文字變白
+    新設計：完全不用 selected state 表示 keyboard focus、改用 hover_* tag
+    所以不應該有 _style.map("Treeview", background=[("selected", ...)]) 設定
+    """
     content = _read()
-    # 找 _style.map("Treeview", ...) 內有 "selected"
     m = re.search(
         r'_style\.map\([^)]*Treeview[^)]*\)',
         content,
         re.DOTALL,
     )
-    assert m, "找不到 _style.map(\"Treeview\", ...) 設定"
-    body = m.group(0)
-    assert "selected" in body, (
-        "❌ Treeview style 沒設定 selected state 顏色！\n"
-        "William 15:58 反映 highlight 顏色跟 hover 不同步"
-    )
-    # 應該用跟 hover 一樣的 #fff3a0
-    assert "#fff3a0" in body, (
-        "❌ selected 顏色沒用 #fff3a0（hover 用的色）！"
-    )
+    # 期望找不到、或者找到但不包含 selected
+    if m and "selected" in m.group(0):
+        pytest.fail(
+            "❌ 還在覆寫 selected state 顏色！\n"
+            "新設計：不要覆寫 selected、讓 hover_* tag 同時處理 hover + keyboard focus\n"
+            "詳見 _sync_focus_to_hover()"
+        )
 
 
 def test_focus_tab_tree_function_exists():
@@ -609,3 +612,283 @@ def test_focus_tab_tree_unknown_tab_no_op():
     # 不應該爆
     st.StrategyGUI._focus_tab_tree_on_change(app, 3)  # 買賣記錄 tab
     st.StrategyGUI._focus_tab_tree_on_change(app, 99)  # 不存在
+
+
+# ==========================================================
+# 【V1.2.0-kb-focus-v2】完全不用 selected state、用 hover_* tag 同時處理
+# ==========================================================
+
+
+def test_sync_focus_to_hover_function_exists():
+    """_sync_focus_to_hover 函式存在"""
+    content = _read()
+    assert re.search(r'def _sync_focus_to_hover\(self,\s*event\):', content), (
+        "❌ 找不到 _sync_focus_to_hover(self, event) 函式！\n"
+        "新設計：用 <<TreeviewSelect>> 把 focus 變化同步到 hover_* tag"
+    )
+
+
+def test_sync_focus_to_hover_supports_all_four_trees():
+    """_sync_focus_to_hover 應該支援 4 種 tree"""
+    content = _read()
+    m = re.search(
+        r'def _sync_focus_to_hover\(self,\s*event\):.*?(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    assert m, "找不到 _sync_focus_to_hover"
+    body = m.group(0)
+    for tree_attr in ("_ms_tree", "_etf_tree", "select_tree", "_bt_checked"):
+        assert tree_attr in body, (
+            f"❌ _sync_focus_to_hover 沒處理 {tree_attr}！"
+        )
+
+
+def test_select_tree_binds_treeview_select():
+    """select_tree / backtest_tree 有綁 <<TreeviewSelect>>"""
+    content = _read()
+    # 透過 results_tree 共用綁
+    m = re.search(
+        r'results_tree\.bind\(\s*["\']<<TreeviewSelect>>["\']',
+        content,
+    )
+    assert m, (
+        "❌ results_tree 沒綁 <<TreeviewSelect>>！\n"
+        "William 16:26 反映 hover 跟 keyboard highlight 沒同步"
+    )
+
+
+def test_ms_tree_binds_treeview_select():
+    """_ms_tree 有綁 <<TreeviewSelect>>"""
+    content = _read()
+    m = re.search(
+        r'self\._ms_tree\.bind\(\s*["\']<<TreeviewSelect>>["\']',
+        content,
+    )
+    assert m, "❌ _ms_tree 沒綁 <<TreeviewSelect>>！"
+
+
+def test_etf_tree_binds_treeview_select():
+    """_etf_tree 有綁 <<TreeviewSelect>>"""
+    content = _read()
+    m = re.search(
+        r'self\._etf_tree\.bind\(\s*["\']<<TreeviewSelect>>["\']',
+        content,
+    )
+    assert m, "❌ _etf_tree 沒綁 <<TreeviewSelect>>！"
+
+
+def test_force_focus_tree_function_exists():
+    """【V1.2.0-kb-focus-v2】_force_focus_tree exists for after_idle"""
+    content = _read()
+    assert re.search(r'def _force_focus_tree\(', content), (
+        "❌ 找不到 _force_focus_tree 函式！\n"
+        "after_idle 強迫 focus、避免被 notebook 內部事件覆蓋"
+    )
+
+
+def test_focus_tab_tree_uses_after_idle():
+    """_focus_tab_tree_on_change 內應該用 after_idle"""
+    content = _read()
+    m = re.search(
+        r'def _focus_tab_tree_on_change\(self,\s*current_tab_idx.*?(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    body = m.group(0)
+    assert "after_idle" in body, (
+        "❌ _focus_tab_tree_on_change 沒用 after_idle！\n"
+        "William 16:26 反映 ETF / 手動選股 up/down 還是不會動 → 需要 after_idle 避開 notebook 內部事件"
+    )
+
+
+# ==========================================================
+# 行為測試：_sync_focus_to_hover
+# ==========================================================
+
+
+def test_sync_focus_to_hover_ms_tree():
+    """_sync_focus_to_hover：ms_tree focus 改變時把 hover tag 移到新 row"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    # 模擬 tree 有兩個 rows + 一個 row 已經有 hover_zero tag
+    rows = ["row1", "row2"]
+    items_state = {
+        "row1": {"tags": ("hover_zero",), "values": ("☐", "3188")},
+        "row2": {"tags": ("unchecked", "price_up"), "values": ("☐", "3028")},
+    }
+
+    def get_children():
+        return list(rows)
+
+    def item(iid, *args, **kwargs):
+        if args:
+            # tree.item(iid, "tags") → 回傳該欄位值
+            return items_state[iid].get(args[0], ())
+        if kwargs:
+            items_state[iid].update(kwargs)
+        s = items_state[iid]
+        return SimpleNamespace(values=s.get("values", ()), tags=s.get("tags", ()))
+
+    tree = SimpleNamespace(focused_iid="row2")
+    tree.focus = lambda: tree.focused_iid
+    tree.get_children = get_children
+    tree.item = item
+
+    app = SimpleNamespace(
+        _ms_tree=tree,
+        _etf_tree=SimpleNamespace(),
+        select_tree=SimpleNamespace(),
+        _ms_checked={"row1": False, "row2": False},
+        _ms_price_tags={"row1": "price_zero", "row2": "price_up"},
+        _etf_checked={},
+        _etf_price_tags={},
+        _select_checked={},
+        _select_price_tags={},
+    )
+
+    event = SimpleNamespace(widget=tree)
+    st.StrategyGUI._sync_focus_to_hover(app, event)
+
+    # row1 應該被恢復成 unchecked + price_zero
+    assert "hover" not in items_state["row1"]["tags"], (
+        f"row1 應該取消 hover_* tag、實際 tags={items_state['row1']['tags']}"
+    )
+    # row2 應該被設成 hover_up
+    assert "hover_up" in items_state["row2"]["tags"], (
+        f"row2 應該設 hover_up tag、實際 tags={items_state['row2']['tags']}"
+    )
+
+
+def test_sync_focus_to_hover_etf_tree():
+    """_sync_focus_to_hover：etf_tree focus 改變時把 hover tag 移到新 row"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    items_state = {
+        "e1": {"tags": ("unchecked", "price_down"), "values": ("☐", "0050")},
+        "e2": {"tags": ("unchecked", "price_up"), "values": ("☐", "0056")},
+    }
+
+    def item(iid, *args, **kwargs):
+        if args:
+            return items_state[iid].get(args[0], ())
+        if kwargs:
+            items_state[iid].update(kwargs)
+        s = items_state[iid]
+        return SimpleNamespace(values=s.get("values", ()), tags=s.get("tags", ()))
+
+    tree = SimpleNamespace(focused_iid="e1")
+    tree.focus = lambda: tree.focused_iid
+    tree.get_children = lambda: ["e1", "e2"]
+    tree.item = item
+
+    app = SimpleNamespace(
+        _ms_tree=SimpleNamespace(),
+        _etf_tree=tree,
+        select_tree=SimpleNamespace(),
+        _ms_checked={},
+        _ms_price_tags={},
+        _etf_checked={"e1": False, "e2": False},
+        _etf_price_tags={"e1": "price_down", "e2": "price_up"},
+        _select_checked={},
+        _select_price_tags={},
+    )
+
+    event = SimpleNamespace(widget=tree)
+    st.StrategyGUI._sync_focus_to_hover(app, event)
+
+    assert "hover_down" in items_state["e1"]["tags"], (
+        f"e1 應設 hover_down tag、實際 tags={items_state['e1']['tags']}"
+    )
+
+
+def test_sync_focus_to_hover_select_tree():
+    """_sync_focus_to_hover：select_tree focus 改變時把 hover tag 移到新 row"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    items_state = {
+        "s1": {"tags": ("unchecked", "price_up"), "values": ("☐", "2330")},
+    }
+
+    def item(iid, *args, **kwargs):
+        if args:
+            return items_state[iid].get(args[0], ())
+        if kwargs:
+            items_state[iid].update(kwargs)
+        s = items_state[iid]
+        return SimpleNamespace(values=s.get("values", ()), tags=s.get("tags", ()))
+
+    tree = SimpleNamespace(focused_iid="s1")
+    tree.focus = lambda: tree.focused_iid
+    tree.get_children = lambda: ["s1"]
+    tree.item = item
+
+    app = SimpleNamespace(
+        _ms_tree=SimpleNamespace(),
+        _etf_tree=SimpleNamespace(),
+        select_tree=tree,
+        _ms_checked={},
+        _ms_price_tags={},
+        _etf_checked={},
+        _etf_price_tags={},
+        _select_checked={"s1": False},
+        _select_price_tags={"s1": "price_up"},
+    )
+
+    event = SimpleNamespace(widget=tree)
+    st.StrategyGUI._sync_focus_to_hover(app, event)
+
+    assert "hover_up" in items_state["s1"]["tags"]
+
+
+def test_sync_focus_to_hover_no_focus_no_op():
+    """focus 為空時（tree.focus() 回空）不應該爆"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    tree = SimpleNamespace(focused_iid="")
+    tree.focus = lambda: tree.focused_iid
+    tree.get_children = lambda: ["row1"]
+
+    app = SimpleNamespace(
+        _ms_tree=tree,
+        _etf_tree=SimpleNamespace(),
+        select_tree=SimpleNamespace(),
+        _ms_checked={},
+        _ms_price_tags={},
+        _etf_checked={},
+        _etf_price_tags={},
+        _select_checked={},
+        _select_price_tags={},
+    )
+
+    event = SimpleNamespace(widget=tree)
+    # 不應該爆
+    st.StrategyGUI._sync_focus_to_hover(app, event)
+
+
+def test_force_focus_tree():
+    """_force_focus_tree：呼叫後應該 focus_set + focus"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    calls = []
+
+    def focus_set():
+        calls.append(("focus_set",))
+
+    def focus(iid):
+        calls.append(("focus", iid))
+
+    tree = SimpleNamespace()
+    tree.focus_set = focus_set
+    tree.focus = focus
+    tree.get_children = lambda: ["row1"]
+
+    st.StrategyGUI._force_focus_tree(SimpleNamespace(), tree, "row1")
+
+    assert ("focus_set",) in calls, "應呼叫 focus_set"
+    assert ("focus", "row1") in calls, "應呼叫 focus(row1)"
