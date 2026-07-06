@@ -1,12 +1,36 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-system-topn (2026-07-06 15:02) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-keyboard-toggle (2026-07-06 15:32) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-system-topn
-最後更新: 2026-07-06 15:12 (Asia/Taipei)
+Version: v1.2.0-paper-trading-keyboard-toggle
+最後更新: 2026-07-06 15:44 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+【v1.2.0 paper-trading-keyboard-toggle】2026-07-06 15:32 (William 15:32 反映「鍵盤操作選股」)
+【背景】William 2026-07-06 15:32 反映：
+  - 選股結果除了「mouse roller then click 選股」外、希望能用鍵盤操作
+  - 希望：↑/↓ 鍵移動 highlight、Space 鍵 select item (toggle 勾選)
+  - 希望 4 個 Treeview 都要支援（系統選股 / 手動選股 / ETF 選股 / 回測）
+
+【實作】
+- 新增 StrategyGUI._on_tree_space_toggle(event) 統一處理 4 個 Treeview
+  - 邏輯：用 tree.focus() 取得當前 highlight row、toggle 第一欄勾選
+  - 根據 tree 判斷用哪個 checked_dict（_ms_checked / _etf_checked / _select_checked / _bt_checked）
+  - return "break" 避免 Space 鍵被當成 button activate
+- 綁定 .bind("<space>", self._on_tree_space_toggle) 在 4 個 Treeview
+  - select_tree / backtest_tree 共用 _build_tab_layout 加在 results_tree.bind
+  - etf_tree / ms_tree 各自 binding 區加
+- ↑/↓ 鍵移動 focus 是 Tkinter Treeview 內建、不需額外 binding
+
+【新測試】tests/test_keyboard_space_toggle.py (15 個全線)
+- 靜態測試 (9 個)：4 個 Treeview 都有綁 <space>、handler 是 _on_tree_space_toggle、
+  函式存在、return "break"、用 focus()、支援 4 種 tree
+- 行為測試 (6 個)：select_tree / ms_tree / etf_tree / backtest_tree 各自 toggle 正確、
+  連按兩次 unselect、沒 focus 不爆
+
+【驗證】全 test suite 跑完 719 pass + 7 pre-existing fail（與本改無關、修改前就 fail）
 
 【v1.2.0 paper-trading-system-topn】2026-07-06 15:02 (William 14:54 反映「TopN=20 結果出現 50 檔」)
 【背景】William 2026-07-06 14:54 反映：
@@ -3967,6 +3991,8 @@ class StrategyGUI(tk.Tk):
         results_tree.bind("<Motion>", self._on_select_tree_hover)
         results_tree.bind("<Leave>", self._on_select_tree_leave)
         results_tree.bind("<Button-1>", self._on_select_tree_click)
+        # 【V1.2.0-keyboard-toggle】Space 鍵 toggle focus row 勾選（↑/↓ 鍵移動 focus 是 Treeview 內建）
+        results_tree.bind("<space>", self._on_tree_space_toggle)
         # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單
         # 原本：results_tree.bind("<Button-3>", self._on_select_tree_rclick)
         # 為什麼拿：header 已是 ☐/☑/▣ 動態 checkbox、點下去就是全選/全不選
@@ -4902,6 +4928,8 @@ class StrategyGUI(tk.Tk):
         self._etf_tree.bind("<Motion>", self._etf_tree_hover_combined)
         self._etf_tree.bind("<Leave>", self._etf_tree_leave_combined)
         self._etf_tree.bind("<Button-1>", self._etf_toggle_check)
+        # 【V1.2.0-keyboard-toggle】Space 鍵 toggle focus row 勾選
+        self._etf_tree.bind("<space>", self._on_tree_space_toggle)
         # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單
         # 原本：self._etf_tree.bind("<Button-3>", self._etf_tree_rclick_new)
         # 為什麼拿：header 已是 ☐/☑/▣ 動態 checkbox、右鍵選單重複
@@ -5159,6 +5187,8 @@ class StrategyGUI(tk.Tk):
         self._ms_tree.bind("<Button-1>", self._ms_toggle_check)
         self._ms_tree.bind("<Motion>", self._ms_tree_hover)
         self._ms_tree.bind("<Leave>", self._ms_tree_leave)
+        # 【V1.2.0-keyboard-toggle】Space 鍵 toggle focus row 勾選
+        self._ms_tree.bind("<space>", self._on_tree_space_toggle)
         # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單
         # 原本：
         #   self._ms_tree.bind("<Button-3>", self._ms_tree_rclick)  # 原本是 dead code、被下面那行覆蓋
@@ -8123,6 +8153,58 @@ class StrategyGUI(tk.Tk):
             tree.item(item, values=vals, tags=("unchecked", price_tag))
         # 【V0.9.5-tab-split-phase3-D】動態更新 header
         self._update_checkbox_header(tree, checked_dict)
+
+    def _on_tree_space_toggle(self, event):
+        """【V1.2.0-keyboard-toggle】Space 鍵 toggle 當前 focus row 的第一欄勾選
+
+        William 2026-07-06 15:32 反映：
+          - 系統選股 / 手動選股 / ETF 選股 / 回測，除了滑鼠點勾選外
+          - 希望用 ↑/↓ 鍵移動 highlight、Space 鍵 toggle 勾選
+
+        設計：
+          - ↑/↓ 鍵移動 focus 是 Tkinter Treeview 內建、不需額外 binding
+          - 本函式只負責「focus row 的第一欄 toggle」
+          - 支援 select_tree / backtest_tree / ms_tree / etf_tree 四個 Treeview
+          - return "break" 避免 Space 鍵被當成 button activate 事件跳出去
+
+        Args:
+            event: Tkinter event（event.widget = tree）
+        """
+        tree = event.widget
+        iid = tree.focus()
+        if not iid:
+            return "break"
+
+        # 判斷是哪個 Treeview、拿對應的 checked_dict 跟 price_tags_attr
+        if tree is self._ms_tree:
+            checked_dict = self._ms_checked
+            price_tags_attr = "_ms_price_tags"
+        elif tree is self._etf_tree:
+            checked_dict = self._etf_checked
+            price_tags_attr = "_etf_price_tags"
+        else:
+            # select_tree / backtest_tree（兩者共用 _on_select_tree_click）
+            if tree is self.select_tree:
+                checked_dict = self._select_checked
+            else:
+                if not hasattr(self, "_bt_checked"):
+                    self._bt_checked = {}
+                checked_dict = self._bt_checked
+            price_tags_attr = "_select_price_tags"
+
+        # Toggle 第一欄勾選
+        current = checked_dict.get(iid, False)
+        checked_dict[iid] = not current
+        vals = list(tree.item(iid, "values"))
+        vals[0] = "☑" if not current else "☐"
+        price_tag = getattr(self, price_tags_attr, {}).get(iid, "price_zero")
+        tree.item(
+            iid, values=vals,
+            tags=("checked" if not current else "unchecked", price_tag),
+        )
+        # 動態更新 header（全選/部分/全不選 狀態）
+        self._update_checkbox_header(tree, checked_dict)
+        return "break"
 
     def _update_checkbox_header(self, tree, checked_dict):
         """【V0.9.5-tab-split-phase3-D】依全選狀態動態更新 checkbox header ☑/☐/▣
