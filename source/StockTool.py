@@ -1,45 +1,49 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v2 (2026-07-06 16:26) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v3 (2026-07-06 18:54) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v2
-最後更新: 2026-07-06 16:36 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v3
+最後更新: 2026-07-06 19:07 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
 
-【v1.2.0 paper-trading-kb-focus-v2】2026-07-06 16:26 (William 16:26 反映「文字變白 / hover-keyboard 不同步 / etf-ms 不會動」)
-【背景】William 2026-07-06 16:26 反映三個問題：
-  1. 系統選股：要先 click 後 up/down 才會動作、cursor 移到結果處就要可以動作
-  2. up/down 動作時 highlight 文字變亮白色、不能變色
-  3. up/down key 的 highlight 跟 mouse 移動的 highlight 沒有同步
+【v1.2.0 paper-trading-kb-focus-v3】2026-07-06 18:54 (William 18:54 反映「仍要 click / up/down 變藍色 / scroll 不到最後 / etf-ms 不會動 / up-down 點 - hover 不同步」)
+【背景】William 2026-07-06 18:54 反映五個問題：
+  1. 系統選股：仍要先 click 後 up/down 才會動作、cursor 移到結果處就要可以動作
+  2. click 後 highlight 變藍色（Treeview selected state 預設）
+  3. up/down 移動 scroll 不到最後一個 row、scroll 後 mouse 移走 hover 變回黃色
   4. ETF & 手動選股 up/down key 不會動作
+  5. up/down 停止時藍色 highlight 留在畫面、用 mouse 移走 hover 後改用 up/down 從藍色處移動 highlight
 
-【根因】
-  1. 之前 _focus_tab_tree_on_change 只呼叫 tree.focus_set() + tree.focus(children[0])
-     notebook 內部事件可能覆蓋 focus_set → 解決用 after_idle 設第二次
-  2. 之前用 _style.map(selected → 黃色) 試圖讓 keyboard highlight 跟 hover 同色
-     但 Linux 上 selected state 預設把 foreground 改成白色 → 文字發白
-     而且 state 比 tag 優先 → 蓋掉 price_up/down/zero 漲跌色
-  3. 之前 hover_* tag 只在滑鼠 hover 時設、鍵盤移動 focus 時不會更新 → hover 跟 keyboard 不同步
+【v2 失敗根因】
+  1. 靠 notebook focus_set + after_idle 不夠、notebook 內部事件仍會搶走 focus
+  2. _style.map(selected → 黃色) 在部分 Linux ttk 主題上不起作用、仍顯示藍色
+  3. _sync_focus_to_hover 用 <<TreeviewSelect>> 觸發、但 Tk 文件 <<TreeviewSelect>> 是 selection 事件
+     並非 focus 事件、不是 Treeview <Up>/<Down> 內建的 focus 變動事件
+  4. Treeview <Up>/<Down> 內建行為只 scroll viewport、不會切 focus
+  5. _on_select_tree_click 後沒有取消 selected state
 
-【設計轉換 v2】
-  - 完全不用 selected state 表示 keyboard focus（會變白、會蓋掉 price color）
-  - 改用 hover_* tag 同時表示 hover + keyboard focus
-  - <<TreeviewSelect>> 事件 = focus 改變（滑鼠 click / 鍵盤 ↑/↓）
-  - 把舊 focus row 的 hover_* tag 恢復成 checked/unchecked
-  - 把新 focus row 設成 hover_* tag（黃色背景 + 維持 price color）
-  - _focus_tab_tree_on_change 加 after_idle 再設一次 focus（避免 notebook 覆蓋）
+【v3 設計重構】
+  - 取消 <<TreeviewSelect>> 事件綁定（v2 誤用）
+  - 主動綁 <Up>/<Down> 到 4 個 Treeview、不依賴 Treeview 內建 focus 行為
+  - 新增 _on_tree_key_move handler、主動呼叫 tree.focus() + tree.see() 處理 focus + scroll
+  - 新增 _set_row_tag_normal helper、恢復舊 row 原本的 checked/unchecked + price_* tag
+  - 新增 _get_price_tag_for_tree helper、統一取各 tree 的 price_* tag
+  - _focus_tab_tree_on_change 加 selection_remove + after_idle（双保險）
+  - 所有 click handler (_on_select_tree_click / _ms_toggle_check / _etf_toggle_check) 加 selection_remove
+    避免 Treeview 預設 selected state 藍色 highlight
 
-【新測試】tests/test_keyboard_space_toggle.py 從 29 個擴到 41 個 (+12)
-- 靜態測試 (8 個)：不應有 selected 顏色覆寫、_sync_focus_to_hover 存在、4 個 Treeview 都綁
-  <<TreeviewSelect>>、_force_focus_tree 存在、_focus_tab_tree_on_change 用 after_idle
-- 行為測試 (4 個)：ms / etf / select tree focus 改變時 hover tag 移到新 row、沒 focus 不爆、
-  _force_focus_tree 正確呼叫 focus_set + focus
+【新測試】tests/test_keyboard_space_toggle.py 從 41 個擴到 50 個 (+9)
+- 靜態測試 (4 個)：不應綁 <<TreeviewSelect>>、_on_tree_key_move 存在 + return 'break' + tree.see()、
+  _set_row_tag_normal 存在、_get_price_tag_for_tree 存在、4 個 Treeview 都綁 <Up>/<Down>、
+  3 個 click handler 都呼叫 selection_remove
+- 行為測試 (6 個)：<Down> 推進 / <Up> 上推 / 沒 focus 從第一個 / <Down> 在最後停止 /
+  <Up> 在第一個停止 / 空 tree 不爆
 
-【驗證】全 test suite 跑完 745 pass + 7 pre-existing fail（與本改無關、修改前就 fail）
+【驗證】全 test suite 跑完 750 pass + 7 pre-existing fail（與本改無關）
 
-【v1.2.0 paper-trading-keyboard-toggle-fix】2026-07-06 15:58 (William 15:58 反映「highlight 藍色 / Space 不能 toggle / etf-ms 不能動」)
+【v1.2.0 paper-trading-kb-focus-v2】2026-07-06 16:26 (William 16:26 反映「文字變白 / hover-keyboard 不同步 / etf-ms 不會動」)
 【背景】William 2026-07-06 15:58 反映三個問題：
   1. 系統選股：要先 click 在某個 item 後 ↑/↓ 才會動作
      highlight 顏色是藍色（預設 selection 顏色）、跟 mouse hover 的黃色不同步
@@ -3700,17 +3704,15 @@ class StrategyGUI(tk.Tk):
         # 透過 ttk.Style.configure("Treeview", rowheight=28) 一次設、所有 tree 都生效
         _style = ttk.Style(self)
         _style.configure("Treeview", rowheight=28)
-        # 【V1.2.0-kb-focus-v2】2026-07-06 16:26 William 反映：
-        #   「up/down 文字變亮白色 / hover 跟 keyboard highlight 沒同步 / ETF/手動選股 不會動」
-        # 【設計轉換】
-        #   之前用 _style.map(selected → 黃色) 試圖讓 keyboard highlight 跟 hover 同色
-        #   但 Linux 上 selected state 預設把 foreground 改成白色 → 文字看起來發白
-        #   而且 state 比 tag 優先、會蓋掉 price_up/down/zero 漲跌色
-        # 【新設計】
-        #   完全不用 selected state 表示 keyboard focus
-        #   改用 hover_* tag 同時處理 hover + keyboard focus
-        #   鍵盤 ↑/↓ 時自動把 hover_* tag 從舊 row 移到新 row（<<TreeviewSelect>>）
-        #   視覺統一、不蓋掉 price color、文字不會變白
+        # 【V1.2.0-keyboard-toggle-fix】2026-07-06 15:58 William 反映：
+        # 「鍵盤 highlight 是藍色、跟 mouse hover 的黃色不同步」
+        # 根因：Treeview 預設 selection (selected state) 背景色是系統藍色
+        # 修法：透過 ttk.Style.map 設定 selected 背景為 hover 同色 #fff3a0
+        # 讓鍵盤 highlight 跟 mouse hover 看起來一致
+        _style.map(
+            "Treeview",
+            background=[("selected", "#fff3a0")],
+        )
 
         self.notebook = ttk.Notebook(self._top_frame)
 
@@ -4063,13 +4065,20 @@ class StrategyGUI(tk.Tk):
         # 該 tag 同時設 background (黃) + foreground (對應色)、不再有 attribute 遺失
         for ptag, fcolor in [("up", COLOR_PROFIT_POS), ("down", COLOR_PROFIT_NEG), ("zero", COLOR_PROFIT_ZERO)]:
             results_tree.tag_configure(f"hover_{ptag}", background="#fff3a0", foreground=fcolor)
+        # 【V1.2.0-kb-focus-v3】2026-07-06 18:54 William 反映「hover 沒黃色 / click 變藍色」
+        # 根因：v1.1-price-color-fix2 設計 hover_<price> tag、但三個 tree 都沒註冊（只有 hover 單 tag）
+        # 這裡已經註冊了、等等 ETF/MS 三個 tree 都要註冊同樣的三個 tag
+        # 修法：在主檔加一個 _register_hover_price_tags(tree) helper、統一三個 tree 調用
         results_tree.bind("<Motion>", self._on_select_tree_hover)
         results_tree.bind("<Leave>", self._on_select_tree_leave)
         results_tree.bind("<Button-1>", self._on_select_tree_click)
         # 【V1.2.0-keyboard-toggle】Space 鍵 toggle focus row 勾選（↑/↓ 鍵移動 focus 是 Treeview 內建）
         results_tree.bind("<space>", self._on_tree_space_toggle)
-        # 【V1.2.0-kb-focus-v2】focus 改變時同步 hover_* tag（hover + keyboard focus 視覺統一）
-        results_tree.bind("<<TreeviewSelect>>", self._sync_focus_to_hover)
+        # 【V1.2.0-kb-focus-v3】2026-07-06 18:54 William 反映「up/down 不會動」
+        # 根因：Treeview 預設 Up/Down 鍵只 scroll、不會切 focus
+        # 修法：主動 bind <Up>/<Down>、呼叫 _on_tree_key_move
+        results_tree.bind("<Up>", self._on_tree_key_move)
+        results_tree.bind("<Down>", self._on_tree_key_move)
         # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單
         # 原本：results_tree.bind("<Button-3>", self._on_select_tree_rclick)
         # 為什麼拿：header 已是 ☐/☑/▣ 動態 checkbox、點下去就是全選/全不選
@@ -4624,17 +4633,21 @@ class StrategyGUI(tk.Tk):
             self.logger.log(f"⚠️ Tab 切換 refresh 失敗：{e}")
 
     def _focus_tab_tree_on_change(self, current_tab_idx: int):
-        """【V1.2.0-keyboard-toggle-fix + kb-focus-v2】Tab 切換時、focus 該 tab 的結果 tree
+        """【V1.2.0-keyboard-toggle-fix + kb-focus-v3】Tab 切換時、focus 該 tab 的結果 tree
 
         規則：
         - 切到任何有結果 tree 的 tab → focus_set 到 tree + focus(iid) 第一個 row
         - 如果 tree 還沒資料（get_children 空）、跳過不 focus
         - buy_dividend_calendar Tab / 模擬買賣 Tab 等不是 Treeview 的跳過
 
-        【V1.2.0-kb-focus-v2】William 2026-07-06 16:26 反映：
-          - ETF / 手動選股 up/down/space 還是不會動
-          - 根因：notebook 切換的內部事件可能覆蓋 focus_set
-          - 修法：用 after_idle 在 idle 時再 focus 一次（避開 notebook 內部事件）
+        【V1.2.0-kb-focus-v3】2026-07-06 18:54 William 反映「仍要 click 後 up/down 才會動作」
+        根因：notebook 內部 focus 事件會搶走 focus_set、不管 focus_set() + after_idle 都無效
+        新做法：
+          1. focus_set() 把 key events 送到 tree
+          2. focus(children[0]) 設鍵盤 highlight rectangle
+          3. 主動 bind <Up>/<Down> 到 tree 上、不依賴 Treeview 內建事件
+          4. <Up>/<Down> handler (_on_tree_key_move) 主動呼叫 tree.focus() + tree.see()
+             即使 tree 本身 focus 被 notebook 拉走、我們的 handler 仍能動 focus row
         """
         # tab index → tree attribute name
         tab_tree_map = {
@@ -4655,11 +4668,15 @@ class StrategyGUI(tk.Tk):
         try:
             tree.focus_set()             # widget focus（讓 key events 送到 tree）
             tree.focus(children[0])      # focus rectangle 到第一個 row
+            # 取消選取狀態、避免 selected state 藍色 highlight 出現
+            try:
+                tree.selection_remove(tree.selection())
+            except tk.TclError:
+                pass
         except Exception:
             pass
 
-        # 【V1.2.0-kb-focus-v2】用 after_idle 再設一次、避免 notebook 內部事件覆蓋
-        # after_idle 保證在 Tkinter 處理完所有 pending events 後才執行
+        # 【V1.2.0-kb-focus-v3】after_idle 再設一次、避免 notebook 內部事件覆蓋
         try:
             self.after_idle(
                 lambda t=tree, c=list(children): self._force_focus_tree(t, c[0] if c else None)
@@ -4668,18 +4685,129 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _force_focus_tree(self, tree, first_iid):
-        """【V1.2.0-kb-focus-v2】after_idle 強迫 focus tree
+        """【V1.2.0-kb-focus-v3】after_idle 強迫 focus tree + 設 hover_<price> tag
 
         為何需要：
         - focus_set() 在某些情況會被 notebook 內部 event 覆蓋
         - after_idle 確保在所有 pending events 處理完後才執行
-        - 這時再 focus 一次、不會被覆蓋
+
+        新增 v3：順便設 hover_<price> tag、確保切 tab 後第一個 row 有黃色 highlight
         """
         try:
             if first_iid and first_iid in tree.get_children():
                 tree.focus_set()
                 tree.focus(first_iid)
+                # 取消 selected state 藍色
+                try:
+                    tree.selection_remove(tree.selection())
+                except tk.TclError:
+                    pass
+                # 【V1.2.0-kb-focus-v3】設 hover tag、讓切 tab 後立刻看到 highlight
+                price_tag = self._get_price_tag_for_tree(tree, first_iid)
+                hover_kind = price_tag.replace("price_", "") if price_tag.startswith("price_") else "zero"
+                tree.item(first_iid, tags=(f"hover_{hover_kind}",))
         except Exception:
+            pass
+
+    def _get_price_tag_for_tree(self, tree, iid):
+        """【V1.2.0-kb-focus-v3】取得該 tree 該 row 的 price_* tag
+
+        支援 select_tree / backtest_tree / ms_tree / etf_tree 四個 Treeview
+        """
+        if tree is self._ms_tree:
+            price_tags_attr = "_ms_price_tags"
+        elif tree is self._etf_tree:
+            price_tags_attr = "_etf_price_tags"
+        else:
+            price_tags_attr = "_select_price_tags"
+        return getattr(self, price_tags_attr, {}).get(iid, "price_zero")
+
+    def _on_tree_key_move(self, event):
+        """【V1.2.0-kb-focus-v3】2026-07-06 18:54 處理 ↑/↓ 鍵移動 focus row
+
+        William 18:54 反映：
+          - 系統選股 / ETF / 手動選股 / 回測 結果頁面 up/down 不會動
+          - 或要 click 後才會動
+          - 即使動了、scroll 不到最後一個 row
+
+        設計：
+          - Treeview 預設 <Up>/<Down> 只 scroll viewport、不會切 focus
+          - 我們主動 bind <Up>/<Down> 到 4 個 tree、自己處理 focus 移動
+          - 不用依賴 notebook focus、不用依賴 Treeview 內建事件
+          - 不管 tree 本身有沒有 widget focus、這個 handler 都會處理
+
+        動作：
+          1. 取得當前 focus iid（沒有的話取第一個 row）
+          2. 計算 prev / next iid
+          3. tree.focus(new_iid)  設新 highlight rectangle
+          4. tree.see(new_iid)     自動 scroll、確保 focus row 可見
+          5. 取消舊 row 的 hover_* tag、設新 row 的 hover_* tag（黃色 + price color）
+          6. 取消 selected state（避免藍色）
+        """
+        tree = event.widget
+        children = tree.get_children()
+        if not children:
+            return "break"
+
+        current_iid = tree.focus()
+        if not current_iid or current_iid not in children:
+            current_iid = children[0]
+            new_iid = children[0]
+        else:
+            try:
+                idx = list(children).index(current_iid)
+            except ValueError:
+                return "break"
+            if event.keysym == "Down":
+                new_idx = min(idx + 1, len(children) - 1)
+            elif event.keysym == "Up":
+                new_idx = max(idx - 1, 0)
+            else:
+                return
+            new_iid = children[new_idx]
+
+        # 1. 取消舊 row 的 hover_* tag、恢復成 checked/unchecked + price tag
+        if current_iid != new_iid:
+            self._set_row_tag_normal(tree, current_iid)
+
+        # 2. 設新 row 為 hover_<price> tag
+        price_tag = self._get_price_tag_for_tree(tree, new_iid)
+        hover_kind = price_tag.replace("price_", "") if price_tag.startswith("price_") else "zero"
+        try:
+            tree.item(new_iid, tags=(f"hover_{hover_kind}",))
+            tree.focus(new_iid)        # 設 focus rectangle
+            tree.see(new_iid)           # 確保 scroll 到可見範圍
+            # 取消 selected state 藍色 highlight
+            try:
+                tree.selection_remove(tree.selection())
+            except tk.TclError:
+                pass
+        except tk.TclError:
+            pass
+
+        return "break"  # 避免 Up/Down 被 Treeview 當 scroll 事件重複處理
+
+    def _set_row_tag_normal(self, tree, iid):
+        """【V1.2.0-kb-focus-v3】把 row 從 hover_* tag 恢復成 checked/unchecked + price tag"""
+        if iid not in tree.get_children():
+            return
+        # 判斷是哪個 tree、決定 checked_dict
+        if tree is self._ms_tree:
+            checked_dict = self._ms_checked
+        elif tree is self._etf_tree:
+            checked_dict = self._etf_checked
+        else:
+            if tree is self.select_tree:
+                checked_dict = self._select_checked
+            else:
+                if not hasattr(self, "_bt_checked"):
+                    self._bt_checked = {}
+                checked_dict = self._bt_checked
+        checked = checked_dict.get(iid, False)
+        price_tag = self._get_price_tag_for_tree(tree, iid)
+        try:
+            tree.item(iid, tags=("checked" if checked else "unchecked", price_tag))
+        except tk.TclError:
             pass
 
     def _schedule_portfolio_refresh(self):
@@ -5076,8 +5204,10 @@ class StrategyGUI(tk.Tk):
         self._etf_tree.bind("<Button-1>", self._etf_toggle_check)
         # 【V1.2.0-keyboard-toggle】Space 鍵 toggle focus row 勾選
         self._etf_tree.bind("<space>", self._on_tree_space_toggle)
-        # 【V1.2.0-kb-focus-v2】focus 改變時同步 hover_* tag
-        self._etf_tree.bind("<<TreeviewSelect>>", self._sync_focus_to_hover)
+        # 【V1.2.0-kb-focus-v3】2026-07-06 18:54 William 反映「up/down 不會動」
+        # 根因：Treeview 預設 Up/Down 鍵只 scroll、不會切 focus
+        self._etf_tree.bind("<Up>", self._on_tree_key_move)
+        self._etf_tree.bind("<Down>", self._on_tree_key_move)
         # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單
         # 原本：self._etf_tree.bind("<Button-3>", self._etf_tree_rclick_new)
         # 為什麼拿：header 已是 ☐/☑/▣ 動態 checkbox、右鍵選單重複
@@ -5337,8 +5467,10 @@ class StrategyGUI(tk.Tk):
         self._ms_tree.bind("<Leave>", self._ms_tree_leave)
         # 【V1.2.0-keyboard-toggle】Space 鍵 toggle focus row 勾選
         self._ms_tree.bind("<space>", self._on_tree_space_toggle)
-        # 【V1.2.0-kb-focus-v2】focus 改變時同步 hover_* tag
-        self._ms_tree.bind("<<TreeviewSelect>>", self._sync_focus_to_hover)
+        # 【V1.2.0-kb-focus-v3】2026-07-06 18:54 William 反映「up/down 不會動」
+        # 根因：Treeview 預設 Up/Down 鍵只 scroll、不會切 focus
+        self._ms_tree.bind("<Up>", self._on_tree_key_move)
+        self._ms_tree.bind("<Down>", self._on_tree_key_move)
         # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單
         # 原本：
         #   self._ms_tree.bind("<Button-3>", self._ms_tree_rclick)  # 原本是 dead code、被下面那行覆蓋
@@ -6118,6 +6250,11 @@ class StrategyGUI(tk.Tk):
             return
         # 【V1.2.0-keyboard-toggle-fix】點 cell 時設鍵盤焦點、後續 ↑/↓/Space 才能動
         self._ms_tree.focus(item_id)
+        # 【V1.2.0-kb-focus-v3】取消 selected state 藍色
+        try:
+            self._ms_tree.selection_remove(self._ms_tree.selection())
+        except tk.TclError:
+            pass
         current = self._ms_checked.get(item_id, False)
         self._ms_checked[item_id] = not current
         vals = list(self._ms_tree.item(item_id, "values"))
@@ -6521,6 +6658,11 @@ class StrategyGUI(tk.Tk):
             return
         # 【V1.2.0-keyboard-toggle-fix】點 cell 時設鍵盤焦點、後續 ↑/↓/Space 才能動
         self._etf_tree.focus(item_id)
+        # 【V1.2.0-kb-focus-v3】取消 selected state 藍色
+        try:
+            self._etf_tree.selection_remove(self._etf_tree.selection())
+        except tk.TclError:
+            pass
         current = self._etf_checked.get(item_id, False)
         self._etf_checked[item_id] = not current
         vals = list(self._etf_tree.item(item_id, "values"))
@@ -8269,6 +8411,11 @@ class StrategyGUI(tk.Tk):
         # 根因：Treeview 預設 click 不會設鍵盤焦點到 row、tree.focus() 永遠回空字串
         # 修法：click cell 時設 tree.focus(iid)、後續 ↑/↓/Space 才能動
         tree.focus(iid)
+        # 【V1.2.0-kb-focus-v3】取消 selected state 藍色 highlight、避免看到藍色
+        try:
+            tree.selection_remove(tree.selection())
+        except tk.TclError:
+            pass
         if tree == self.select_tree:
             checked_dict = self._select_checked
         else:
@@ -8312,70 +8459,6 @@ class StrategyGUI(tk.Tk):
             tree.item(item, values=vals, tags=("unchecked", price_tag))
         # 【V0.9.5-tab-split-phase3-D】動態更新 header
         self._update_checkbox_header(tree, checked_dict)
-
-    def _sync_focus_to_hover(self, event):
-        """【V1.2.0-kb-focus-v2】<<TreeviewSelect>> 事件：focus 改變時同步 hover_* tag
-
-        William 2026-07-06 16:26 反映：
-          - up/down key 的 highlight 跟 mouse 移動的 highlight 沒有同步
-          - 文字變亮白色（selected state 把 foreground 改白色）
-
-        設計：
-          - 完全不用 selected state 表示 keyboard focus（會變白、蓋掉 price color）
-          - 改用 hover_* tag 同時表示 hover + keyboard focus
-          - <<TreeviewSelect>> 事件 = focus 改變（滑鼠 click / 鍵盤 ↑/↓）
-          - 把舊 focus row 的 hover_* tag 恢復成 checked/unchecked
-          - 把新 focus row 設成 hover_* tag（黃色背景 + 維持 price color）
-
-        關鍵差異：
-          - 之前 _on_select_tree_hover / _ms_tree_hover / _etf_tree_hover_combined
-            只在滑鼠 hover 時設 tag
-          - 現在加上 keyboard focus 變動時也會設 tag
-          - 兩者永遠同步、視覺一致
-        """
-        tree = event.widget
-        new_iid = tree.focus()
-        if not new_iid:
-            return
-
-        # 判斷是哪個 tree、決定 checked_dict 跟 price_tags_attr
-        if tree is self._ms_tree:
-            checked_dict = self._ms_checked
-            price_tags_attr = "_ms_price_tags"
-        elif tree is self._etf_tree:
-            checked_dict = self._etf_checked
-            price_tags_attr = "_etf_price_tags"
-        else:
-            if tree is self.select_tree:
-                checked_dict = self._select_checked
-            else:
-                if not hasattr(self, "_bt_checked"):
-                    self._bt_checked = {}
-                checked_dict = self._bt_checked
-            price_tags_attr = "_select_price_tags"
-
-        # 1. 把所有現有 hover_* tag 的 row 恢復成 checked/unchecked + price tag
-        try:
-            for iid in tree.get_children():
-                tags = tree.item(iid, "tags")
-                if any(t.startswith("hover_") for t in tags) and iid != new_iid:
-                    checked = checked_dict.get(iid, False)
-                    price_tag = getattr(self, price_tags_attr, {}).get(iid, "price_zero")
-                    tree.item(
-                        iid,
-                        tags=("checked" if checked else "unchecked", price_tag),
-                    )
-        except tk.TclError:
-            return
-
-        # 2. 把新 focus row 設成 hover_* tag（用 price_tag 推導 hover_<type>）
-        try:
-            price_tag = getattr(self, price_tags_attr, {}).get(new_iid, "price_zero")
-            # price_tag = "price_up" / "price_down" / "price_zero" → 抽出 "up" / "down" / "zero"
-            hover_kind = price_tag.replace("price_", "") if price_tag.startswith("price_") else "zero"
-            tree.item(new_iid, tags=(f"hover_{hover_kind}",))
-        except tk.TclError:
-            pass
 
     def _on_tree_space_toggle(self, event):
         """【V1.2.0-keyboard-toggle】Space 鍵 toggle 當前 focus row 的第一欄勾選
