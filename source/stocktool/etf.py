@@ -40,7 +40,7 @@ def fetch_active_etf_list(session: requests.Session, cfg: StrategyConfig) -> pd.
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v1.2.0-paper-trading-kb-focus-v3",
+            "User-Agent": "StockTool/AdvisorStyle-v1.2.0-paper-trading-kb-focus-v4",
             "Referer": "https://www.twse.com.tw/zh/products/securities/etf/products/active-list.html",
         },
     )
@@ -83,7 +83,7 @@ def fetch_etf_top10_holdings(session: requests.Session, cfg: StrategyConfig,
         timeout=cfg.timeout,
         verify=cfg.verify_ssl,
         headers={
-            "User-Agent": "StockTool/AdvisorStyle-v1.2.0-paper-trading-kb-focus-v3",
+            "User-Agent": "StockTool/AdvisorStyle-v1.2.0-paper-trading-kb-focus-v4",
             "Referer": "https://www.etfinfo.tw/",
         },
     )
