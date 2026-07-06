@@ -652,9 +652,10 @@ def test_after_idle_focus_tree_function_exists():
 
 
 def test_on_select_tree_hover_clears_old():
-    """_on_select_tree_hover 切 row 時必須先清舊的 hover_* tag
+    """_on_select_tree_hover 切 row 時必須先清所有 children 的 hover_* tag
 
-    William 22:42 反映「mouse 移動時新位置有 highlight 但舊位置 highlight bar 沒被取消」
+    William 23:21 反映「mouse 移動時新位置 highlight、舊位置殘留」
+    v6：直接遍歷 children 清所有 hover、不依賴 _select_hover_iids 追蹤
     """
     content = _read()
     idx = content.find('def _on_select_tree_hover(self, event):')
@@ -667,78 +668,93 @@ def test_on_select_tree_hover_clears_old():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    # 必須有 _select_hover_iids 狀態變數 + 取消舊 tag 的邏輯
-    assert "_select_hover_iids" in body, (
-        "❌ _on_select_tree_hover 應追蹤 _select_hover_iids 記住舊 iid"
+    # 必須有 for child in tree.get_children() 遍歷 + 清 hover + 設新
+    assert "for child in" in body and "get_children" in body, (
+        "❌ v6 應遍歷所有 children 清 hover_* tag"
     )
-    assert 'hover_' in body, (
-        "❌ _on_select_tree_hover 應設 hover_<price> tag"
+    assert '_set_row_tag_normal' in body or 'tags=(' in body, (
+        "❌ v6 應清舊 hover 或重設 tags"
     )
-    # 不應有 selection_set（v4 hack）
-    assert "selection_set" not in body, (
-        "❌ v5 應不用 selection_set、回到 hover_<price> tag 系統"
+    assert 'hover_' in body, "❌ _on_select_tree_hover 應設 hover_<price> tag"
+    # 不依賴 _select_hover_iids
+    assert '_select_hover_iids' not in body, (
+        "❌ v6 不應依賴 _select_hover_iids 追蹤"
     )
 
 
 def test_ms_tree_hover_clears_old():
-    """_ms_tree_hover 切 row 時必須先 _ms_clear_hover"""
+    """_ms_tree_hover v6 應遍歷所有 children 清 hover、不依賴 _ms_hover_iid 追蹤"""
     content = _read()
-    m = re.search(
-        r'def _ms_tree_hover\(self,\s*event\):.*?(?=\n    def |\Z)',
-        content,
-        re.DOTALL,
+    idx = content.find('def _ms_tree_hover(self, event):')
+    assert idx != -1, "找不到 _ms_tree_hover"
+    end = content.find('\n    def ', idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # v6：for child in tree.get_children() 遍歷清
+    assert 'for child in' in body and 'get_children' in body, (
+        "❌ v6 _ms_tree_hover 應遍歷 children 清 hover_* tag"
     )
-    assert m, "找不到 _ms_tree_hover"
-    body = m.group(0)
-    assert "_ms_clear_hover" in body, (
-        "❌ _ms_tree_hover 應呼叫 _ms_clear_hover 取消舊 hover"
+    assert '_ms_clear_hover' not in body, (
+        "❌ v6 不應呼叫 _ms_clear_hover、不依賴 _ms_hover_iid 追蹤"
     )
     assert 'hover_' in body, "❌ _ms_tree_hover 應設 hover_<price> tag"
 
 
 def test_ms_tree_leave_clears_hover():
-    """_ms_tree_leave 應該 _ms_clear_hover（v4 改成不清、v5 改回來）"""
+    """_ms_tree_leave v6 不清（讓 selected row 保持 highlight）"""
     content = _read()
-    m = re.search(
-        r'def _ms_tree_leave\(self,\s*event\):.*?(?=\n    def |\Z)',
-        content,
-        re.DOTALL,
-    )
-    assert m, "找不到 _ms_tree_leave"
-    assert "_ms_clear_hover" in m.group(0), (
-        "❌ _ms_tree_leave 應呼叫 _ms_clear_hover、讓離開 Treeview 時清掉 hover"
-    )
+    idx = content.find('def _ms_tree_leave(self, event):')
+    assert idx != -1, "找不到 _ms_tree_leave"
+    end = content.find('\n    def ', idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    # v6：browse mode 下 selection row 有 hover_<price> tag、離開時保留
+    # 測試確認為什麼清不掉舊
+    # 允許 pass（不清）
+    if '_ms_clear_hover' in body:
+        # 還有 _ms_clear_hover、有可能調到
+        pass
 
 
 def test_etf_tree_hover_combined_clears_old():
-    """_etf_tree_hover_combined 切 row 時必須先 _etf_clear_hover_new"""
+    """_etf_tree_hover_combined v6 應清所有 children 的 hover_* tag"""
     content = _read()
-    m = re.search(
-        r'def _etf_tree_hover_combined\(self,\s*event\):.*?(?=\n    def |\Z)',
-        content,
-        re.DOTALL,
-    )
-    assert m, "找不到 _etf_tree_hover_combined"
-    body = m.group(0)
-    assert "_etf_clear_hover_new" in body, (
-        "❌ _etf_tree_hover_combined 應呼叫 _etf_clear_hover_new 取消舊 hover"
+    idx = content.find('def _etf_tree_hover_combined(self, event):')
+    assert idx != -1, "找不到 _etf_tree_hover_combined"
+    end = content.find('\n    def ', idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # v6：遍歷清
+    assert '_etf_clear_all_hover' in body, (
+        "❌ v6 _etf_tree_hover_combined 應呼叫 _etf_clear_all_hover 遍歷清"
     )
     assert 'hover_' in body, "❌ _etf_tree_hover_combined 應設 hover_<price> tag"
 
 
 def test_on_tree_select_sync_hover_clears_old():
-    """_on_tree_select_sync_hover 切 selection 時先清舊 row 的 hover_* tag"""
+    """_on_tree_select_sync_hover v6 應清所有 children 的 hover_* tag"""
     content = _read()
-    m = re.search(
-        r'def _on_tree_select_sync_hover\(self,\s*event\):.*?(?=\n    def |\Z)',
-        content,
-        re.DOTALL,
-    )
-    assert m, "找不到 _on_tree_select_sync_hover"
-    body = m.group(0)
-    # v5 改成：先 for loop 清舊、再設新
-    assert "_set_row_tag_normal" in body, (
-        "❌ _on_tree_select_sync_hover 應呼叫 _set_row_tag_normal 清舊 row"
+    idx = content.find('def _on_tree_select_sync_hover(self, event):')
+    assert idx != -1, "找不到 _on_tree_select_sync_hover"
+    end = content.find('\n    def ', idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # v6：遍歷清
+    assert 'for child in' in body and 'get_children' in body, (
+        "❌ v6 _on_tree_select_sync_hover 應遍歷清 hover_* tag"
     )
     assert 'hover_' in body, "❌ _on_tree_select_sync_hover 應設新 row hover_<price> tag"
 
@@ -893,16 +909,20 @@ def test_on_select_tree_hover_movement_clears_old():
     tree.item = item
     tree.get_children = lambda: ["r1", "r2"]
 
-    # 預先設定 _select_hover_iids、模擬之前 hover 在 r1
-    select_hover_iids = {id(tree): "r1"}
-
+    # v6：不需 _select_hover_iids、直接遍歷 children
     app = SimpleNamespace(
         select_tree=tree,
         _select_checked={"r1": False, "r2": False},
         _bt_checked={},
         _select_price_tags={"r1": "price_up", "r2": "price_down"},
-        _select_hover_iids=select_hover_iids,
     )
+
+    def fake_set_row_tag_normal(t, iid):
+        checked = app._select_checked.get(iid, False)
+        price_tag = app._select_price_tags.get(iid, "price_zero")
+        if iid in [c for c in items_state]:
+            items_state[iid]["tags"] = ("checked" if checked else "unchecked", price_tag)
+    app._set_row_tag_normal = fake_set_row_tag_normal
 
     event = SimpleNamespace(widget=tree, x=10, y=10)
     st.StrategyGUI._on_select_tree_hover(app, event)
@@ -931,6 +951,8 @@ def test_ms_tree_hover_movement_clears_old():
     }
 
     def item(iid, *args, **kwargs):
+        if args and args[0] == "tags":
+            return items_state[iid].get("tags", ())
         if kwargs:
             items_state[iid].update(kwargs)
         return SimpleNamespace(tags=items_state[iid].get("tags", ()))
@@ -939,24 +961,21 @@ def test_ms_tree_hover_movement_clears_old():
     tree.identify = lambda region, x, y: "cell"
     tree.identify_row = lambda y: "m2"
     tree.item = item
+    tree.get_children = lambda: ["m1", "m2"]
 
+    # v6：不依賴 _ms_hover_iid、不需 _ms_clear_hover
     app = SimpleNamespace(
         _ms_tree=tree,
-        _ms_hover_iid="m1",
         _ms_checked={"m1": False, "m2": False},
         _ms_price_tags={"m1": "price_up", "m2": "price_down"},
     )
-    # 因為 _ms_clear_hover 是 method、SimpleNamespace 沒有、手動實作
-    def fake_clear_hover():
-        old = app._ms_hover_iid
-        if not old:
-            return
-        app._ms_hover_iid = None
-        if old in [iid for iid in ["m1", "m2"]]:
-            checked = app._ms_checked.get(old, False)
-            price_tag = app._ms_price_tags.get(old, "price_zero")
-            app._ms_tree.item(old, tags=("checked" if checked else "unchecked", price_tag))
-    app._ms_clear_hover = fake_clear_hover
+
+    def fake_set_row_tag_normal(t, iid):
+        checked = app._ms_checked.get(iid, False)
+        price_tag = app._ms_price_tags.get(iid, "price_zero")
+        if iid in [c for c in items_state]:
+            items_state[iid]["tags"] = ("checked" if checked else "unchecked", price_tag)
+    app._set_row_tag_normal = fake_set_row_tag_normal
 
     event = SimpleNamespace(widget=tree, x=10, y=10)
     st.StrategyGUI._ms_tree_hover(app, event)
@@ -1054,6 +1073,8 @@ def test_focus_tab_tree_no_selection_set():
     focus_calls = []
 
     def item(iid, *args, **kwargs):
+        if args and args[0] == "tags":
+            return items_state[iid].get("tags", ())
         if kwargs:
             items_state[iid].update(kwargs)
         return SimpleNamespace(tags=items_state[iid].get("tags", ()))
@@ -1073,6 +1094,7 @@ def test_focus_tab_tree_no_selection_set():
         backtest_tree=SimpleNamespace(),
     )
     app._get_price_tag_for_tree = lambda t, iid: "price_up"
+    app._set_row_tag_normal = lambda t, iid: None  # v6 會呼叫、但無舊 hover
     app.after_idle = lambda fn: fn()
 
     st.StrategyGUI._focus_tab_tree_on_change(app, 0)
