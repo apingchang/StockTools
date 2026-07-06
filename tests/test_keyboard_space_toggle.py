@@ -334,3 +334,278 @@ def test_space_no_focus_noop():
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])
+
+# ==========================================================
+# 【V1.2.0-keyboard-toggle-fix】2026-07-06 15:58 William 反映
+# 1. highlight 顏色藍色 ≠ hover 黃色
+# 2. Space 不能 toggle（因為 tree.focus() 沒 row）
+# 3. etf / 手動選股 up/down/space 都不會動（因為切 tab 時沒設 widget focus）
+# ==========================================================
+
+
+def test_select_tree_click_sets_focus():
+    """_on_select_tree_click 內 cell click 應設定 tree.focus(iid)"""
+    content = _read()
+    # 抓 _on_select_tree_click 函式本體
+    m = re.search(
+        r'def _on_select_tree_click\(self,\s*event\):.*?(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    assert m, "找不到 _on_select_tree_click"
+    body = m.group(0)
+    assert "tree.focus(" in body, (
+        "❌ _on_select_tree_click 內沒設 tree.focus()！\n"
+        "William 15:58 反映 click 後 Space 不能 toggle 因為 focus 沒設"
+    )
+
+
+def test_ms_tree_click_sets_focus():
+    """_ms_toggle_check 內 cell click 應設定 _ms_tree.focus(item_id)"""
+    content = _read()
+    m = re.search(
+        r'def _ms_toggle_check\(self,\s*event\):.*?(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    assert m, "找不到 _ms_toggle_check"
+    body = m.group(0)
+    assert "_ms_tree.focus(" in body, (
+        "❌ _ms_toggle_check 內沒設 _ms_tree.focus()！"
+    )
+
+
+def test_etf_tree_click_sets_focus():
+    """_etf_toggle_check 內 cell click 應設定 _etf_tree.focus(item_id)"""
+    content = _read()
+    m = re.search(
+        r'def _etf_toggle_check\(self,\s*event\):.*?(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    assert m, "找不到 _etf_toggle_check"
+    body = m.group(0)
+    assert "_etf_tree.focus(" in body, (
+        "❌ _etf_toggle_check 內沒設 _etf_tree.focus()！"
+    )
+
+
+def test_style_map_sets_selected_color():
+    """ttk.Style.map("Treeview", ...) 設定 selected 顏色為黃色"""
+    content = _read()
+    # 找 _style.map("Treeview", ...) 內有 "selected"
+    m = re.search(
+        r'_style\.map\([^)]*Treeview[^)]*\)',
+        content,
+        re.DOTALL,
+    )
+    assert m, "找不到 _style.map(\"Treeview\", ...) 設定"
+    body = m.group(0)
+    assert "selected" in body, (
+        "❌ Treeview style 沒設定 selected state 顏色！\n"
+        "William 15:58 反映 highlight 顏色跟 hover 不同步"
+    )
+    # 應該用跟 hover 一樣的 #fff3a0
+    assert "#fff3a0" in body, (
+        "❌ selected 顏色沒用 #fff3a0（hover 用的色）！"
+    )
+
+
+def test_focus_tab_tree_function_exists():
+    """_focus_tab_tree_on_change 函式存在"""
+    content = _read()
+    assert re.search(r'def _focus_tab_tree_on_change\(', content), (
+        "❌ 找不到 _focus_tab_tree_on_change 函式！"
+    )
+
+
+def test_on_tab_changed_calls_focus_tree():
+    """_on_tab_changed 內應該 call _focus_tab_tree_on_change"""
+    content = _read()
+    m = re.search(
+        r'def _on_tab_changed\(self,\s*event\):.*?(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    assert m, "找不到 _on_tab_changed"
+    body = m.group(0)
+    assert "_focus_tab_tree_on_change" in body, (
+        "❌ _on_tab_changed 內沒 call _focus_tab_tree_on_change！\n"
+        "William 15:58 反映 etf / 手動選股 up/down/space 都不會動"
+    )
+
+
+def test_focus_tab_tree_map_includes_all_results_tabs():
+    """_focus_tab_tree_on_change 內的 tab_tree_map 應包含 4 個結果 tab"""
+    content = _read()
+    m = re.search(
+        r'def _focus_tab_tree_on_change\(self,\s*current_tab_idx.*?(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    assert m, "找不到 _focus_tab_tree_on_change 函式本體"
+    body = m.group(0)
+    # 4 個結果 tab 都要有 mapping
+    for tree_attr in ("select_tree", "_etf_tree", "_ms_tree", "backtest_tree"):
+        assert tree_attr in body, (
+            f"❌ _focus_tab_tree_on_change 沒處理 {tree_attr}！"
+        )
+
+
+def test_focus_tab_tree_focus_set_and_focus_row():
+    """_focus_tab_tree_on_change 應呼叫 focus_set + focus(iid)"""
+    content = _read()
+    m = re.search(
+        r'def _focus_tab_tree_on_change\(self,\s*current_tab_idx.*?(?=\n    def |\Z)',
+        content,
+        re.DOTALL,
+    )
+    body = m.group(0)
+    assert "focus_set" in body, (
+        "❌ 沒呼叫 focus_set()、切到 tab 後 key events 不會送到 tree"
+    )
+    assert "tree.focus(children[0])" in body or "tree.focus(first_iid)" in body, (
+        "❌ 沒設 focus rectangle 到第一個 row"
+    )
+
+
+# ==========================================================
+# 行為測試：_focus_tab_tree_on_change
+# ==========================================================
+
+
+def test_focus_tab_tree_select_tree():
+    """切到系統選股 tab → focus select_tree 第一個 row"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    tree = SimpleNamespace(
+        children=["row1", "row2"],
+        focus_set_called=[],
+        focus_called=[],
+    )
+    tree.get_children = lambda: tree.children
+    tree.focus_set = lambda: tree.focus_set_called.append(True)
+    tree.focus = lambda iid: tree.focus_called.append(iid)
+
+    app = SimpleNamespace(
+        select_tree=tree,
+        _etf_tree=None,
+        _ms_tree=None,
+        backtest_tree=None,
+    )
+
+    st.StrategyGUI._focus_tab_tree_on_change(app, 0)
+
+    assert tree.focus_set_called, "應呼叫 focus_set"
+    assert tree.focus_called == ["row1"], f"應 focus 第一個 row、實際 {tree.focus_called}"
+
+
+def test_focus_tab_tree_etf_tree():
+    """切到 ETF tab → focus _etf_tree 第一個 row"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    tree = SimpleNamespace(children=["e1"], focus_set_called=[], focus_called=[])
+    tree.get_children = lambda: tree.children
+    tree.focus_set = lambda: tree.focus_set_called.append(True)
+    tree.focus = lambda iid: tree.focus_called.append(iid)
+
+    app = SimpleNamespace(
+        select_tree=None,
+        _etf_tree=tree,
+        _ms_tree=None,
+        backtest_tree=None,
+    )
+
+    st.StrategyGUI._focus_tab_tree_on_change(app, 1)
+
+    assert tree.focus_set_called
+    assert tree.focus_called == ["e1"]
+
+
+def test_focus_tab_tree_ms_tree():
+    """切到手動選股 tab → focus _ms_tree 第一個 row"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    tree = SimpleNamespace(children=["m1", "m2", "m3"], focus_set_called=[], focus_called=[])
+    tree.get_children = lambda: tree.children
+    tree.focus_set = lambda: tree.focus_set_called.append(True)
+    tree.focus = lambda iid: tree.focus_called.append(iid)
+
+    app = SimpleNamespace(
+        select_tree=None,
+        _etf_tree=None,
+        _ms_tree=tree,
+        backtest_tree=None,
+    )
+
+    st.StrategyGUI._focus_tab_tree_on_change(app, 2)
+
+    assert tree.focus_set_called
+    assert tree.focus_called == ["m1"]
+
+
+def test_focus_tab_tree_backtest_tree():
+    """切到回測 tab → focus backtest_tree 第一個 row"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    tree = SimpleNamespace(children=["b1"], focus_set_called=[], focus_called=[])
+    tree.get_children = lambda: tree.children
+    tree.focus_set = lambda: tree.focus_set_called.append(True)
+    tree.focus = lambda iid: tree.focus_called.append(iid)
+
+    app = SimpleNamespace(
+        select_tree=None,
+        _etf_tree=None,
+        _ms_tree=None,
+        backtest_tree=tree,
+    )
+
+    st.StrategyGUI._focus_tab_tree_on_change(app, 4)
+
+    assert tree.focus_set_called
+    assert tree.focus_called == ["b1"]
+
+
+def test_focus_tab_tree_empty_no_op():
+    """tree 沒資料時（get_children 空）不應該 focus、不爆"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    tree = SimpleNamespace(children=[], focus_set_called=[], focus_called=[])
+    tree.get_children = lambda: tree.children
+    tree.focus_set = lambda: tree.focus_set_called.append(True)
+    tree.focus = lambda iid: tree.focus_called.append(iid)
+
+    app = SimpleNamespace(
+        select_tree=tree,
+        _etf_tree=None,
+        _ms_tree=None,
+        backtest_tree=None,
+    )
+
+    # 不應該爆
+    st.StrategyGUI._focus_tab_tree_on_change(app, 0)
+
+    assert not tree.focus_set_called, "空 tree 不應 focus_set"
+    assert not tree.focus_called, "空 tree 不應設 focus"
+
+
+def test_focus_tab_tree_unknown_tab_no_op():
+    """tab index 沒對應 tree 時（買賣記錄 tab 3）不應該爆"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    app = SimpleNamespace(
+        select_tree=SimpleNamespace(),
+        _etf_tree=SimpleNamespace(),
+        _ms_tree=SimpleNamespace(),
+        backtest_tree=SimpleNamespace(),
+    )
+
+    # 不應該爆
+    st.StrategyGUI._focus_tab_tree_on_change(app, 3)  # 買賣記錄 tab
+    st.StrategyGUI._focus_tab_tree_on_change(app, 99)  # 不存在

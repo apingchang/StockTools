@@ -1,12 +1,45 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-keyboard-toggle (2026-07-06 15:32) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-keyboard-toggle-fix (2026-07-06 15:58) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-keyboard-toggle
-最後更新: 2026-07-06 15:44 (Asia/Taipei)
+Version: v1.2.0-paper-trading-keyboard-toggle-fix
+最後更新: 2026-07-06 16:08 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools
+
+【v1.2.0 paper-trading-keyboard-toggle-fix】2026-07-06 15:58 (William 15:58 反映「highlight 藍色 / Space 不能 toggle / etf-ms 不能動」)
+【背景】William 2026-07-06 15:58 反映三個問題：
+  1. 系統選股：要先 click 在某個 item 後 ↑/↓ 才會動作
+     highlight 顏色是藍色（預設 selection 顏色）、跟 mouse hover 的黃色不同步
+  2. Space bar 不能 toggle item selection（在系統選股）
+  3. ETF / 手動選股結果 up/down/space bar 都不會動
+
+【根因】
+  1. Treeview 預設 selected state 背景色是系統藍色
+     → hover tag 設定黃色 #fff3a0、兩者不同步看起來不一致
+  2. Treeview 預設 click 不會設鍵盤焦點到 row
+     → tree.focus() 永遠回空字串 → space handler 取不到 iid
+  3. 切到 notebook tab 時 tree 沒拿到 widget focus
+     → key events 仍送給舊 focus 的 widget（不是 tree）
+
+【修法】
+  1. ttk.Style.map("Treeview", background=[("selected", "#fff3a0")])
+     → 讓鍵盤 highlight 跟 mouse hover 視覺一致
+  2. 三個 click handler (_on_select_tree_click / _ms_toggle_check / _etf_toggle_check)
+     cell click 分支都加 tree.focus(iid) 設鍵盤焦點
+  3. _on_tab_changed 加 _focus_tab_tree_on_change(current_tab_idx)
+     → 切到結果 tab 時自動 focus_set 到該 tree 並設 focus rectangle 到第一個 row
+     → tab → tree mapping：0=select_tree、1=_etf_tree、2=_ms_tree、4=backtest_tree
+     → tab 3 (買賣記錄) 沒有結果 tree、跳過
+
+【新測試】tests/test_keyboard_space_toggle.py 從 15 個擴到 29 個 (+14)
+- 靜態測試 (5 個)：3 個 click handler 都有 tree.focus()、style 有 selected 顏色、
+  _focus_tab_tree_on_change 存在且被 _on_tab_changed call、map 含 4 種 tree
+- 行為測試 (6 個)：focus_tab_tree 4 個 tab 正確 focus 第一個 row、
+  空 tree 不 focus、未知 tab 不爆
+
+【驗證】全 test suite 跑完 733 pass + 7 pre-existing fail（與本改無關、修改前就 fail）
 
 【v1.2.0 paper-trading-keyboard-toggle】2026-07-06 15:32 (William 15:32 反映「鍵盤操作選股」)
 【背景】William 2026-07-06 15:32 反映：
@@ -3636,6 +3669,15 @@ class StrategyGUI(tk.Tk):
         # 透過 ttk.Style.configure("Treeview", rowheight=28) 一次設、所有 tree 都生效
         _style = ttk.Style(self)
         _style.configure("Treeview", rowheight=28)
+        # 【V1.2.0-keyboard-toggle-fix】2026-07-06 15:58 William 反映：
+        # 「鍵盤 highlight 是藍色、跟 mouse hover 的黃色不同步」
+        # 根因：Treeview 預設 selection (selected state) 背景色是系統藍色
+        # 修法：透過 ttk.Style.map 設定 selected 背景為 hover 同色 #fff3a0
+        # 讓鍵盤 highlight 跟 mouse hover 看起來一致
+        _style.map(
+            "Treeview",
+            background=[("selected", "#fff3a0")],
+        )
 
         self.notebook = ttk.Notebook(self._top_frame)
 
@@ -4520,7 +4562,13 @@ class StrategyGUI(tk.Tk):
     # V0.9.4 買賣記錄 Tab（不動 V0.9.3 上面所有 method）
     # ==========================================================
     def _on_tab_changed(self, event):
-        """Tab 切換時自動 refresh 買賣記錄 + 抓持倉現價"""
+        """Tab 切換時自動 refresh 買賣記錄 + 抓持倉現價
+
+        【V1.2.0-keyboard-toggle-fix】2026-07-06 15:58 William 反映：
+          「etf / 手動選股 up/down/space bar 都不會動」
+          根因：切到 tab 時 tree 沒拿到 widget focus、↑/↓/Space 不送到 tree
+          修法：切到結果 tab 時 focus_set 到該 tree、並設 focus rectangle 到第一個 row
+        """
         try:
             current = self.notebook.index(self.notebook.select())
             if current == 3:  # Tab 4 = 買賣記錄
@@ -4533,8 +4581,42 @@ class StrategyGUI(tk.Tk):
             else:
                 # 切離買賣記錄 Tab → 取消 refresh loop
                 self._cancel_portfolio_refresh()
+
+            # 【V1.2.0-keyboard-toggle-fix】Tab 切到結果類別時、focus 到結果 tree 的第一個 row
+            # 讓 ↑/↓/Space 鍵能直接動、不需要先 click
+            self._focus_tab_tree_on_change(current)
         except Exception as e:
             self.logger.log(f"⚠️ Tab 切換 refresh 失敗：{e}")
+
+    def _focus_tab_tree_on_change(self, current_tab_idx: int):
+        """【V1.2.0-keyboard-toggle-fix】Tab 切換時、focus 該 tab 的結果 tree
+
+        規則：
+        - 切到任何有結果 tree 的 tab → focus_set 到 tree + focus(iid) 第一個 row
+        - 如果 tree 還沒資料（get_children 空）、跳過不 focus
+        - buy_dividend_calendar Tab / 模擬買賣 Tab 等不是 Treeview 的跳過
+        """
+        # tab index → tree attribute name
+        tab_tree_map = {
+            0: "select_tree",      # 系統選股
+            1: "_etf_tree",        # 主動式 ETF
+            2: "_ms_tree",         # 手動選股
+            4: "backtest_tree",    # 回測模擬
+        }
+        tree_attr = tab_tree_map.get(current_tab_idx)
+        if not tree_attr:
+            return
+        tree = getattr(self, tree_attr, None)
+        if not tree:
+            return
+        children = tree.get_children()
+        if not children:
+            return
+        try:
+            tree.focus_set()             # widget focus（讓 key events 送到 tree）
+            tree.focus(children[0])      # focus rectangle 到第一個 row
+        except Exception:
+            pass
 
     def _schedule_portfolio_refresh(self):
         """V0.9.5+ Phase 8：盤中（09:00~13:30）每 30 秒 refresh 一次持倉現價
@@ -5966,6 +6048,8 @@ class StrategyGUI(tk.Tk):
         item_id = self._ms_tree.identify_row(event.y)
         if not item_id:
             return
+        # 【V1.2.0-keyboard-toggle-fix】點 cell 時設鍵盤焦點、後續 ↑/↓/Space 才能動
+        self._ms_tree.focus(item_id)
         current = self._ms_checked.get(item_id, False)
         self._ms_checked[item_id] = not current
         vals = list(self._ms_tree.item(item_id, "values"))
@@ -6367,6 +6451,8 @@ class StrategyGUI(tk.Tk):
         item_id = self._etf_tree.identify_row(event.y)
         if not item_id:
             return
+        # 【V1.2.0-keyboard-toggle-fix】點 cell 時設鍵盤焦點、後續 ↑/↓/Space 才能動
+        self._etf_tree.focus(item_id)
         current = self._etf_checked.get(item_id, False)
         self._etf_checked[item_id] = not current
         vals = list(self._etf_tree.item(item_id, "values"))
@@ -8110,6 +8196,11 @@ class StrategyGUI(tk.Tk):
         iid = tree.identify_row(event.y)
         if not iid:
             return
+        # 【V1.2.0-keyboard-toggle-fix】2026-07-06 15:58 William 反映：
+        # 「↑/↓ 鍵要先 click 在某個 item 才會動作、space bar 不能 toggle」
+        # 根因：Treeview 預設 click 不會設鍵盤焦點到 row、tree.focus() 永遠回空字串
+        # 修法：click cell 時設 tree.focus(iid)、後續 ↑/↓/Space 才能動
+        tree.focus(iid)
         if tree == self.select_tree:
             checked_dict = self._select_checked
         else:
