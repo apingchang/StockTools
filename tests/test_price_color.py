@@ -241,17 +241,25 @@ def test_etf_tree_insert_uses_price_tag():
 # ──────────────────── hover 保留 price tag 守護 ────────────────────
 
 def test_select_hover_preserves_price_tag():
-    """select_tree hover 進入要保留 price_* tag"""
+    """select_tree hover_<price> tag 由 _on_tree_select_sync_hover 管理（v7）
+
+    【V1.2.0-kb-focus-v7】2026-07-07 01:08 重構：
+    v6：motion handler + <<TreeviewSelect>> 兩個來源同時設 hover → race condition
+    v7：motion handler 只設 focus、hover_<price> 完全由 <<TreeviewSelect>> handler 管
+    所以改成檢查 _on_tree_select_sync_hover 讀 _select_price_tags
+    """
     content = _read(STOCKTOOL_PY)
     m = re.search(
-        r'def _on_select_tree_hover\(self, event\):(.*?)(?=\n    def |\Z)',
+        r'def _on_tree_select_sync_hover\(self, event\):(.*?)(?=\n    def |\Z)',
         content,
         re.DOTALL,
     )
-    assert m, "找不到 _on_select_tree_hover"
+    assert m, "找不到 _on_tree_select_sync_hover"
     body = m.group(1)
-    assert "_select_price_tags" in body, "_on_select_tree_hover 沒讀 _select_price_tags"
-    assert "hover_" in body, "_on_select_tree_hover 沒保留 price_* tag"
+    assert "_get_price_tag_for_tree" in body, (
+        "_on_tree_select_sync_hover 應讀 _get_price_tag_for_tree（內部讀 _select_price_tags）"
+    )
+    assert "hover_" in body, "_on_tree_select_sync_hover 應設 hover_<price> tag"
 
 
 def test_ms_hover_preserves_price_tag():
@@ -379,20 +387,20 @@ def test_all_files_compile():
             pytest.fail(f"❌ {f} 編譯失敗：\n{e}")
 
 def test_etf_hover_combined_uses_price_tag():
-    """【V1.1-price-color-fix3 + V1.2.0-kb-focus-v4】
-    ETF hover 要帶 price tag
+    """【V1.1-price-color-fix3 + V1.2.0-kb-focus-v7】
+    ETF hover_<price> tag 由 _on_tree_select_sync_hover 統一管（v7）
 
     Bug 歷史：William 15:49 反映 cursor 移到第一行再移開後變黑
-    v4 重構：hover 用 selection_set()、<<TreeviewSelect>> handler 讀 price_tags 設 hover_<price> tag
+    v4：hover 用 selection_set()、<<TreeviewSelect>> handler 讀 price_tags 設 hover_<price> tag
+    v7：motion handler 只設 focus、不動 tags
     """
     content = _read(STOCKTOOL_PY)
-    # v4：hover 不直接設 hover_<price> tag、靠 <<TreeviewSelect>> handler 處理
     m = re.search(
         r'def _on_tree_select_sync_hover\(self, event\):(.*?)(?=\n    def |\Z)',
         content,
         re.DOTALL,
     )
-    assert m, "找不到 _on_tree_select_sync_hover handler（v4 統一處理 hover_<price>）"
+    assert m, "找不到 _on_tree_select_sync_hover handler（v7 統一處理 hover_<price>）"
     body = m.group(1)
     assert "_get_price_tag_for_tree" in body or "_etf_price_tags" in body, (
         "_on_tree_select_sync_hover 應讀 price_tags dict"
