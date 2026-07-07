@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v21 (2026-07-07 18:42) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v22 (2026-07-07 18:42) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v21
-最後更新: 2026-07-07 19:27 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v22
+最後更新: 2026-07-07 22:15 (Asia/Taipei)
 
 Python 版本: 3.8+
 
@@ -5327,26 +5327,22 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _on_tree_select_sync_hover(self, event):
-        """【V1.2.0-kb-focus-v12】<<TreeviewSelect>> 事件（click 切換 selection 時觸發）
+        """【V1.2.0-kb-focus-v22】<<TreeviewSelect>> handler - do nothing
 
-        v12 完全解耦 hover 跟 click：
-        - click 只設 selection (excel output)、不動 hover tag
-        - hover tag 完全由 mouse motion handler 跟 up/down key 控制
-        - click 之後如果 mouse 移到別 row、motion handler 會 _apply_hover 更新
+        v22 改變：放手了。
+        v12 設計「_clear_all_hover 清空、靠 mouse motion handler 重設」造成 race condition
+        → 200ms 內 hover 沒了、文字變黑、click 也有同樣問題
+        → 之前我以為 XWarpPointer 動不了 cursor 是大問題
+        → 實際上 hover 本身就是問題
 
-        為什麼要解耦？
-        - William 2026-07-07 15:03 反映：click 是選股 (excel output)、不該動 hover
-        - v8-v11 click 會設 hover 到 click row、若 mouse 還在 click row 附近、不動
-          也不會讓 hover 移到 mouse 位置 → 跟上 mouse motion handler 衝突
-        - 解法：<<TreeviewSelect>> 只管 selection、不 call _apply_hover
-
-        為了避免留下舊的 hover_<kind> tag、同步 _clear_all_hover
-        （因為 click 切 selection 後、mouse 可能還在舊 hover row、motion 未 fire）
+        最終設計：
+        - <<TreeviewSelect>> 不動作、讓 hover 保留
+        - motion handler 自己處理 hover（mouse 移到哪就 hover 哪）
+        - key-nav (_on_tree_key_see_focus) 自己 _apply_hover
+        - click 不該有 hover 動作（但因為 mouse 動作有 motion、仍然 natural）
         """
-        tree = event.widget
-        # click 不動 hover、但確保舊 hover tag 被清（click 後 mouse 還沒動）
-        # → mouse 動後 motion handler 會重設 hover 到新 cursor 位置
-        self._clear_all_hover(tree)
+        # 什麼都不做
+        pass
 
     def _clear_all_hover(self, tree):
         """【V1.2.0-kb-focus-v12】清空整個 tree 的所有 hover_<price> tag
@@ -5416,9 +5412,10 @@ class StrategyGUI(tk.Tk):
     def _move_cursor_to_row(self, tree, iid):
         """【V1.2.0-kb-focus-v18】鍵盤 ↑/↓ 移動後、把 OS mouse cursor 移到該 row
 
-        v21 變更：
+        v22 變更：
         - 直接 self._apply_hover(tree, cur)、不依賴 mouse motion
-        - v18 _v18_log 因為 PyCharm 都看不到、已拿掉
+        - 不再 _move_cursor_to_row（X11 動 OS cursor 在 Tk 環境下 race）
+        - 不再 _v18_log（William 已確認不用再印）
         """
         self._v18_log(f"[v18 _move_cursor_to_row] 進入 iid={iid}")
         if not tree or not tree.winfo_exists():
@@ -9245,31 +9242,28 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _on_tree_key_see_focus(self, event):
-        """【V1.2.0-kb-focus-v21】Down/Up/Home/End/Prior/Next key release 時主動 see + sync highlight
+        """【V1.2.0-kb-focus-v22】Down/Up/Home/End/Prior/Next key release 時主動 hover + scroll
 
-        v21 簡單設計：
-        1. _apply_hover(tree, cur) 直接設 yellow bg + colored fg 的 highlight bar
-           (v18 之前沒 call、導致 key-nav 後 highlight 文字變黑 → 因為只有 (checked, price_x) 但 hover tag 沒了)
+        v22 簡單設計（最終）：
+        1. _apply_hover(tree, cur) 直接設 yellow bg + colored fg highlight
         2. _ensure_focus_visible scroll
-        3. _move_cursor_to_row 真的動 OS cursor
-        4. 全同步、不依賴 mouse <Motion>
+        3. 不動 OS cursor (v17 XWarpPointer 複雜有 race、放棄)
+        4. _kbd_nav_guard 200ms 防 motion handler 覆蓋
         """
         tree = event.widget
         try:
             cur = tree.focus()
             if cur and cur in tree.get_children():
-                # 設 guard、滑鼠只要未動 200ms 內 motion handler 不覆蓋
+                # 設 guard、motion handler 200ms 內不覆蓋 key-nav 設的 hover
                 self._kbd_nav_guard_until_ms = int(time.time() * 1000) + 200
                 try:
                     self._kbd_nav_mouse_pos_at_guard = tree.winfo_pointerxy()
                 except tk.TclError:
                     self._kbd_nav_mouse_pos_at_guard = (0, 0)
-                # === v21 重要: 直接設 hover、不要等 mouse motion ===
+                # 馬上設 hover、馬上可見
                 self._apply_hover(tree, cur)
-                # scroll to make row visible
+                # scroll
                 self._ensure_focus_visible(tree, cur)
-                # 真的動 OS cursor
-                self._move_cursor_to_row(tree, cur)
         except tk.TclError:
             pass
         except Exception:

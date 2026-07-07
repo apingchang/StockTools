@@ -173,8 +173,8 @@ def test_v16_no_windows_specific_api_in_motion_handler():
         )
 
 
-def test_v16_on_tree_key_see_focus_calls_move_cursor():
-    """v16：_on_tree_key_see_focus 必呼叫 _move_cursor_to_row"""
+def test_v22_on_tree_key_see_focus_no_move_cursor():
+    """v22：_on_tree_key_see_focus 不再嘗試動 OS cursor（v17 XWarpPointer race）"""
     content = _read()
     idx = content.find("def _on_tree_key_see_focus(self, event):")
     assert idx != -1
@@ -185,8 +185,12 @@ def test_v16_on_tree_key_see_focus_calls_move_cursor():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    assert "_move_cursor_to_row" in body, (
-        "v16 _on_tree_key_see_focus 必呼叫 _move_cursor_to_row"
+    assert "_move_cursor_to_row" not in body, (
+        "v22 _on_tree_key_see_focus 必不再呼叫 _move_cursor_to_row（XWarpPointer race 放棄）"
+    )
+    # 但仍必呼叫 _apply_hover
+    assert "_apply_hover" in body, (
+        "v22 _on_tree_key_see_focus 必仍呼叫 _apply_hover"
     )
 
 
@@ -414,7 +418,7 @@ def test_v18_no_more_after_idle():
         "v18 _on_tree_key_see_focus 不應再用 self.after_idle("
     )
     # 直接呼叫 _move_cursor_to_row
-    assert "self._move_cursor_to_row(" in body, (
+    assert "self._move_cursor_to_row(" not in body, (
         "v18 _on_tree_key_see_focus 必直接呼叫 self._move_cursor_to_row("
     )
 
@@ -465,3 +469,19 @@ def test_v20_ms_tree_still_has_keyrelease():
         assert evt in section, (
             f"v20 _ms_tree {evt} binding 必保留"
         )
+
+def test_v22_on_tree_select_sync_hover_does_nothing():
+    """v22：_on_tree_select_sync_hover 必 do nothing（不要 _clear_all_hover 製造 race）"""
+    content = _read()
+    idx = content.find("def _on_tree_select_sync_hover(self, event):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "_clear_all_hover" not in body, (
+        "v22 _on_tree_select_sync_hover 不應清 hover（會 race）"
+    )
