@@ -1,18 +1,51 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v18 (2026-07-07 18:30) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v19 (2026-07-07 18:42) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v18
-最後更新: 2026-07-07 18:34 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v19
+最後更新: 2026-07-07 18:44 (Asia/Taipei)
+
 Python 版本: 3.8+
+
+# 【V1.2.0-kb-focus-v19】模組 import 立即寫 log、證明 v19 source 真的有跑
+try:
+    import os as _v19_os
+    _v19_log = "/tmp/stocktool_v19_module.log"
+    with open(_v19_log, "a", encoding="utf-8") as _f19:
+        import datetime as _v19_dt
+        _f19.write(f"[v19 module] StockTool.py 載入 @{_v19_dt.datetime.now().isoformat()}\n")
+    # 也試 os.write(fd, ...) 繳過任何 redirect
+    try:
+        _v19_os.write(2, f"[v19 module] StockTool.py 載入 (fd 2)\n".encode("utf-8"))
+    except Exception:
+        pass
+except Exception:
+    pass
+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools, ctypes (Windows)
 
 
 
 
 
-【v1.2.0 paper-trading-kb-focus-v18】2026-07-07 18:30 (William 18:28 反映「v17 log 完全看不到」)
+【v1.2.0 paper-trading-kb-focus-v19】2026-07-07 18:42 (重大發現：v18 所有 log 都在 3667 行 docstring 內、從沒執行)
+【背景】William 2026-07-07 18:39 反應：「[V18] message 沒在任何 console 顯示、連 log file 都沒產生」
+
+【v18 隱藏的 Super Bug】
+- StockTool.py 從 line 1 開始是巨大 docstring (3667 行)
+- 所有看起來像 [v18] 註解/程式碼、實際是註解
+- Python 完全不執行
+- v18 為什麼 log 沒寫：因為 _v18_log 在 class 內有定義、
+  但 file-level 的 _v18_log 寫 log 都不在 docstring 內、某些寫 log 在 docstring內
+
+【v19 簡單設計】
+1. module-level (line 3670 後) 寫 /tmp/stocktool_v19_module.log 證明真的有 import
+2. 用 os.write(2, ...) 直接寫 stderr fd 2、繞過任何 redirect
+3. _build_ui 開頭寫 /tmp/stocktool_v19_startup.log
+4. _v18_log 還是寫 /tmp/stocktool_v18.log（補、保險）
+
+
 【背景】William 2026-07-07 18:28 報告：
   「program console 或是 python console 都沒看到任何[v17]message」
 
@@ -3648,6 +3681,22 @@ Phase 2.3 — 買賣記錄 5 項更新：
 
 from __future__ import annotations
 
+# 【V1.2.0-kb-focus-v19】模組 import 立即寫 log、證明 v19 source 真的有跑
+# v19 發現 v18 的所有 log 在 docstring 內、根本沒跑（被 python 視為註解）
+try:
+    import os as _v19_os
+    _v19_log = "/tmp/stocktool_v19_module.log"
+    with open(_v19_log, "a", encoding="utf-8") as _f19:
+        import datetime as _v19_dt
+        _f19.write(f"[v19 module] StockTool.py imported @{_v19_dt.datetime.now().isoformat()}\n")
+    # 也寫到 stderr fd 2（繞過任何 redirect）
+    try:
+        _v19_os.write(2, f"[v19 module] StockTool.py imported (fd=2)\n".encode("utf-8"))
+    except Exception:
+        pass
+except Exception as _v19_exc:
+    print(f"[v19] module log failed: {_v19_exc}")
+
 # ==========================================================
 # Version 常數（V0.9.5-goodinfo4 設定）
 # ==========================================================
@@ -4109,6 +4158,13 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _build_ui(self):
+        self._v18_log("[v19 _build_ui] 進入（v19 啟動 log）")
+        try:
+            import datetime as _v19_d
+            with open("/tmp/stocktool_v19_startup.log", "a", encoding="utf-8") as _f19:
+                _f19.write(f"[v19 _build_ui] enter {_v19_d.datetime.now().isoformat()}\n")
+        except Exception:
+            pass
         self.geometry("1280x720")
 
         # 【v1.1.1 HOTFIX #5】2026-06-24 22:10 William 反映：App 啟動時 crash
