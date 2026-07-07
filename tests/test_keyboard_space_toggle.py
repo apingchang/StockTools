@@ -200,6 +200,7 @@ def test_v16_x11_with_mock_unit():
     x11_libs.XOpenDisplay = lambda name: x11_calls.append(("XOpenDisplay", name)) or b"display"
     x11_libs.XWarpPointer = lambda *args: x11_calls.append(("XWarpPointer", args))
     x11_libs.XFlush = lambda d: x11_calls.append(("XFlush", d))
+    x11_libs.XSync = lambda d, b: x11_calls.append(("XSync", d, b))
     x11_libs.XCloseDisplay = lambda d: x11_calls.append(("XCloseDisplay", d))
 
     app = SimpleNamespace()
@@ -216,11 +217,11 @@ def test_v16_x11_with_mock_unit():
     finally:
         _ct.CDLL = saved_cdll
 
-    # 檢查 mock 被呼叫
+    # 檢查 mock 被呼叫（v17 用 XSync 不是 XFlush）
     calls_summary = [c[0] for c in x11_calls]
     assert "XOpenDisplay" in calls_summary, "必呼叫 XOpenDisplay(None)"
     assert "XWarpPointer" in calls_summary, "必呼叫 XWarpPointer(x, y)"
-    assert "XFlush" in calls_summary, "必呼叫 XFlush"
+    assert "XSync" in calls_summary, "v17 必用 XSync (取代 XFlush、等 server 處理完)"
     assert "XCloseDisplay" in calls_summary, "必呼叫 XCloseDisplay"
 
 
@@ -257,3 +258,104 @@ def test_v16_move_os_cursor_dispatch_unit():
         )
     finally:
         _sys.platform = saved_platform
+
+
+# ==========================================================
+# 【V1.2.0-kb-focus-v17】XSync + xdotool fallback
+# ==========================================================
+
+def test_v17_x11_uses_xsync_not_xflush():
+    """v17：_x11_move_cursor_to 用 XSync 不是 XFlush、等 X server 處理完"""
+    content = _read()
+    idx = content.find("def _x11_move_cursor_to(self, target_x, target_y):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # v17 必用 XSync
+    assert "lib.XSync(" in body, (
+        "v17 _x11_move_cursor_to 必用 lib.XSync 而不是 XFlush（XFlush 不等 server）"
+    )
+    # 但 XFlush 也應該還保留作為 backup / 先 flush
+    # 重點是 XSync 必存在
+
+
+def test_v17_x11_xdotool_fallback():
+    """v17：_x11_move_cursor_to 必 fallback 到 xdotool subprocess"""
+    content = _read()
+    idx = content.find("def _x11_move_cursor_to(self, target_x, target_y):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 必用 subprocess
+    assert "subprocess" in body, (
+        "v17 _x11_move_cursor_to 必用 subprocess 作為 fallback"
+    )
+    # 必呼叫 xdotool
+    assert "xdotool" in body, (
+        "v17 _x11_move_cursor_to fallback 必呼叫 xdotool"
+    )
+    assert "mousemove" in body, (
+        "v17 xdotool 必呼叫 mousemove"
+    )
+
+
+def test_v17_stderr_log_for_debug():
+    """v17：_move_cursor_to_row 必印 stderr log 方便 debug"""
+    content = _read()
+    idx = content.find("def _move_cursor_to_row(self, tree, iid):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 必印 log 含 target
+    assert "_sys.stderr" in body or "sys.stderr" in body, (
+        "v17 _move_cursor_to_row 必印 stderr log"
+    )
+    assert "target=" in body or "target_x" in body, (
+        "v17 必 log target 座標"
+    )
+
+
+def test_v17_x11_with_xsync_mock_unit():
+    """v17：mock XSync 確認 XWarpPointer + XSync 被呼叫"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    x11_calls = []
+    x11_libs = SimpleNamespace()
+    x11_libs.XOpenDisplay = lambda name: x11_calls.append(("XOpenDisplay", name)) or b"display"
+    x11_libs.XWarpPointer = lambda *args: x11_calls.append(("XWarpPointer", args))
+    x11_libs.XFlush = lambda d: x11_calls.append(("XFlush", d))
+    x11_libs.XSync = lambda d, b: x11_calls.append(("XSync", d, b))
+    x11_libs.XCloseDisplay = lambda d: x11_calls.append(("XCloseDisplay", d))
+
+    app = SimpleNamespace()
+    import ctypes as _ct
+    saved_cdll = _ct.CDLL
+    _ct.CDLL = lambda name: x11_libs
+
+    try:
+        result = st.StrategyGUI._x11_move_cursor_to(app, 100, 200)
+        assert result is True
+    finally:
+        _ct.CDLL = saved_cdll
+
+    # v17 必用 XSync
+    calls_summary = [c[0] for c in x11_calls]
+    assert "XSync" in calls_summary, (
+        f"v17 必用 XSync、實際 {calls_summary}"
+    )

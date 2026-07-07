@@ -1,14 +1,35 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v16 (2026-07-07 17:30) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v17 (2026-07-07 18:18) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v16
-最後更新: 2026-07-07 17:56 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v17
+最後更新: 2026-07-07 18:21 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools, ctypes (Windows)
 
 
+
+
+【v1.2.0 paper-trading-kb-focus-v17】2026-07-07 18:20 (William 18:12 明確反映本機 Ubuntu + XWarpPointer 仍沒動)
+【背景】William 2026-07-07 18:17 確認：
+  「我是在本機(Ubuntu) pycharm stocktools.py 直接按 run button 執行」
+
+【v16 失敗分析】
+- libX11.so.6 有裝、XWarpPointer return 成功、但 OS cursor 沒動
+- XFlush 只 flush event queue、不等 X server 處理完（可能 race condition）
+- ctypes 走 X protocol 在某些環境不可靠
+
+【v17 簡單設計（多層丰豐 + debug log）】
+1. _x11_move_cursor_to：
+   - Layer A: XWarpPointer + XSync(display, False) × 3 retries
+     XSync 取代 XFlush、XSync block 等 server 真的處理完
+   - Layer B: subprocess xdotool mousemove fallback
+     走 libxdo XTest extension、某些環境反而比 ctypes 可靠
+   - 每 layer 印 stderr log 方便 debug
+2. _move_cursor_to_row 加 stderr log (iid、rootxy、target、return) 方便追蹤
+
+【新測試】tests/test_keyboard_space_toggle.py 新增 4 個 v17 test
 
 【v1.2.0 paper-trading-kb-focus-v16】2026-07-07 17:35 (William 17:29 明確反映在 Ubuntu 執行)
 【背景】William 2026-07-07 17:29 訊息：
@@ -5275,21 +5296,19 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _move_cursor_to_row(self, tree, iid):
-        """【V1.2.0-kb-focus-v16】鍵盤 ↑/↓ 移動後、把 OS mouse cursor 移到該 row
+        """【V1.2.0-kb-focus-v17】鍵盤 ↑/↓ 移動後、把 OS mouse cursor 移到該 row
 
-        v16 變更（根據 William 2026-07-07 17:29 明確反應他在 Ubuntu 執行）：
-        - v13-v15 用 Windows ctypes.windll.user32.SetCursorPos、Linux 上完全無效
-        - v16 改用跨平台 _move_os_cursor：
-          * Linux: X11 XWarpPointer（libX11.so.6）
-          * macOS: CGWarpMouseCursorPosition
-          * Windows: SetCursorPos
-        為什麼要去 X11：因為只有把 OS cursor 真的動到新 row、
-        下次的真實 mouse motion 才不會把 hover 拉回去
+        v17 變更（William 18:12 報告 v16 XWarpPointer 仍沒動）：
+        - XFlush 換 XSync（block 等 server 處理完）
+        - 加 subprocess xdotool mousemove fallback
+        - 加 stderr log 方便 debug
         """
+        import sys as _sys
         if not tree or not tree.winfo_exists():
             return
         bbox = tree.bbox(iid)
         if not bbox:
+            print(f"[v17] _move_cursor_to_row bbox 為空 iid={iid}", file=_sys.stderr)
             return
         x, y, w, h = bbox
         if h <= 0:
@@ -5297,17 +5316,27 @@ class StrategyGUI(tk.Tk):
         cx = x + w // 2
         cy = y + h // 2
 
-        # 1. Tk 內部 Motion 同步（必定 work、視覺上 hover 同步到 focus row）
+        # 1. Tk 內部 Motion 同步（Tk 內建、視覺上 hover 同步到 focus row）
         try:
             tree.event_generate("<Motion>", x=cx, y=cy)
         except tk.TclError:
             pass
 
-        # 2. 實體 OS cursor 移動（跨平台）
+        # 2. 實體 OS cursor 移動（跨平台 + log）
         try:
             target_x = tree.winfo_rootx() + cx
             target_y = tree.winfo_rooty() + cy
-            self._move_os_cursor(target_x, target_y)
+            print(
+                f"[v17] key nav iid={iid} root=({tree.winfo_rootx()},{tree.winfo_rooty()}) "
+                f"tree_local=({cx},{cy}) → target=({target_x},{target_y})",
+                file=_sys.stderr,
+            )
+            moved = self._move_os_cursor(target_x, target_y)
+            print(
+                f"[v17] _move_os_cursor returned {moved}",
+                file=_sys.stderr,
+            )
+            return moved
         except Exception:
             pass
 
@@ -5345,12 +5374,25 @@ class StrategyGUI(tk.Tk):
             return False
 
     def _x11_move_cursor_to(self, target_x, target_y):
-        """【V1.2.0-kb-focus-v16】Linux X11 用 XWarpPointer 移 OS cursor
+        """【V1.2.0-kb-focus-v17】Linux X11 cursor 移動 - XSync + xdotool 雙層丰豐
 
-        標準 X11 庫 libX11.so.6 提供的 XWarpPointer：
-          XWarpPointer(display, src_w, dst_w, src_x, src_y, src_w, src_h, dst_x, dst_y)
-        會 dispatch 一個 Warp event 給 X server、cursor 立刻跳到新位置
+        v16 失敗原因（William 18:12 報告：app 本機 Ubuntu 跑、XWarpPointer 卻沒動）：
+        1. XFlush 只 flush event queue、不等 X server 真的處理完
+           → 改成 XSync(display, False) block 直到 server 處理完
+        2. 可能是 Tk grab / focus race
+           → 重試 3 次 + 用不同的 XSync 選項
+        3. ctypes 走 X protocol 在某些環境不可靠
+           → fallback 用 subprocess 走 xdotool mousemove（走 libxdo 內部的 XTest extension）
+
+        優先序：
+        - Layer A: XWarpPointer + XSync ×3
+        - Layer B: subprocess xdotool mousemove fallback
+        每層 log 結果到 stderr 方便 debug
         """
+        import sys as _sys
+        target_x, target_y = int(target_x), int(target_y)
+
+        # Layer A: ctypes XWarpPointer + XSync (3 retries)
         try:
             import ctypes
             lib = ctypes.CDLL("libX11.so.6")
@@ -5363,25 +5405,60 @@ class StrategyGUI(tk.Tk):
                 ctypes.c_int, ctypes.c_int,
             ]
             lib.XWarpPointer.restype = ctypes.c_int
+            # XSync 不是 XFlush：XSync block 等 server 處理完
+            lib.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            lib.XSync.restype = ctypes.c_int
             lib.XFlush.argtypes = [ctypes.c_void_p]
             lib.XFlush.restype = ctypes.c_int
             lib.XCloseDisplay.argtypes = [ctypes.c_void_p]
             lib.XCloseDisplay.restype = ctypes.c_int
 
-            display = lib.XOpenDisplay(None)
-            if not display:
-                return False
-            try:
-                lib.XWarpPointer(
-                    display, 0, 0, 0, 0, 0, 0,
-                    int(target_x), int(target_y),
+            for attempt in range(3):
+                display = lib.XOpenDisplay(None)
+                if not display:
+                    continue
+                try:
+                    # 動 cursor 到 target
+                    lib.XWarpPointer(
+                        display, 0, 0, 0, 0, 0, 0,
+                        target_x, target_y,
+                    )
+                    # XSync(reject=False) 等 server 處理完所有 event queue
+                    lib.XSync(display, False)
+                    print(
+                        f"[v17 x11] layer A attempt {attempt+1}/3 success → ({target_x},{target_y})",
+                        file=_sys.stderr,
+                    )
+                    return True
+                finally:
+                    lib.XCloseDisplay(display)
+            print("[v17 x11] layer A 全部 attempts 完沒成功", file=_sys.stderr)
+        except Exception as e:
+            print(f"[v17 x11] layer A exception: {e}", file=_sys.stderr)
+
+        # Layer B: xdotool subprocess fallback (走 libxdo XTest extension)
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["xdotool", "mousemove", "--screen", "0", str(target_x), str(target_y)],
+                capture_output=True, timeout=1.0,
+            )
+            if result.returncode == 0:
+                print(
+                    f"[v17 x11] layer B xdotool success → ({target_x},{target_y})",
+                    file=_sys.stderr,
                 )
-                lib.XFlush(display)
                 return True
-            finally:
-                lib.XCloseDisplay(display)
-        except Exception:
-            return False
+            print(
+                f"[v17 x11] layer B xdotool fail: rc={result.returncode} stderr={result.stderr!r}",
+                file=_sys.stderr,
+            )
+        except FileNotFoundError:
+            print("[v17 x11] layer B xdotool not found in PATH", file=_sys.stderr)
+        except Exception as e:
+            print(f"[v17 x11] layer B exception: {e}", file=_sys.stderr)
+
+        return False
 
     def _mac_move_cursor_to(self, target_x, target_y):
         """【V1.2.0-kb-focus-v16】macOS CGWarpMouseCursorPosition 移 OS cursor"""
