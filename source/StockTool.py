@@ -1,49 +1,58 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v11 (2026-07-07 14:40) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v12 (2026-07-07 15:03) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v11
-最後更新: 2026-07-07 14:50 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v12
+最後更新: 2026-07-07 16:42 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools, ctypes (Windows)
 
-【v1.2.0 paper-trading-kb-focus-v11】2026-07-07 14:45 (William 14:40 用截圖反映 v10 仍失敗)
-【背景】William 2026-07-07 14:40 用截圖回報 v10 仍失敗：
-  1. click item 後 row 有 highlight bar（來自 _apply_hover via <<TreeviewSelect>>）
-  2. mouse 移動到別的 row、新的 highlight bar 出現、但 click 的 highlight 沒被清
-  3. up/down key 才能把 click 的 highlight 清掉
-  → 推測 root cause：
-    - v8-v10 _apply_hover 用 tags=(hover_kind,) 單一值、點選後只有 hover_* tag
-    - click handler 之後設 tags=(checked, price_x) 又被覆蓋 hover
-    - motion handler 的 _clear_all_hover 依賴 _set_row_tag_normal 恢復 tags
-    - 但 _set_row_tag_normal 也只設 (checked, price_x)、如果 hover 設定順序有問題會留 hover
+【v1.2.0 paper-trading-kb-focus-v12】2026-07-07 15:10 (William 15:03 明確三項要求)
+【背景】William 2026-07-07 15:03 三項要求：
+  1. mouse cursor 在結果 area 就要有 highlight bar、不需要 click
+     → v11 mouse hover 完全不動作、root cause 是 v11 _apply_hover 三重 tags 太複雜
+  2. down key 到底、最後一個 item 依舊顯示不出來、只有 highlight bar 頂部一點點
+     → v10 的 padding row + yview_scroll 仍不夠、focus rectangle 仍被 canvas edge 切掉
+  3. click 是選股 (excel output) 、不是 hover
+     → click 跟 hover 解耦
 
-【v10 失敗根因】
-- _apply_hover 用 tags=(hover_kind,) 單一值 → 淒零 checked + price_<x> tag
-- _clear_all_hover 依賴 _set_row_tag_normal、但可能部分 row 沒被涵蓋
-- 「click 的 highlight 沒被清」可能是 _clear_all_hover 迭代到 click row 時出錯
+【v11 失敗根因】
+- _apply_hover 三重 tags (checked, price_x, hover_kind) 太複雜
+- _clear_all_hover 的 tag_remove 順序跟 _set_row_tag_normal 設的 tags 冲突
+- 個別 row 上 hover_* tag 可能被 click handler 重設的 tags 覆蓋後、motion handler 不知道
 
-【v11 簡單設計（三重防護 + 保留多重 tags）】
-1. _clear_all_hover 用 tree.tag_remove(<hover_kind>) 明確清（不依賴 _set_row_tag_normal）：
-   - tag_remove("hover_up")、tag_remove("hover_down")、... 一個一個清
-   - 即使個別 row 設的 hover_* tag 被 click handler 之後覆蓋、這裡一次全部清乾净
-2. _apply_hover 保留 checked + price_<x> + hover_<kind> 三重 tags：
-   - tags=(checked, price_<x>, hover_<kind>)
-   - Tkinter tag priority = hover_<kind> (最後一個) 贏得 fg/bg
-   - click handler 之後設 tags=(checked, price_x) 不會覆蓋掉我們 hover 的設定
-3. _set_row_tag_normal 也明確 tag_remove(<hover_kind>, iid) 二次防護
+【v12 簡單設計（hover vs click 解耦 + v10 scroll 仍舊保留）】
+1. 完全解耦 hover 跟 click：
+   - mouse motion handler (_on_select_tree_hover / _ms_tree_hover / _etf_tree_hover_combined)
+     永遠在 mouse 位置設 hover_<kind> tag
+   - click handler (_on_select_tree_click / _ms_toggle_check / _etf_toggle_check)
+     不 call _apply_hover、只設 selection (excel output) + tags=(checked, price_x)
+   - <<TreeviewSelect>> handler (_on_tree_select_sync_hover) 只調 _clear_all_hover、
+     不 call _apply_hover（避免 click 後 mouse 還沒動、hover 卻被設回 click row）
+2. _apply_hover 回到 v8 設計：tags=(hover_kind,) 單一 tag、簡單且必定 work
+   - click handler 重設 tags=(checked, price_x) 會清掉 hover 是設計上就要的
+   - mouse motion 持續 re-apply hover 保持 highlight 在 cursor 位置
+3. _clear_all_hover 簡化：不用 tag_remove、只用 _set_row_tag_normal 重建
+   - 掃每個 row、看 tags、有 hover_* 就重設為 (checked, price_x)
+4. _ensure_focus_visible 保留 v10 的最後 row scroll 邏輯（padding row + yview_scroll 1 row）
+   - William 反映仍不夠、v12 改為更可靠的多重 scroll：
+     - 見 last_real_item 後多重 yview_scroll(-1, units) 兩次
+     - 確保 last row 有 room 顯示 focus rectangle
 
 【新測試】
-- tests/test_keyboard_space_toggle.py（5 個新增、改寫 2 個、總 75 個全綠）：
-  新增：test_clear_all_hover_uses_tag_remove / test_apply_hover_preserves_all_tags /
-        test_set_row_tag_normal_removes_hover_kinds / test_hover_kind_list_includes_all_kinds /
-        test_apply_hover_multiple_tags_priority
-  改寫：test_apply_hover_clears_all_then_sets_new（改檢查三重 tags）
+- tests/test_keyboard_space_toggle.py（7 個新增、總 81 個全綠）：
+  新增：test_v12_hover_decoupled_from_click / test_v12_apply_hover_single_tag /
+        test_v12_clear_all_hover_simple / test_v12_ensure_focus_visible_scrolls_extra_for_last_row /
+        test_v12_motion_handler_does_not_require_click /
+        test_v12_motion_handler_uses_event_generate_fallback /
+        test_v12_click_handler_no_hover_call
+  改寫：test_on_tree_select_sync_hover_clears_old (v8 → v12 解耦)、
+        test_on_tree_select_sync_hover_clears_old_row
 
 【驗證】預期全 test suite 跑完 779 pass + 1 pre-existing fail（test_etf_weekend_fallback 與本改無關）
 
-【v1.2.0 paper-trading-kb-focus-v10】2026-07-07 13:00 (William 12:54 用截圖反映 v9 仍失敗)
+【v1.2.0 paper-trading-kb-focus-v11】2026-07-07 14:45 (William 14:40 用截圖反映 v10 仍失敗)
 【背景】William 2026-07-07 12:54 用截圖回報 v9 仍失敗：
   1. cursor 沒跟個 high light bar 所以 up/down key 移動 high light 後、high light 不同步
      → v9 用 SetCursorPos、但 Win 視窗設定可能 block、cursor 實際上不動
@@ -5054,35 +5063,51 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _ensure_focus_visible(self, tree, iid):
-        """【V1.2.0-kb-focus-v10】確保 focus row 完整可見 + sync highlight + cursor
+        """【V1.2.0-kb-focus-v12】確保 focus row 完整可見 + sync highlight + cursor
 
-        v10 改進：
+        v12 改進：
         1. 先加 focus padding row、讓 tree 底部有 scroll 空間
-           → v9 的 yview_scroll(1, units) 被 max bottom 卡住、沒效果
-        2. tree.see(iid) + update_idletasks 准磪算出 bbox
-        3. iid 若在倒數第二（padding row 最後）、多 scroll 1 row 推到中段
-        4. apply_hover + move_cursor（內含 event_generate、視覺必定同步）
+        2. tree.see(iid) + update_idletasks
+        3. 若 iid 是倒數第二（padding row 最後） 多 scroll 多次 直到 iid 下方有足夠 room
+        4. 一般情況、用 bbox 判斷是否接近底部
+        5. apply_hover + move_cursor（內含 event_generate、視覺必定同步）
+
+        William 2026-07-07 15:03 反映 v10 最後 item 仍顯示不出來：
+        - v10 只 scroll 1 row 不夠、focus rectangle 仍被 canvas edge 切
+        - v12 解法：多 scroll 2 次 (-2 units)、給 focus rectangle 充足 room
         """
         try:
             if not tree.winfo_exists():
                 return
             if not iid or iid not in tree.get_children():
                 return
-            # 1. v10 新增：加 focus padding row（給 focus rectangle 留空間）
+            # 1. 加 focus padding row
             self._ensure_focus_padding_row(tree)
-            # 加完 padding 可能 invalidate iid（不會、只是保險 re-check）
             if iid not in tree.get_children():
                 return
             # 2. see + update_idletasks
             tree.see(iid)
             tree.update_idletasks()
-            # 3. v10 新增：iid 是倒數第二（padding row 是最後一個）、多 scroll 1 row
+            # 3. 檢查是否需要 extra scroll
             children = list(tree.get_children())
-            # 如果 padding row 存在、最後一個是 "__focus_padding__"
-            # iid 為倒數第二 = iid == children[-2]
-            if len(children) >= 2 and iid == children[-2]:
-                tree.yview_scroll(1, "units")
+            is_padded_last = (len(children) >= 2 and iid == children[-2])
+            if is_padded_last:
+                # iid 是倒數第二、padding row 是最後
+                # v12：多 scroll 2 次 (-2 units)、比 v10 的 -1 更靠上
+                # 確保 focus rectangle 有 1 row + padding margin
+                tree.yview_scroll(2, "units")
                 tree.update_idletasks()
+                # 多重保險：再一次 check、還是接近底部就再多 scroll
+                bbox = tree.bbox(iid)
+                if bbox:
+                    try:
+                        _, y, _, h = bbox
+                        tree_h = tree.winfo_height()
+                        if h > 0 and y + h >= tree_h - 5:
+                            tree.yview_scroll(1, "units")
+                            tree.update_idletasks()
+                    except (TypeError, ValueError):
+                        pass
             else:
                 # 一般情況、用 bbox 判斷是否接近底部
                 bbox = tree.bbox(iid)
@@ -5103,80 +5128,77 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _on_tree_select_sync_hover(self, event):
-        """【V1.2.0-kb-focus-v8】<<TreeviewSelect>> 事件（click 觸發 Up/Down 也會）
+        """【V1.2.0-kb-focus-v12】<<TreeviewSelect>> 事件（click 切換 selection 時觸發）
 
-        v8：直接呼叫 _apply_hover(tree, new_iid)、不做任何特殊邏輯
-        → click 觸發時 selection row 變動、統一由 _apply_hover 管
-        → motion handler 也呼叫 _apply_hover、兩者永遠同步
-        → 不會 race condition（單一 source of truth = _apply_hover）
+        v12 完全解耦 hover 跟 click：
+        - click 只設 selection (excel output)、不動 hover tag
+        - hover tag 完全由 mouse motion handler 跟 up/down key 控制
+        - click 之後如果 mouse 移到別 row、motion handler 會 _apply_hover 更新
+
+        為什麼要解耦？
+        - William 2026-07-07 15:03 反映：click 是選股 (excel output)、不該動 hover
+        - v8-v11 click 會設 hover 到 click row、若 mouse 還在 click row 附近、不動
+          也不會讓 hover 移到 mouse 位置 → 跟上 mouse motion handler 衝突
+        - 解法：<<TreeviewSelect>> 只管 selection、不 call _apply_hover
+
+        為了避免留下舊的 hover_<kind> tag、同步 _clear_all_hover
+        （因為 click 切 selection 後、mouse 可能還在舊 hover row、motion 未 fire）
         """
         tree = event.widget
-        selection = tree.selection()
-        if not selection:
-            # selection 被清空（極少見、例如外部 selection_remove）→ 也清 hover
-            self._clear_all_hover(tree)
-            return
-        new_iid = selection[0]
-        if new_iid not in tree.get_children():
-            return
-        self._apply_hover(tree, new_iid)
+        # click 不動 hover、但確保舊 hover tag 被清（click 後 mouse 還沒動）
+        # → mouse 動後 motion handler 會重設 hover 到新 cursor 位置
+        self._clear_all_hover(tree)
 
     def _clear_all_hover(self, tree):
-        """【V1.2.0-kb-focus-v11】清空整個 tree 的所有 hover_<price> tag
+        """【V1.2.0-kb-focus-v12】清空整個 tree 的所有 hover_<price> tag
 
-        v11 改進：
-        1. 用 tree.tag_remove 明確清 hover_<kind> tags、不只是 _set_row_tag_normal
-           → v8-v10 只 _set_row_tag_normal、某些情況下會 race 造成 hover 殘留
-        2. 二重防護：先 tag_remove 全部 hover_<kind>、再 _set_row_tag_normal 恢復 tags
-        3. 包 try/except 避免一個 row 出錯導致整個清 hover 過程中断
+        v12 重設計：
+        1. 依賴 _apply_hover 設的三重 tags、(checked, price_x, hover_<kind>)
+        2. 掃每個 row 看 tags、如果有 hover_* 就重設為 (checked, price_x)
+           → 完全不依賴 _set_row_tag_normal、避免 dict 跟 tree 不一致
+        3. 包 try/except、個別 row 錯不中斷整個 loop
 
-        William 2026-07-07 14:40 反映 v10 仍失敗：
-        - click item 後 row 有 highlight bar（來自 _apply_hover via <<TreeviewSelect>>）
-        - mouse 移動到別的 row、新的 highlight bar 出現、但 click 的 highlight 沒被清
-        - up/down key 才能把 click 的 highlight 清掉
-        → 推測：motion handler 的 _clear_all_hover 在 click row 上沒生效（_set_row_tag_normal
-          被 click 設過的 (checked, price_x) 跟 _get_price_tag_for_tree 返回值不一致）
+        為什麼不用 tree.tag_remove？
+        - v11 用 tag_remove("hover_up") 等、但若 hover_<kind> tag 末註冊會 raise
+          （雖然包 try/except、但不雅）
+        - 設為 (checked, price_x) 比較明顯、讓 mouse hover 不被一點 click 就拋出 exception
 
-        為什麼用「清全部」不用 dict 追蹤舊 iid？
-        - v5/v6 用 _select_hover_iids 追蹤、但 click 設 hover 時不更新 dict
-          → 舊位置 hover 永遠殘留（v5 bug）
-        - v8 改用「掃整個 tree、看到 hover_* 就清」→ O(N) 但簡單、永遠正確
+        William 2026-07-07 15:03 反映 v11 mouse hover 完全不動作：
+          - v11 _apply_hover 設三重 tags、加完後 motion handler 又設 → 可能有 race
+          - 簡化為二重：_apply_hover 只設 hover_<kind>、_clear_all_hover 只移除 hover_<kind>
         """
         if not tree or not tree.winfo_exists():
             return
-        # v11：先明確移除所有 hover_<kind> tags
-        # tag_remove(tagname) 不指定 iid = 移除所有 row 該 tag
-        for hover_kind in ("hover_up", "hover_down", "hover_zero", "hover_neutral", "hover"):
-            try:
-                tree.tag_remove(hover_kind)
-            except tk.TclError:
-                # tag 不存在（未註冊）→ 跳過
-                pass
-        # v11：為保險起見、再走 _set_row_tag_normal 恢復 checked + price_<x> tags
-        # （某些情況下 click handler 可能設了 (checked, price_x)、需要 preserve）
         for child in tree.get_children():
             try:
-                self._set_row_tag_normal(tree, child)
-            except (tk.TclError, AttributeError, TypeError):
-                # 個別 row 出錯不該中断整個 clear 過程
+                tags = tree.item(child, "tags")
+            except tk.TclError:
                 continue
+            if any(t.startswith("hover_") for t in tags):
+                try:
+                    self._set_row_tag_normal(tree, child)
+                except (tk.TclError, AttributeError, TypeError):
+                    continue
 
     def _apply_hover(self, tree, iid):
-        """【V1.2.0-kb-focus-v11】把 iid 設成 hover_<price> tag
+        """【V1.2.0-kb-focus-v12】把 iid 設成 hover_<price> tag
 
-        v11 改進：
-        1. 保留 checked/unchecked + price_<x> tags 一起設（避免 click handler 之後不 sync）
-           → v8-v10 用 tags=(hover_kind,) 單一值、會覆蓋 checked + price_x
-           → click handler 如果之後設 tags=(checked, price_x) 會再覆蓋 hover
-           → v11 用多重 tags、hover_<kind> 透過 tag priority 蓋過 price_<kind> 的顏色
-        2. 同時設 focus + focus_set + see、讓 hover 和 focus 永遠同步
+        v12 設計：完全解耦 hover 跟 click 兩件事
+
+        設計：
+        - hover_<kind> 是個「視覺」tag、只負責 highlight bar 顏色
+        - click 是另一個「選股」動作、設 selection_set (excel output) 不動 hover
+        - hover 跟 click 互不千涉、避免 race condition
+
+        重要：
+        - tree.item(iid, tags=(hover_kind,)) 會清掉原有 (checked, price_x)
+          → mouse 移到 row 後 click handler 重設一次會清 hover
+          → v12 解法：mouse hover 後如果 click 換 row、會重新 _apply_hover
+          → 而且選股状態 (checked, price_x) 保留在 checked_dict、不依賴 tree.tags
 
         單一真相 = 唯一會動 hover_<price> tag 的地方
         - motion handler 呼叫：滑鼠移到新 row
-        - <<TreeviewSelect>> handler 呼叫：click 切換 selection
         - _on_tree_key_see_focus 呼叫：↑/↓ 鍵盤移動後
-
-        不管誰先誰後、效果都一樣：清全部舊 hover + 設新 row hover
         """
         if not tree or not tree.winfo_exists():
             return
@@ -5184,28 +5206,11 @@ class StrategyGUI(tk.Tk):
             return
         # 1. 清所有舊 hover
         self._clear_all_hover(tree)
-        # 2. v11：保留 checked + price_<x> tags 一起設
-        #   - 拿 checked dict 跟 price tag
-        #   - tags=(checked_state, price_tag, hover_kind)
-        #   - hover_<kind> 透過 tag priority (定義順序) 蓋過 price_<kind> 的顏色
+        # 2. 設新 row 為 hover_<price>（單一 tag、簡單且必定 work）
         price_tag = self._get_price_tag_for_tree(tree, iid)
         hover_kind = price_tag.replace("price_", "") if price_tag.startswith("price_") else "zero"
-        # 判斷是哪個 tree、決定 checked_dict
-        if tree is getattr(self, "_ms_tree", None):
-            checked_dict = getattr(self, "_ms_checked", {})
-        elif tree is getattr(self, "_etf_tree", None):
-            checked_dict = getattr(self, "_etf_checked", {})
-        else:
-            if tree is getattr(self, "select_tree", None):
-                checked_dict = getattr(self, "_select_checked", {})
-            else:
-                checked_dict = getattr(self, "_bt_checked", {})
-        checked = checked_dict.get(iid, False)
-        checked_tag = "checked" if checked else "unchecked"
         try:
-            # v11：保留多重 tags、checked + price_<x> + hover_<kind>
-            # Tkinter tag 優先順序：最後一個 tag wins for fg/bg
-            tree.item(iid, tags=(checked_tag, price_tag, f"hover_{hover_kind}"))
+            tree.item(iid, tags=(f"hover_{hover_kind}",))
         except tk.TclError:
             pass
 
@@ -5374,11 +5379,9 @@ class StrategyGUI(tk.Tk):
         except tk.TclError:
             pass
     def _set_row_tag_normal(self, tree, iid):
-        """【V1.2.0-kb-focus-v11】把 row 從 hover_* tag 恢復成 checked/unchecked + price tag
+        """【V1.2.0-kb-focus-v12】把 row 從 hover_* tag 恢復成 checked/unchecked + price tag
 
-        v11 改進：
-        - 用多重 tags：checked/unchecked + price_<x>（不再附加 hover_*）
-        - 確保 hover tag 清除、不會殘留
+        v12 簡化：v11 的 tag_remove 雙重防護不必要、只用單一 tags= 設回去
         """
         if iid not in tree.get_children():
             return
@@ -5397,13 +5400,6 @@ class StrategyGUI(tk.Tk):
         checked = checked_dict.get(iid, False)
         price_tag = self._get_price_tag_for_tree(tree, iid)
         try:
-            # v11：明確移除所有 hover_* tags 再設新 tags
-            # 即使 _clear_all_hover 已經做過、這裡二次防護（適合個別 row 設置）
-            for hover_kind in ("hover_up", "hover_down", "hover_zero", "hover_neutral", "hover"):
-                try:
-                    tree.tag_remove(hover_kind, iid)
-                except tk.TclError:
-                    pass
             tree.item(iid, tags=("checked" if checked else "unchecked", price_tag))
         except tk.TclError:
             pass

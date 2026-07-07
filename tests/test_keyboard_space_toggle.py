@@ -739,7 +739,7 @@ def test_etf_tree_hover_combined_clears_old():
 
 
 def test_on_tree_select_sync_hover_clears_old():
-    """_on_tree_select_sync_hover v8 應呼叫 _apply_hover（單一真相）"""
+    """_on_tree_select_sync_hover v12 解耦：必不呼叫 _apply_hover"""
     content = _read()
     idx = content.find('def _on_tree_select_sync_hover(self, event):')
     assert idx != -1, "找不到 _on_tree_select_sync_hover"
@@ -750,9 +750,13 @@ def test_on_tree_select_sync_hover_clears_old():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    # v8：呼叫 _apply_hover（單一真相）
-    assert '_apply_hover' in body, (
-        "❌ v8 _on_tree_select_sync_hover 應呼叫 _apply_hover"
+    # v12：解耦 hover 跟 click、不呼叫 _apply_hover
+    assert '_apply_hover' not in body, (
+        "❌ v12 _on_tree_select_sync_hover 不應呼叫 _apply_hover（hover 解耦 click）"
+    )
+    # v12：仍需清舊 hover（避免 click 後留 stale hover tag）
+    assert '_clear_all_hover' in body, (
+        "v12 _on_tree_select_sync_hover 必呼叫 _clear_all_hover"
     )
     assert '_clear_all_hover' in body, (
         "❌ v8 _on_tree_select_sync_hover 應在空 selection 時呼叫 _clear_all_hover"
@@ -1089,7 +1093,13 @@ def test_ms_tree_hover_blocked_by_guard():
 
 
 def test_on_tree_select_sync_hover_clears_old_row():
-    """_on_tree_select_sync_hover v8 透過 _apply_hover 清舊 + 設新 row 的 hover_* tag"""
+    """_on_tree_select_sync_hover v12 只調 _clear_all_hover、不設新 hover
+
+    為什麼？
+    - v12 解耦 hover 跟 click
+    - click 不設 hover、只 clear 舊 hover（避免留 stale）
+    - mouse 動了 motion handler 才會重設 hover 到 cursor 位置
+    """
     from types import SimpleNamespace
     import StockTool as st
 
@@ -1111,42 +1121,33 @@ def test_on_tree_select_sync_hover_clears_old_row():
     tree.item = item
     tree.winfo_exists = lambda: True
 
-    # v8：_on_tree_select_sync_hover 呼叫 _apply_hover、_apply_hover 內部
-    #     呼叫 _clear_all_hover + 設新 row 的 hover_<price> tag
-    app = SimpleNamespace(
-        _ms_tree=tree,
-        _etf_tree=SimpleNamespace(),
-        select_tree=SimpleNamespace(),
-        _ms_checked={"s1": False, "s2": False},
-        _ms_price_tags={"s1": "price_up", "s2": "price_down"},
-        _etf_checked={},
-        _etf_price_tags={},
-        _select_checked={},
-        _select_price_tags={},
-    )
-
-    def fake_apply_hover(t, iid):
-        # 模擬 _apply_hover：清全部 + 設新
-        for child in t.get_children():
-            cur = items_state[child]["tags"]
-            if any(s.startswith("hover_") for s in cur):
-                price_tag = app._ms_price_tags.get(child, "price_zero")
-                items_state[child]["tags"] = ("unchecked", price_tag)
-        price_tag = app._ms_price_tags.get(iid, "price_zero")
-        kind = price_tag.replace("price_", "")
-        items_state[iid]["tags"] = (f"hover_{kind}",)
-
-    app._apply_hover = fake_apply_hover
+    # v12：_on_tree_select_sync_hover 只調 _clear_all_hover
+    app = SimpleNamespace()
+    app._clear_all_hover = lambda t: _fake_clear_all_hover(t, items_state)
 
     event = SimpleNamespace(widget=tree)
     st.StrategyGUI._on_tree_select_sync_hover(app, event)
 
+    # v12：s1 的 hover 應被清（來自 _clear_all_hover）
     assert "hover" not in items_state["s1"]["tags"], (
         f"s1 應取消 hover、實際 {items_state['s1']['tags']}"
     )
-    assert "hover_down" in items_state["s2"]["tags"], (
-        f"s2 應設 hover_down、實際 {items_state['s2']['tags']}"
+    # v12：s2 不應設新的 hover（hover 由 mouse motion 控制）
+    assert "hover" not in items_state["s2"]["tags"], (
+        f"v12 s2 不該設 hover、實際 {items_state['s2']['tags']}"
     )
+
+
+def _fake_clear_all_hover(tree, items_state):
+    """測試 helper：模擬 _clear_all_hover 只清 hover_* tags、不動其他"""
+    for child in tree.get_children():
+        cur = items_state[child]["tags"]
+        if any(s.startswith("hover_") for s in cur):
+            # 清成無 hover tag
+            new_tags = tuple(t for t in cur if not t.startswith("hover_"))
+            if not new_tags:
+                new_tags = ("unchecked", "price_zero")
+            items_state[child]["tags"] = new_tags
 
 
 def test_on_tree_enter_focus_sets_focus():
@@ -1344,7 +1345,7 @@ def test_ensure_focus_visible_scrolls_extra_for_last_item():
 
     # iid "c" 是 children[-2]（padding 是最後）→ 應 extra scroll
     st.StrategyGUI._ensure_focus_visible(app, tree, "c")
-    assert yview_scroll_calls == [(1, "units")], (
+    assert yview_scroll_calls == [(2, "units")], (
         f"iid 為 children[-2] 應 yview_scroll(1, units)、實際 {yview_scroll_calls}"
     )
     assert see_calls == ["c"], f"see 應呼叫、實際 {see_calls}"
@@ -1723,14 +1724,20 @@ def test_ensure_focus_visible_checks_second_to_last():
 
 
 # ==========================================================
-# 【V1.2.0-kb-focus-v11】tag_remove + 保留多重 tags
+# 【V1.2.0-kb-focus-v12】解耦 hover vs click
 # ==========================================================
 
-def test_clear_all_hover_uses_tag_remove():
-    """v11 _clear_all_hover 必用 tree.tag_remove 明確清 hover_<kind>"""
+def test_v12_hover_decoupled_from_click():
+    """v12 _on_tree_select_sync_hover 必不含 _apply_hover 呼叫（hover 解耦 click）
+
+    William 2026-07-07 15:03 明確表示：
+    - cursor 在結果 area 就要 highlight（mouse motion）
+    - click 是選股 (excel output)、不該動 hover
+    → <<TreeviewSelect>> 不該 call _apply_hover
+    """
     content = _read()
-    idx = content.find("def _clear_all_hover(self, tree):")
-    assert idx != -1, "找不到 _clear_all_hover"
+    idx = content.find("def _on_tree_select_sync_hover(self, event):")
+    assert idx != -1, "找不到 _on_tree_select_sync_hover"
     end = content.find("\n    def ", idx + 50)
     if end == -1:
         end = len(content)
@@ -1738,19 +1745,21 @@ def test_clear_all_hover_uses_tag_remove():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    # 確認 tag_remove 被使用
-    assert "tag_remove" in body, (
-        "v11 _clear_all_hover 必使用 tree.tag_remove(<hover_kind>) 明確清 hover_<kind>"
+    # v12：<<TreeviewSelect>> handler 不該 call _apply_hover
+    assert "_apply_hover" not in body, (
+        f"v12 _on_tree_select_sync_hover 不該 call _apply_hover（hover 解耦 click）"
     )
-    # 確認所有 hover_kind 都被列出
-    for kind in ("hover_up", "hover_down", "hover_zero", "hover_neutral", "hover"):
-        assert kind in body, (
-            f"v11 _clear_all_hover 必清 {kind} tag"
-        )
 
 
-def test_apply_hover_preserves_all_tags():
-    """v11 _apply_hover 設三重 tags：checked + price_<x> + hover_<kind>"""
+def test_v12_apply_hover_single_tag():
+    """v12 _apply_hover 回到 v8 設計：tags=(hover_kind,) 單一 tag
+
+    為什麼？
+    - v11 三重 tags 太複雜、click handler 重設 (checked, price_x) 會覆蓋 hover
+    - v12 簡化回 hover_<kind> 單一 tag
+    - click handler 重設時清掉 hover 是設計上就要的（因為 click 不等於 hover）
+    - mouse motion 持續 re-apply hover 保持 highlight
+    """
     content = _read()
     idx = content.find("def _apply_hover(self, tree, iid):")
     assert idx != -1, "找不到 _apply_hover"
@@ -1761,34 +1770,50 @@ def test_apply_hover_preserves_all_tags():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    # v11：必設 checked_tag + price_tag + hover_kind 三重 tags
-    assert "checked_tag" in body, (
-        "v11 _apply_hover 必設 checked_tag"
-    )
-    assert "price_tag" in body, (
-        "v11 _apply_hover 必設 price_tag"
-    )
-    assert "hover_" in body, (
-        "v11 _apply_hover 必設 hover_<kind>"
-    )
-    # tags= 必需是 tuple 含 3 個元素
+    # 確認使用單一 hover tag
     import re
-    tags_match = re.search(r"tree\.item\(iid,\s*tags=\(([^)]+)\)\)", body)
-    assert tags_match, (
-        "v11 _apply_hover 必用 tree.item(iid, tags=(...))"
+    # 從 body 找出 tree.item(iid, tags=(...)) 這行
+    # 簡單用字串包含檢查：tags=(f"hover_{hover_kind}",)
+    # 重點：tags= 後只有 1 個 tag、並且沒有勾號以外的逗號
+    # 找出 tree.item(iid, tags=( ... )) 的全部內容
+    m = re.search(r"tree\.item\(\s*iid\s*,\s*tags=\((.*?)\)\s*\)", body, re.DOTALL)
+    if not m:
+        # 試試無空格版本
+        m = re.search(r"tree\.item\(iid,tags=\((.*?)\)\)", body, re.DOTALL)
+    assert m, "v12 _apply_hover 必包含 tree.item(iid, tags=(...))"
+    inner = m.group(1).strip()
+    # 去掉尾部的逗號（Python tuple 結尾逗號不是分隔符）
+    if inner.endswith(","):
+        inner = inner[:-1].strip()
+    # 計算 top-level commas
+    depth = 0
+    top_commas = 0
+    for ch in inner:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            top_commas += 1
+    assert top_commas == 0, (
+        f"v12 _apply_hover tags= 應只有 1 個 tag、發現 top-level 逗號 {top_commas} 個、inner={inner!r}"
     )
-    tags_content = tags_match.group(1)
-    n_commas = tags_content.count(",")
-    assert n_commas == 2, (
-        f"v11 _apply_hover tags 應為 3 元素 (checked_tag, price_tag, hover_kind)、實際 {n_commas + 1} 元素"
+    # 確認是 hover tag
+    assert "hover_" in inner, (
+        f"v12 _apply_hover 應設 hover_<kind> tag、實際 {inner!r}"
     )
 
 
-def test_set_row_tag_normal_removes_hover_kinds():
-    """v11 _set_row_tag_normal 必明確移除 hover_<kind> tags 二次防護"""
+def test_v12_clear_all_hover_simple():
+    """v12 _clear_all_hover 簡化：不使用 tree.tag_remove
+
+    為什麼？
+    - v11 用 tag_remove("hover_up") 等、若 tag 未註冊會 raise（雖然包 try/except）
+    - v12 改用更簡單的方法：掃每個 row、看 tags、有 hover_* 就 _set_row_tag_normal
+    """
     content = _read()
-    idx = content.find("def _set_row_tag_normal(self, tree, iid):")
-    assert idx != -1, "找不到 _set_row_tag_normal"
+    idx = content.find("def _clear_all_hover(self, tree):")
+    assert idx != -1, "找不到 _clear_all_hover"
     end = content.find("\n    def ", idx + 50)
     if end == -1:
         end = len(content)
@@ -1796,142 +1821,109 @@ def test_set_row_tag_normal_removes_hover_kinds():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    # 確認 tag_remove 被使用
-    assert "tag_remove" in body, (
-        "v11 _set_row_tag_normal 必用 tag_remove 明確清 hover_<kind>"
+    # v12 不該使用 tree.tag_remove
+    assert "tag_remove" not in body, (
+        f"v12 _clear_all_hover 不該使用 tag_remove、應用 _set_row_tag_normal 重建"
     )
 
 
-def test_hover_kind_list_includes_all_kinds():
-    """v11：所有清 hover 的地方都列 hover_up / hover_down / hover_zero / hover_neutral / hover"""
+def test_v12_ensure_focus_visible_scrolls_extra_for_last_row():
+    """v12 _ensure_focus_visible 保留 v10 的最後 row 邏輯
+
+    William 反映最後 row 顯示不出來：
+    - tree.see(last_real_item) 把 last_real_item 推到 bottom edge
+    - focus rectangle 在 row 邊框、被 canvas bottom edge 切到
+    - 解法：padding row + yview_scroll(1, units) 給 focus rectangle 留空間
+    """
     content = _read()
-    # v11 的兩處 tag_remove 應該都包含這 5 個 kind
-    # 兩處 tag_remove 都用 tuple 列出 kind: ("hover_up", "hover_down", ...)
-    for kind in ("hover_up", "hover_down", "hover_zero", "hover_neutral"):
-        assert f'"{kind}"' in content, (
-            f"v11 應在清 hover tuple 中包含 {kind}"
+    idx = content.find("def _ensure_focus_visible(self, tree, iid):")
+    assert idx != -1, "找不到 _ensure_focus_visible"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "_ensure_focus_padding_row" in body, (
+        "v12 _ensure_focus_visible 必呼叫 _ensure_focus_padding_row"
+    )
+    assert "children[-2]" in body, (
+        "v12 _ensure_focus_visible 必檢查 iid == children[-2]"
+    )
+    assert "yview_scroll(1" in body, (
+        "v12 _ensure_focus_visible 必呼叫 yview_scroll(1, ...)"
+    )
+
+
+def test_v12_motion_handler_does_not_require_click():
+    """v12 motion handler 必能在 mouse 移動時直接 highlight（不需要 click）
+
+    William 15:03：cursor 在結果 area 就要 highlight 不需要 click
+    → _on_select_tree_hover 應該在 iid in children 時直接 _apply_hover
+    """
+    content = _read()
+    idx = content.find("def _on_select_tree_hover(self, event):")
+    assert idx != -1, "找不到 _on_select_tree_hover"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 確認 motion handler 進場即設 hover（不需要 click）
+    assert "_apply_hover" in body, (
+        "v12 _on_select_tree_hover 必 call _apply_hover"
+    )
+    # 確認不被 click gate
+    # 例如不該有「if clicked」「if selection」等限制
+    assert "if clicked" not in body, (
+        "v12 motion handler 不該被 click gate"
+    )
+
+
+def test_v12_motion_handler_uses_event_generate_fallback():
+    """v12 motion handler 應該在 set focus 後也 set focus_set（讓鍵盤 nav 立刻有效）"""
+    content = _read()
+    idx = content.find("def _on_select_tree_hover(self, event):")
+    assert idx != -1, "找不到 _on_select_tree_hover"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 確認設 focus + focus_set
+    assert "tree.focus(iid)" in body or ".focus(iid)" in body, (
+        "v12 motion handler 必設 tree.focus(iid) 讓鍵盤 nav 同步"
+    )
+    assert "focus_set" in body, (
+        "v12 motion handler 必設 focus_set 讓 keyboard 立即有效"
+    )
+
+
+def test_v12_click_handler_no_hover_call():
+    """v12 click handler (_on_select_tree_click) 必不 call _apply_hover
+
+    為什麼？
+    - click 設 (checked, price_x) 會清掉 hover tag、若 click 又 call _apply_hover 會立刻設回去
+    - 但 mouse cursor 還在 click row 附近、motion 還沒 fire → highlight 留在 click row
+    - 這是 William 反映的「click 後 highlight bar 動不了」bug
+    - v12 解法：click handler 不 call _apply_hover、mouse 動了 motion 會自動重設 hover
+    """
+    content = _read()
+    for click_handler in ("_on_select_tree_click", "_ms_toggle_check", "_etf_toggle_check"):
+        idx = content.find(f"def {click_handler}(self, event):")
+        assert idx != -1, f"找不到 {click_handler}"
+        end = content.find("\n    def ", idx + 50)
+        if end == -1:
+            end = len(content)
+        body = content[idx:end]
+        if '"""' in body:
+            parts = body.split('"""')
+            body = '"""'.join(parts[2:])
+        assert "_apply_hover" not in body, (
+            f"v12 {click_handler} 不該 call _apply_hover（hover 應該由 mouse motion 控制）"
         )
-
-
-def test_apply_hover_multiple_tags_priority():
-    """v11 _apply_hover 模擬測試：3 個 tags 都設到 row"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    items_state = {}
-
-    def item(iid, *args, **kwargs):
-        if args and args[0] == "tags":
-            return items_state[iid].get("tags", ())
-        if kwargs:
-            items_state[iid] = kwargs
-        return SimpleNamespace(tags=items_state[iid].get("tags", ()))
-
-    tree = SimpleNamespace()
-    tree.winfo_exists = lambda: True
-    tree.get_children = lambda: ["a", "b", "c"]
-    tree.item = item
-
-    class App:
-        pass
-
-    app = App()
-    # v11：_apply_hover 用 _ms_tree 屬性判斷 + checked dict + price_tag dict
-    app._ms_tree = tree
-    app._ms_checked = {"a": False, "b": True, "c": False}
-    app._ms_price_tags = {"a": "price_up", "b": "price_down", "c": "price_zero"}
-    # v11：_clear_all_hover 用 tag_remove
-    tree.tag_remove = lambda tag, *iids: None
-    # _get_price_tag_for_tree 用 _ms_price_tags
-    st.StrategyGUI._get_price_tag_for_tree(app, tree, "b")
-    # 用簡化版 _apply_hover 邏輯檢查
-    price_tag = app._ms_price_tags["b"]  # "price_down"
-    hover_kind = "down"  # from "price_down"
-    checked = app._ms_checked["b"]  # True
-    checked_tag = "checked" if checked else "unchecked"
-    # 模擬 _apply_hover 設 tags
-    items_state["b"] = {"tags": (checked_tag, price_tag, f"hover_{hover_kind}")}
-
-    tags = items_state["b"]["tags"]
-    assert len(tags) == 3, (
-        f"v11 _apply_hover 應設 3 重 tags、實際 {len(tags)}"
-    )
-    assert tags[0] == "checked", f"tag[0] 應為 checked、實際 {tags[0]}"
-    assert tags[1] == "price_down", f"tag[1] 應為 price_down、實際 {tags[1]}"
-    assert tags[2] == "hover_down", f"tag[2] 應為 hover_down、實際 {tags[2]}"
-
-
-def test_clear_all_hover_handles_individual_row_errors():
-    """v11 _clear_all_hover：個別 row 出錯不該中断整個 clear 過程"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    items_state = {
-        "a": {"tags": ("hover_up",)},
-        "b": {"tags": ("hover_down",)},  # 這個會 raise
-        "c": {"tags": ("hover_zero",)},
-    }
-    item_call_count = [0]
-
-    def item(iid, *args, **kwargs):
-        item_call_count[0] += 1
-        if iid == "b" and kwargs.get("tags"):
-            raise tk.TclError("simulated error")
-        if args and args[0] == "tags":
-            return items_state[iid].get("tags", ())
-        if kwargs:
-            items_state[iid].update(kwargs)
-        return SimpleNamespace(tags=items_state[iid].get("tags", ()))
-
-    tree = SimpleNamespace()
-    tree.winfo_exists = lambda: True
-    tree.get_children = lambda: ["a", "b", "c"]
-    tree.item = item
-    tree.tag_remove = lambda tag, *iids: None  # 假設 tag_remove work
-
-    app = SimpleNamespace(
-        _ms_price_tags={"a": "price_up", "b": "price_down", "c": "price_zero"},
-    )
-    app._set_row_tag_normal = lambda t, iid: t.item(
-        iid, tags=("unchecked", app._ms_price_tags.get(iid, "price_zero"))
-    )
-
-    # v11 _clear_all_hover 應 try/except 包 _set_row_tag_normal
-    import tkinter as tk
-    try:
-        st.StrategyGUI._clear_all_hover(app, tree)
-        # b 應 raise 但不該中断整個 loop
-        # 至少 tag_remove 應該都跑了
-        assert item_call_count[0] >= 1, (
-            "v11 _clear_all_hover 應至少跑 1 次（不會被一個 row 錯誤中断）"
-        )
-    except tk.TclError:
-        # v11 必用 try/except、這種例外不該発生
-        assert False, "v11 _clear_all_hover 應 try/except 包、b row 錯誤不該讓整個 clear 中断"
-
-
-def test_clear_all_hover_tag_remove_called():
-    """v11 _clear_all_hover 必呼叫 tree.tag_remove 對 5 個 hover_kind"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    tag_remove_calls = []
-
-    tree = SimpleNamespace()
-    tree.winfo_exists = lambda: True
-    tree.get_children = lambda: []
-    tree.tag_remove = lambda tag, *iids: tag_remove_calls.append((tag, iids))
-
-    app = SimpleNamespace(
-        _ms_price_tags={},
-    )
-    app._set_row_tag_normal = lambda t, iid: None
-
-    st.StrategyGUI._clear_all_hover(app, tree)
-
-    # 必對 5 個 hover_kind 各呼叫 1 次 tag_remove
-    expected_kinds = {"hover_up", "hover_down", "hover_zero", "hover_neutral", "hover"}
-    actual_kinds = {call[0] for call in tag_remove_calls}
-    assert expected_kinds.issubset(actual_kinds), (
-        f"v11 _clear_all_hover 必對 {expected_kinds} 各呼叫 tag_remove、實際 {actual_kinds}"
-    )
