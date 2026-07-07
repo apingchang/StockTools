@@ -1,13 +1,36 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v15 (2026-07-07 17:27) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v16 (2026-07-07 17:30) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v15
-最後更新: 2026-07-07 17:43 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v16
+最後更新: 2026-07-07 17:56 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools, ctypes (Windows)
 
+
+
+【v1.2.0 paper-trading-kb-focus-v16】2026-07-07 17:35 (William 17:29 明確反映在 Ubuntu 執行)
+【背景】William 2026-07-07 17:29 訊息：
+  「這個 project 我是在 Ubuntu 不是 windows 環境下執行」
+
+【v8-v15 失敗根因】
+- v8-v14 的所有 Windows API (ctypes.windll.user32.SetCursorPos) 在 Linux 上根本不存在
+  → 全部 return / except pass
+  → 代碼跑了、什麼都沒動
+- v15 的 sticky 邏輯是基於「OS cursor 移不動」的假設
+  → 但其實 Linux X11 是可以移的 → v15 邏輯反而把事情變複雜
+
+【v16 簡單設計（跨平台 OS cursor 移動）】
+1. 新增 _move_os_cursor(x, y) 統一介面、用 sys.platform 分派
+2. Linux X11: libX11.so.6 的 XWarpPointer（Ubuntu 預裝、單一 ctypes call）
+3. macOS: CGWarpMouseCursorPosition（CoreGraphics）
+4. Windows: SetCursorPos（保留作為 fallback）
+5. 取消 v15 sticky 邏輯
+6. _on_tree_key_see_focus 設 200ms 短 guard + 真的用 _move_cursor_to_row 移 cursor
+7. event_generate('<Motion>') 保留為 Tk 內部視覺同步
+
+【新測試】tests/test_keyboard_space_toggle.py 新增 11 個 v16 test
 
 【v1.2.0 paper-trading-kb-focus-v15】2026-07-07 17:30 (William 17:27 反映 v14 完全無 effect)
 【背景】William 2026-07-07 17:27 反映 v14 仍失敗：
@@ -3989,12 +4012,9 @@ class StrategyGUI(tk.Tk):
         # 記憶體中股票名稱（stock_id → name，fetch 回來時順便快取）
         self._current_names: Dict[str, str] = {}
 
-        # 【V1.2.0-kb-focus-v9】key nav guard（v15 不再使用、保留以防舊路徑用）
+        # 【V1.2.0-kb-focus-v9】key nav guard（v16 依然使用）
         self._kbd_nav_guard_until_ms = 0
         self._kbd_nav_mouse_pos_at_guard = (0, 0)
-        # 【V1.2.0-kb-focus-v15】sticky key nav target dict
-        # key = id(tree)、value = 最近 key nav 設的 row iid
-        self._sticky_key_nav_iids = {}
 
         self._build_ui()
         self._poll_log_queue()
@@ -5255,19 +5275,16 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _move_cursor_to_row(self, tree, iid):
-        """【V1.2.0-kb-focus-v13】鍵盤 ↑/↓ 移動後、把 OS mouse cursor 移到該 row
+        """【V1.2.0-kb-focus-v16】鍵盤 ↑/↓ 移動後、把 OS mouse cursor 移到該 row
 
-        v13 改進（根據 William 2026-07-07 16:51 截圖顯示）：
-        - v9-v12 SetCursorPos return 成功但 OS cursor 沒動
-        - 加 GetCursorPos 驗證、SetCursorPos 後 check 真的到了 target
-        - 若 SetCursorPos 不 effect、試 ClipCursor 釋放 + 重試
-        - 試 mouse_event (老 API) + SendInput
-        - 全部失敗才依賴 event_generate("<Motion>") + _kbd_nav_guard 視覺同步
-
-        關鍵點：
-        - 即使 OS cursor 不動、event_generate 會讓 hover 視覺上同步到 focus row
-        - 但下次的真實 mouse motion event 又會把 hover 拉回 OS cursor 位置
-        - 所以 SetCursorPos 一定要真的成功、否則下次 mouse 動就會残留
+        v16 變更（根據 William 2026-07-07 17:29 明確反應他在 Ubuntu 執行）：
+        - v13-v15 用 Windows ctypes.windll.user32.SetCursorPos、Linux 上完全無效
+        - v16 改用跨平台 _move_os_cursor：
+          * Linux: X11 XWarpPointer（libX11.so.6）
+          * macOS: CGWarpMouseCursorPosition
+          * Windows: SetCursorPos
+        為什麼要去 X11：因為只有把 OS cursor 真的動到新 row、
+        下次的真實 mouse motion 才不會把 hover 拉回去
         """
         if not tree or not tree.winfo_exists():
             return
@@ -5277,235 +5294,108 @@ class StrategyGUI(tk.Tk):
         x, y, w, h = bbox
         if h <= 0:
             return
-        # 計算 row 中央相對於 tree 的座標
         cx = x + w // 2
         cy = y + h // 2
 
-        # 1. event_generate("<Motion>") = 視覺同步的主矛（Tk 內建、必定 work）
+        # 1. Tk 內部 Motion 同步（必定 work、視覺上 hover 同步到 focus row）
         try:
             tree.event_generate("<Motion>", x=cx, y=cy)
         except tk.TclError:
             pass
 
-        # 2-5. 同步實體 OS mouse cursor（多層豐的）
+        # 2. 實體 OS cursor 移動（跨平台）
         try:
-            import platform
-            if platform.system() == "Windows":
-                target_x = tree.winfo_rootx() + cx
-                target_y = tree.winfo_rooty() + cy
-                self._win_move_cursor_to(target_x, target_y)
+            target_x = tree.winfo_rootx() + cx
+            target_y = tree.winfo_rooty() + cy
+            self._move_os_cursor(target_x, target_y)
         except Exception:
             pass
 
-    def _win_move_cursor_to(self, target_x, target_y):
-        """【V1.2.0-kb-focus-v14】Windows OS cursor 同步（最直接的多層豐的）
+    def _move_os_cursor(self, target_x, target_y):
+        """【V1.2.0-kb-focus-v16】跨平台 OS cursor 移動
 
-        William 16:51 截圖顯示 v13 仍無作用、SetCursorPos 似乎沒 effect。
-        v14 直接放棄驗證、純嘗試 SetCursorPos 不下 5 次：
-        1. 直接 SetCursorPos（用 argtypes/restype 明確化）
-        2. ClipCursor 釋放 + SetCursorPos
-        3. SetCursorPos 重試 3 次（有些 accessibility tools 只是偶爾 block）
-        4. mouse_event with MOUSEEVENTF_ABSOLUTE
-        5. SendInput INPUT_MOUSE
+        William 2026-07-07 17:29 明確反應：
+        「這個 project 我是在 Ubuntu 不是 windows 環境下執行」
 
-        關鍵修正：
-        - SetCursorPos 用 argtypes=[c_int, c_int]、restype=BOOL
-        - 處理 DPI scaling：Tk 在 Windows HiDPI 預設是 logical pixels
-          我們需要把 logical 轉成 physical (multiply by DPI scale)
-        - 不靠 GetCursorPos 驗證（OS cursor 變化是 OS 內部、可能 Tk 看不到）
-          只記錄嘗試、讓使用者知道代碼跑了
+        v8-v15 都假設 Windows、用 ctypes.windll.user32 的 SetCursorPos
+        → Linux 上 windll.user32 不存在 → 全部函式都 pass / 不執行
+        → 結果：up/down key 移動 highlight 但 cursor 停留原位
+        → mouse 一動、出現兩個 highlight bar
+
+        v16 重寫、用 sys.platform 選擇對的 backend：
+        - Linux: X11 XWarpPointer（libX11.so.6、Ubuntu 預裝）
+        - macOS: CGWarpMouseCursorPosition（CoreGraphics）
+        - Windows: SetCursorPos（保留作為 fallback）
         """
+        import sys as _sys
         try:
-            import ctypes
-            from ctypes import wintypes
-            user32 = ctypes.windll.user32
-            user32.SetCursorPos.argtypes = [wintypes.INT, wintypes.INT]
-            user32.SetCursorPos.restype = wintypes.BOOL
-            user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
-            user32.GetCursorPos.restype = wintypes.BOOL
-            user32.ClipCursor.argtypes = [ctypes.c_void_p]
-            user32.ClipCursor.restype = wintypes.BOOL
-            user32.mouse_event.argtypes = [
-                wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
-                wintypes.DWORD, ctypes.c_void_p,
-            ]
-            user32.mouse_event.restype = None
-            user32.SendInput.argtypes = [
-                wintypes.UINT,
-                ctypes.c_void_p,
-                wintypes.INT,
-            ]
-            user32.SendInput.restype = wintypes.UINT
-
-            # ==== 處理 DPI scaling ====
-            # Tk 在 Windows HiDPI 上 winfo_* 返回 logical pixels
-            # Windows SetCursorPos 需要 physical pixels
-            # 用 GetDpiForSystem 拿 system DPI
-            try:
+            if _sys.platform.startswith("linux"):
+                return self._x11_move_cursor_to(target_x, target_y)
+            elif _sys.platform == "darwin":
+                return self._mac_move_cursor_to(target_x, target_y)
+            else:
+                # Windows fallback（用簡單的 ctypes.windll）
                 try:
-                    user32.GetDpiForSystem.argtypes = []
-                    user32.GetDpiForSystem.restype = wintypes.UINT
-                    sys_dpi = user32.GetDpiForSystem()
+                    import ctypes
+                    ctypes.windll.user32.SetCursorPos(int(target_x), int(target_y))
+                    return True
                 except Exception:
-                    # Fallback: 用 GetDeviceCaps 拿 desktop DC 的 DPI
-                    try:
-                        user32.GetDC.argtypes = [wintypes.HWND]
-                        user32.GetDC.restype = wintypes.HDC
-                        user32.GetDeviceCaps.argtypes = [wintypes.HDC, wintypes.INT]
-                        user32.GetDeviceCaps.restype = wintypes.INT
-                        user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
-                        user32.ReleaseDC.restype = wintypes.INT
-                        hdc = user32.GetDC(None)
-                        LOGPIXELSX = 88
-                        sys_dpi = user32.GetDeviceCaps(hdc, LOGPIXELSX)
-                        user32.ReleaseDC(None, hdc)
-                    except Exception:
-                        sys_dpi = 96  # 預設 100%
-                # DPI 100% = 96、DPI 150% = 144
-                # physical = logical * dpi / 96
-                dpi_scale = sys_dpi / 96.0
-                phys_x = int(target_x * dpi_scale)
-                phys_y = int(target_y * dpi_scale)
-            except Exception:
-                # fallback 不行就用 target 本身
-                phys_x, phys_y = target_x, target_y
-
-            # ==== Layer 1: 直接 SetCursorPos（不驗證、只 attempt） ====
-            for attempt in range(3):
-                try:
-                    user32.SetCursorPos(phys_x, phys_y)
-                except Exception:
-                    pass
-
-            # ==== Layer 2: ClipCursor 釋放 + 重試 ====
-            try:
-                user32.ClipCursor(None)
-                for _ in range(2):
-                    try:
-                        user32.SetCursorPos(phys_x, phys_y)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            # ==== Layer 3: mouse_event (絕對座標) ====
-            try:
-                sw = user32.GetSystemMetrics(0)  # SM_CXSCREEN
-                sh = user32.GetSystemMetrics(1)  # SM_CYSCREEN
-                if sw > 0 and sh > 0:
-                    abs_x = int(phys_x * 65536 / sw)
-                    abs_y = int(phys_y * 65536 / sh)
-                    for _ in range(2):
-                        try:
-                            user32.mouse_event(
-                                0x0001 | 0x8000,  # MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
-                                abs_x, abs_y, 0, 0
-                            )
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-
-            # ==== Layer 4: SendInput INPUT_MOUSE ====
-            try:
-                class MOUSEINPUT(ctypes.Structure):
-                    _fields_ = [
-                        ("dx", wintypes.LONG),
-                        ("dy", wintypes.LONG),
-                        ("mouseData", wintypes.DWORD),
-                        ("dwFlags", wintypes.DWORD),
-                        ("time", wintypes.DWORD),
-                        ("dwExtraInfo", ctypes.c_void_p),
-                    ]
-
-                class INPUT(ctypes.Structure):
-                    _fields_ = [
-                        ("type", wintypes.DWORD),
-                        ("mi", MOUSEINPUT),
-                    ]
-
-                sw = user32.GetSystemMetrics(0)
-                sh = user32.GetSystemMetrics(1)
-                if sw > 0 and sh > 0:
-                    abs_x = int(phys_x * 65536 / sw)
-                    abs_y = int(phys_y * 65536 / sh)
-                    inp = INPUT()
-                    inp.type = 0  # INPUT_MOUSE
-                    inp.mi.dx = abs_x
-                    inp.mi.dy = abs_y
-                    inp.mi.mouseData = 0
-                    inp.mi.dwFlags = 0x0001 | 0x8000
-                    inp.mi.time = 0
-                    inp.mi.dwExtraInfo = None
-                    try:
-                        user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            # ==== Layer 5: 最後一次 SetCursorPos ====
-            try:
-                user32.ClipCursor(None)
-                user32.SetCursorPos(phys_x, phys_y)
-            except Exception:
-                pass
-
-            return True
-
+                    return False
         except Exception:
             return False
 
-    def _sendinput_move_cursor(self, x, y):
-        """【V1.2.0-kb-focus-v10】用 SendInput API 動 mouse cursor
+    def _x11_move_cursor_to(self, target_x, target_y):
+        """【V1.2.0-kb-focus-v16】Linux X11 用 XWarpPointer 移 OS cursor
 
-        SetCursorPos 不 work 時的 backup。
-        SendInput 是 Windows 低階的合成 input event API、
-        即使 SetCursorPos 被擋、SendInput 仍有機會成功。
-
-        為什麼需要2層？
-        - SetCursorPos 被某些應用視窗設定 block（UIPI / accessibility tools）
-        - SendInput 需要 input focus 才能充分可靠、但至少能試試看
+        標準 X11 庫 libX11.so.6 提供的 XWarpPointer：
+          XWarpPointer(display, src_w, dst_w, src_x, src_y, src_w, src_h, dst_x, dst_y)
+        會 dispatch 一個 Warp event 給 X server、cursor 立刻跳到新位置
         """
         try:
             import ctypes
-            sw = ctypes.windll.user32.GetSystemMetrics(0)  # SM_CXSCREEN
-            sh = ctypes.windll.user32.GetSystemMetrics(1)  # SM_CYSCREEN
-            if sw <= 0 or sh <= 0:
-                return
+            lib = ctypes.CDLL("libX11.so.6")
+            lib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+            lib.XOpenDisplay.restype = ctypes.c_void_p
+            lib.XWarpPointer.argtypes = [
+                ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong,
+                ctypes.c_int, ctypes.c_int,
+                ctypes.c_int, ctypes.c_int,
+                ctypes.c_int, ctypes.c_int,
+            ]
+            lib.XWarpPointer.restype = ctypes.c_int
+            lib.XFlush.argtypes = [ctypes.c_void_p]
+            lib.XFlush.restype = ctypes.c_int
+            lib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+            lib.XCloseDisplay.restype = ctypes.c_int
 
-            # 計算 absolute coordinate (0-65535 range)
-            abs_x = int(x * 65536 / sw)
-            abs_y = int(y * 65536 / sh)
-
-            class MOUSEINPUT(ctypes.Structure):
-                _fields_ = [
-                    ("dx", ctypes.c_long),
-                    ("dy", ctypes.c_long),
-                    ("mouseData", ctypes.c_ulong),
-                    ("dwFlags", ctypes.c_ulong),
-                    ("time", ctypes.c_ulong),
-                    ("dwExtraInfo", ctypes.c_void_p),
-                ]
-
-            class INPUT(ctypes.Structure):
-                _fields_ = [
-                    ("type", ctypes.c_ulong),
-                    ("mi", MOUSEINPUT),
-                ]
-
-            inp = INPUT()
-            inp.type = 0  # INPUT_MOUSE
-            inp.mi.dx = abs_x
-            inp.mi.dy = abs_y
-            inp.mi.mouseData = 0
-            inp.mi.dwFlags = 0x0001 | 0x8000  # MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
-            inp.mi.time = 0
-            inp.mi.dwExtraInfo = None
-
-            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+            display = lib.XOpenDisplay(None)
+            if not display:
+                return False
+            try:
+                lib.XWarpPointer(
+                    display, 0, 0, 0, 0, 0, 0,
+                    int(target_x), int(target_y),
+                )
+                lib.XFlush(display)
+                return True
+            finally:
+                lib.XCloseDisplay(display)
         except Exception:
-            pass
+            return False
+
+    def _mac_move_cursor_to(self, target_x, target_y):
+        """【V1.2.0-kb-focus-v16】macOS CGWarpMouseCursorPosition 移 OS cursor"""
+        try:
+            import ctypes
+            cg = ctypes.CDLL(
+                "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+            )
+            cg.CGWarpMouseCursorPosition.argtypes = [ctypes.c_double, ctypes.c_double]
+            cg.CGWarpMouseCursorPosition.restype = ctypes.c_int
+            cg.CGWarpMouseCursorPosition(ctypes.c_double(target_x), ctypes.c_double(target_y))
+            return True
+        except Exception:
+            return False
 
     def _ensure_focus_padding_row(self, tree):
         """【V1.2.0-kb-focus-v10】確保 tree 底部有一個 invisible padding row
@@ -7067,32 +6957,19 @@ class StrategyGUI(tk.Tk):
 
 
     def _ms_tree_hover(self, event):
-        """【V1.2.0-kb-focus-v15】手動選股 hover
+        """【V1.2.0-kb-focus-v16】手動選股 hover
 
-        v15 變更：用 sticky_key_nav_iid 邏輯取代 timer-based guard
+        v16 取消 v15 sticky 邏輯、回到標準 motion handler
         """
         try:
             tree = self._ms_tree
             region = tree.identify("region", event.x, event.y)
-            mouse_iid = tree.identify_row(event.y) if region == "cell" else None
-            if not mouse_iid or mouse_iid not in tree.get_children():
-                return
-            sticky_iid = self._get_sticky_key_nav_iid(tree)
-            if sticky_iid and sticky_iid != mouse_iid:
-                sticky_bbox = tree.bbox(sticky_iid)
-                mouse_bbox = tree.bbox(mouse_iid)
-                if sticky_bbox and mouse_bbox:
-                    sx, sy, sw, sh = sticky_bbox
-                    mx, my, mw, mh = mouse_bbox
-                    row_overlap = min(sy + sh, my + mh) - max(sy, my)
-                    if row_overlap > sh * 0.5 or row_overlap > mh * 0.5:
-                        self._apply_hover(tree, sticky_iid)
-                        tree.focus(sticky_iid)
-                        return
-                    self._set_sticky_key_nav_iid(tree, mouse_iid)
-            self._apply_hover(tree, mouse_iid)
-            tree.focus(mouse_iid)
-            tree.focus_set()
+            iid = tree.identify_row(event.y) if region == "cell" else None
+            if iid and iid in tree.get_children():
+                if not self._kbd_nav_guard_should_block(tree):
+                    self._apply_hover(tree, iid)
+                tree.focus(iid)
+                tree.focus_set()
         except tk.TclError:
             pass
 
@@ -7147,14 +7024,14 @@ class StrategyGUI(tk.Tk):
         """【Fix12 廢棄】改成 _etf_tree_hover_combined"""
 
     def _etf_tree_hover_combined(self, event):
-        """【V0.9.5-tab-split-phase3-C Fix12 + V1.2.0-kb-focus-v15】
+        """【V0.9.5-tab-split-phase3-C Fix12 + V1.2.0-kb-focus-v16】
         ETF Treeview hover：
         - 移到 cell（任意欄） → 該列 highlight（_apply_hover 設 hover_<price> tag）
         - 移到「ETF數」欄（column #6） → popup 顯示包含此股的 ETF 列表
         - 移到「今日異動」欄（column #7） → popup 顯示異動明細
         - 移到非 cell 區（捲軸/header） → 關 popup + 清 hover
 
-        v15 新增 sticky_key_nav_iid 邏輯取代 v9 timer-based guard
+        v16 取消 v15 sticky 邏輯
         """
         tree = self._etf_tree
         region = tree.identify("region", event.x, event.y)
@@ -7162,29 +7039,15 @@ class StrategyGUI(tk.Tk):
             self._close_etf_popup()
             self._clear_all_hover(self._etf_tree)
             return
-        iid = self._etf_tree.identify_row(event.y)
+        iid = tree.identify_row(event.y)
         if not iid:
             self._close_etf_popup()
             self._clear_all_hover(self._etf_tree)
             return
 
-        # v15 sticky_key_nav_iid 邏輯
-        sticky_iid = self._get_sticky_key_nav_iid(tree)
-        if sticky_iid and sticky_iid != iid:
-            sticky_bbox = tree.bbox(sticky_iid)
-            mouse_bbox = tree.bbox(iid)
-            if sticky_bbox and mouse_bbox:
-                sx, sy, sw, sh = sticky_bbox
-                mx, my, mw, mh = mouse_bbox
-                row_overlap = min(sy + sh, my + mh) - max(sy, my)
-                if row_overlap > sh * 0.5 or row_overlap > mh * 0.5:
-                    iid = sticky_iid  # 用 sticky 而不是 mouse position
-                else:
-                    self._set_sticky_key_nav_iid(tree, iid)
-
-        # 設視覺 highlight（單一真相 = _apply_hover）
-        self._apply_hover(tree, iid)
-        # 同步設鍵盤 focus
+        # v16 用 guard 避免 key nav 後 motion 覆蓋
+        if not self._kbd_nav_guard_should_block(tree):
+            self._apply_hover(tree, iid)
         try:
             tree.focus(iid)
             tree.focus_set()
@@ -9160,103 +9023,79 @@ class StrategyGUI(tk.Tk):
     # ══════════════════════════════════════════════════════════════
 
     def _on_select_tree_hover(self, event):
-        """【V1.2.0-kb-focus-v15】系統選股 / 回測 Treeview hover
+        """【V1.2.0-kb-focus-v16】系統選股 / 回測 Treeview hover
 
-        William 2026-07-07 17:27 反映 v8-v14 仍失敗：
-          - up/down key 移動 highlight bar、但 OS cursor 還是停留在舊位置
-          - mouse 動的時候 motion handler 設 hover 到 OS cursor 位置
-          - 舊的 hover (from key nav) 不被清掉 → 兩個 highlight bar
-
-        v15 簡單設計（根本不靠 OS cursor 移動）：
-        1. 記錄 _last_key_nav_iid：上次 key nav 設的 row iid
-        2. motion handler 進場檢查：
-           - 若 mouse cursor 在 _last_key_nav_iid 同一 row 範圍内 → 用 _last_key_nav_iid（同步兩者）
-           - 若 mouse cursor 離 _last_key_nav_iid 遠 → 跟隨 mouse
-        3. 不再依賴 OS cursor 物理移動、不再依賴 _kbd_nav_guard timer
-
-        設計精神：
-        - 「最近一次 keyboard nav 設的位置」 是個 sticky target
-        - mouse 移動到該 row 附近 → hover 同步到該 row (而不是 mouse 位置)
-        - mouse 移到離該 row 遠 → hover 跟 mouse
-        - 這樣無論 OS cursor 有沒有動、hover bar 都會一致
+        v16 變更（William 2026-07-07 17:29 反映他在 Ubuntu 跑）：
+        - v15 sticky 邏輯是為了「OS cursor 移不動」的環境設計的
+        - v16 確認 Linux X11 可以用 XWarpPointer 真的移 cursor 後、
+          取消 sticky 邏輯、回到 v8 標準 motion handler
+        - 防 Motin 殘留 hover 的改靠 _kbd_nav_guard (短 200ms) +
+          event_generate 同步
         """
-        tree = event.widget
         try:
-            region = tree.identify("region", event.x, event.y)
-            mouse_iid = tree.identify_row(event.y) if region == "cell" else None
-            if not mouse_iid or mouse_iid not in tree.get_children():
-                return
-
-            # v15 新邏輯：sticky key nav target
-            sticky_iid = self._get_sticky_key_nav_iid(tree)
-            if sticky_iid and sticky_iid != mouse_iid:
-                # mouse 跟 sticky key nav 不在同一 row
-                # 判斷 mouse 是不是「仍走訪 sticky」的位置（同一 row 或附近）
-                sticky_bbox = tree.bbox(sticky_iid)
-                mouse_bbox = tree.bbox(mouse_iid)
-                if sticky_bbox and mouse_bbox:
-                    sx, sy, sw, sh = sticky_bbox
-                    mx, my, mw, mh = mouse_bbox
-                    # 若 mouse 仍在 sticky 同一 row（上下重疊超過 50%）→ 走 sticky
-                    row_overlap = (
-                        min(sy + sh, my + mh) - max(sy, my)
-                    )
-                    if row_overlap > sh * 0.5 or row_overlap > mh * 0.5:
-                        # mouse 還在 sticky row 區域、同步 hover 到 sticky
-                        self._apply_hover(tree, sticky_iid)
-                        tree.focus(sticky_iid)
-                        return
-                    # mouse 完全離開 sticky → 跟 mouse、清除 sticky
-                    self._set_sticky_key_nav_iid(tree, mouse_iid)
-
-            # 一般 motion：跟 mouse cursor 位置
-            self._apply_hover(tree, mouse_iid)
-            tree.focus(mouse_iid)
-            tree.focus_set()
+            region = self.select_tree.identify("region", event.x, event.y)
+            iid = (
+                self.select_tree.identify_row(event.y)
+                if region == "cell" else None
+            )
+            if iid and iid in self.select_tree.get_children():
+                # v16 加 guard、避免 key nav 後 200ms 內 motion 覆蓋
+                if not self._kbd_nav_guard_should_block(self.select_tree):
+                    self._apply_hover(self.select_tree, iid)
+                self.select_tree.focus(iid)
+                self.select_tree.focus_set()
         except tk.TclError:
             pass
 
-    def _get_sticky_key_nav_iid(self, tree):
-        """v15：取得最近一次 key nav 設的 sticky iid（None 代表没有）"""
-        if not hasattr(self, "_sticky_key_nav_iids"):
-            return None
-        return self._sticky_key_nav_iids.get(id(tree))
-
-    def _set_sticky_key_nav_iid(self, tree, iid):
-        """v15：設定最近一次 key nav 設的 sticky iid"""
-        if not hasattr(self, "_sticky_key_nav_iids"):
-            self._sticky_key_nav_iids = {}
-        if iid is None:
-            self._sticky_key_nav_iids.pop(id(tree), None)
-        else:
-            self._sticky_key_nav_iids[id(tree)] = iid
-
     def _on_tree_key_see_focus(self, event):
-        """【V1.2.0-kb-focus-v15】Down/Up/Home/End/Prior/Next key release 時主動 see + sync highlight
+        """【V1.2.0-kb-focus-v16】Down/Up/Home/End/Prior/Next key release 時主動 see + sync highlight
 
-        v15 變更：
-        1. 不再依賴 _kbd_nav_guard timer
-        2. 設定 sticky_key_nav_iid、motion handler 會「認識」這個 sticky 位置
-        3. event_generate('<Motion>') + SetCursorPos 都保留作為 best effort
-        4. 主要靠 sticky_iid 邏輯確保 hover 不會被 motion handler 拉錯位置
+        v16 變更：
+        - 設定 _kbd_nav_guard（200ms 短、保護 motion handler 不會覆蓋 key nav 的 hover）
+        - _ensure_focus_visible 看 row 是否完整、不足則 scroll
+        - _move_cursor_to_row 跨平台 (Linux XWarpPointer) 真的動 OS cursor
+        - 防止 mouse 動時 motion 殘留 hover
         """
         tree = event.widget
         try:
             cur = tree.focus()
             if cur and cur in tree.get_children():
-                # v15 新增：設定 sticky key nav iid
-                self._set_sticky_key_nav_iid(tree, cur)
+                # v16：必設 guard、滑鼠只要未動 200ms 內不覆蓋 hover
+                self._kbd_nav_guard_until_ms = int(time.time() * 1000) + 200
+                try:
+                    self._kbd_nav_mouse_pos_at_guard = tree.winfo_pointerxy()
+                except tk.TclError:
+                    self._kbd_nav_mouse_pos_at_guard = (0, 0)
                 # 用 after_idle 避免跟 Treeview 內部 scroll 競爭
                 tree.after_idle(lambda: self._ensure_focus_visible(tree, cur))
+                # v16 新增：跨平台 move OS cursor 到新 row
+                tree.after_idle(lambda: self._move_cursor_to_row(tree, cur))
         except tk.TclError:
             pass
 
     def _kbd_nav_guard_should_block(self, tree):
-        """v15：不再使用 timer-based guard、全部交由 sticky_key_nav_iid 邏輯處理
+        """v16：200ms 短 guard、避免 motion handler 速率覆蓋 key nav 剛設的 hover
 
-        保留函式是為了讓舊的 _on_tree_key_see_focus 路徑不會當
+        guard 解除條件（任一）：
+        - 200ms 過期
+        - mouse 位置移動超過 5px（user 明確動了 mouse）
         """
-        return False
+        try:
+            import time as _t
+            now_ms = int(_t.time() * 1000)
+            if now_ms > self._kbd_nav_guard_until_ms:
+                return False  # guard 過期
+            # mouse 移動判斷（5px tolerance）
+            try:
+                mx, my = tree.winfo_pointerxy()
+                gx, gy = self._kbd_nav_mouse_pos_at_guard
+                if abs(mx - gx) > 5 or abs(my - gy) > 5:
+                    return False  # mouse 動了 → 解除
+            except tk.TclError:
+                return False
+            return True  # guard 還 active、motion handler 該 block
+        except Exception:
+            return False
     def _on_select_tree_leave(self, event):
         """【V1.2.0-kb-focus-v4】離開 Treeview 時不清 hover、讓 selected row 保持高亮"""
         # v4 設計：不要清 hover、讓使用者離開 Treeview 後仍能看到選中的 row
@@ -9305,8 +9144,6 @@ class StrategyGUI(tk.Tk):
         iid = tree.identify_row(event.y)
         if not iid:
             return
-        # v15：click 是明確動作、清掉 sticky key nav (mouse 該跟 click row)
-        self._set_sticky_key_nav_iid(tree, None)
         # 【V1.2.0-keyboard-toggle-fix】2026-07-06 15:58 William 反映：
         # 「↑/↓ 鍵要先 click 在某個 item 才會動作、space bar 不能 toggle」
         # 根因：Treeview 預設 click 不會設鍵盤焦點到 row、tree.focus() 永遠回空字串
