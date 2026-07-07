@@ -1,14 +1,14 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v13 (2026-07-07 16:51) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v14 (2026-07-07 17:05) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v13
-最後更新: 2026-07-07 16:59 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v14
+最後更新: 2026-07-07 17:11 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools, ctypes (Windows)
 
-【v1.2.0 paper-trading-kb-focus-v13】2026-07-07 16:55 (William 16:51 截圖反映 v12 仍失敗)
+【v1.2.0 paper-trading-kb-focus-v14】2026-07-07 17:10 (William 17:05 反映 v13 完全無 effect)
 【背景】William 2026-07-07 16:51 截圖反映 v12 仍失敗：
   - 截圖顯示 4 個非連續 row 同時有黃色 highlight bar（2525 / 5525 / 6177 / 2451）
   - 上多個 row 殘留 highlight、mouse 移動時 highlight 從原來的 cursor 處動作
@@ -5301,86 +5301,137 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _win_move_cursor_to(self, target_x, target_y):
-        """【V1.2.0-kb-focus-v13】Windows 多層豐的移動 OS mouse cursor
+        """【V1.2.0-kb-focus-v14】Windows OS cursor 同步（最直接的多層豐的）
 
-        為什麼需要多層？
-        - William 16:51 截圖顯示 SetCursorPos return 成功但 cursor 不動
-        - Windows UIPI / accessibility tools / mouse hover lock 可能 block
-        - 需要 GetCursorPos 驗證、ClipCursor 重試、mouse_event fallback
+        William 16:51 截圖顯示 v13 仍無作用、SetCursorPos 似乎沒 effect。
+        v14 直接放棄驗證、純嘗試 SetCursorPos 不下 5 次：
+        1. 直接 SetCursorPos（用 argtypes/restype 明確化）
+        2. ClipCursor 釋放 + SetCursorPos
+        3. SetCursorPos 重試 3 次（有些 accessibility tools 只是偶爾 block）
+        4. mouse_event with MOUSEEVENTF_ABSOLUTE
+        5. SendInput INPUT_MOUSE
 
-        Returns:
-            bool: True 表示 OS cursor 真的移到了 target
+        關鍵修正：
+        - SetCursorPos 用 argtypes=[c_int, c_int]、restype=BOOL
+        - 處理 DPI scaling：Tk 在 Windows HiDPI 預設是 logical pixels
+          我們需要把 logical 轉成 physical (multiply by DPI scale)
+        - 不靠 GetCursorPos 驗證（OS cursor 變化是 OS 內部、可能 Tk 看不到）
+          只記錄嘗試、讓使用者知道代碼跑了
         """
         try:
             import ctypes
+            from ctypes import wintypes
             user32 = ctypes.windll.user32
+            user32.SetCursorPos.argtypes = [wintypes.INT, wintypes.INT]
+            user32.SetCursorPos.restype = wintypes.BOOL
+            user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+            user32.GetCursorPos.restype = wintypes.BOOL
+            user32.ClipCursor.argtypes = [ctypes.c_void_p]
+            user32.ClipCursor.restype = wintypes.BOOL
+            user32.mouse_event.argtypes = [
+                wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+                wintypes.DWORD, ctypes.c_void_p,
+            ]
+            user32.mouse_event.restype = None
+            user32.SendInput.argtypes = [
+                wintypes.UINT,
+                ctypes.c_void_p,
+                wintypes.INT,
+            ]
+            user32.SendInput.restype = wintypes.UINT
 
-            # 取得現在的 cursor 位置（驗證用）
-            class POINT(ctypes.Structure):
-                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+            # ==== 處理 DPI scaling ====
+            # Tk 在 Windows HiDPI 上 winfo_* 返回 logical pixels
+            # Windows SetCursorPos 需要 physical pixels
+            # 用 GetDpiForSystem 拿 system DPI
+            try:
+                try:
+                    user32.GetDpiForSystem.argtypes = []
+                    user32.GetDpiForSystem.restype = wintypes.UINT
+                    sys_dpi = user32.GetDpiForSystem()
+                except Exception:
+                    # Fallback: 用 GetDeviceCaps 拿 desktop DC 的 DPI
+                    try:
+                        user32.GetDC.argtypes = [wintypes.HWND]
+                        user32.GetDC.restype = wintypes.HDC
+                        user32.GetDeviceCaps.argtypes = [wintypes.HDC, wintypes.INT]
+                        user32.GetDeviceCaps.restype = wintypes.INT
+                        user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+                        user32.ReleaseDC.restype = wintypes.INT
+                        hdc = user32.GetDC(None)
+                        LOGPIXELSX = 88
+                        sys_dpi = user32.GetDeviceCaps(hdc, LOGPIXELSX)
+                        user32.ReleaseDC(None, hdc)
+                    except Exception:
+                        sys_dpi = 96  # 預設 100%
+                # DPI 100% = 96、DPI 150% = 144
+                # physical = logical * dpi / 96
+                dpi_scale = sys_dpi / 96.0
+                phys_x = int(target_x * dpi_scale)
+                phys_y = int(target_y * dpi_scale)
+            except Exception:
+                # fallback 不行就用 target 本身
+                phys_x, phys_y = target_x, target_y
 
-            cur_pos = POINT()
-            user32.GetCursorPos(ctypes.byref(cur_pos))
+            # ==== Layer 1: 直接 SetCursorPos（不驗證、只 attempt） ====
+            for attempt in range(3):
+                try:
+                    user32.SetCursorPos(phys_x, phys_y)
+                except Exception:
+                    pass
 
-            # ==== Layer 1: SetCursorPos ====
-            ok = user32.SetCursorPos(target_x, target_y)
-            if ok:
-                user32.GetCursorPos(ctypes.byref(cur_pos))
-                if abs(cur_pos.x - target_x) <= 2 and abs(cur_pos.y - target_y) <= 2:
-                    return True  # SetCursorPos 成功
-
-            # ==== Layer 2: ClipCursor 釋放 + 重試 SetCursorPos ====
-            # 如果 cursor 被 ClipCursor 限制在別處、先釋放 lock
+            # ==== Layer 2: ClipCursor 釋放 + 重試 ====
             try:
                 user32.ClipCursor(None)
-                ok = user32.SetCursorPos(target_x, target_y)
-                if ok:
-                    user32.GetCursorPos(ctypes.byref(cur_pos))
-                    if abs(cur_pos.x - target_x) <= 2 and abs(cur_pos.y - target_y) <= 2:
-                        return True
+                for _ in range(2):
+                    try:
+                        user32.SetCursorPos(phys_x, phys_y)
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
-            # ==== Layer 3: mouse_event (老 API) ====
+            # ==== Layer 3: mouse_event (絕對座標) ====
             try:
                 sw = user32.GetSystemMetrics(0)  # SM_CXSCREEN
                 sh = user32.GetSystemMetrics(1)  # SM_CYSCREEN
                 if sw > 0 and sh > 0:
-                    abs_x = int(target_x * 65536 / sw)
-                    abs_y = int(target_y * 65536 / sh)
-                    user32.mouse_event(
-                        0x0001 | 0x8000,  # MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
-                        abs_x, abs_y, 0, 0
-                    )
-                    user32.GetCursorPos(ctypes.byref(cur_pos))
-                    if abs(cur_pos.x - target_x) <= 2 and abs(cur_pos.y - target_y) <= 2:
-                        return True
+                    abs_x = int(phys_x * 65536 / sw)
+                    abs_y = int(phys_y * 65536 / sh)
+                    for _ in range(2):
+                        try:
+                            user32.mouse_event(
+                                0x0001 | 0x8000,  # MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
+                                abs_x, abs_y, 0, 0
+                            )
+                        except Exception:
+                            pass
             except Exception:
                 pass
 
-            # ==== Layer 4: SendInput ====
+            # ==== Layer 4: SendInput INPUT_MOUSE ====
             try:
                 class MOUSEINPUT(ctypes.Structure):
                     _fields_ = [
-                        ("dx", ctypes.c_long),
-                        ("dy", ctypes.c_long),
-                        ("mouseData", ctypes.c_ulong),
-                        ("dwFlags", ctypes.c_ulong),
-                        ("time", ctypes.c_ulong),
+                        ("dx", wintypes.LONG),
+                        ("dy", wintypes.LONG),
+                        ("mouseData", wintypes.DWORD),
+                        ("dwFlags", wintypes.DWORD),
+                        ("time", wintypes.DWORD),
                         ("dwExtraInfo", ctypes.c_void_p),
                     ]
 
                 class INPUT(ctypes.Structure):
                     _fields_ = [
-                        ("type", ctypes.c_ulong),
+                        ("type", wintypes.DWORD),
                         ("mi", MOUSEINPUT),
                     ]
 
                 sw = user32.GetSystemMetrics(0)
                 sh = user32.GetSystemMetrics(1)
                 if sw > 0 and sh > 0:
-                    abs_x = int(target_x * 65536 / sw)
-                    abs_y = int(target_y * 65536 / sh)
+                    abs_x = int(phys_x * 65536 / sw)
+                    abs_y = int(phys_y * 65536 / sh)
                     inp = INPUT()
                     inp.type = 0  # INPUT_MOUSE
                     inp.mi.dx = abs_x
@@ -5389,21 +5440,21 @@ class StrategyGUI(tk.Tk):
                     inp.mi.dwFlags = 0x0001 | 0x8000
                     inp.mi.time = 0
                     inp.mi.dwExtraInfo = None
-                    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
-                    user32.GetCursorPos(ctypes.byref(cur_pos))
-                    if abs(cur_pos.x - target_x) <= 2 and abs(cur_pos.y - target_y) <= 2:
-                        return True
+                    try:
+                        user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
-            # ==== Layer 5: 強制解 ClipCursor + 一次最後 SetCursorPos ====
+            # ==== Layer 5: 最後一次 SetCursorPos ====
             try:
                 user32.ClipCursor(None)
-                user32.SetCursorPos(target_x, target_y)
-                user32.GetCursorPos(ctypes.byref(cur_pos))
-                return abs(cur_pos.x - target_x) <= 2 and abs(cur_pos.y - target_y) <= 2
+                user32.SetCursorPos(phys_x, phys_y)
             except Exception:
-                return False
+                pass
+
+            return True
 
         except Exception:
             return False

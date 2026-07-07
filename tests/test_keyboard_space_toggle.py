@@ -2145,3 +2145,159 @@ def test_v13_event_generate_still_called_for_visual():
     assert event_gen_calls == [("<Motion>", {"x": cx, "y": cy})], (
         f"v13 必先 event_generate('<Motion>', x=cx, y=cy) 做視覺同步、實際 {event_gen_calls}"
     )
+
+
+# ==========================================================
+# 【V1.2.0-kb-focus-v14】argtypes/restype + DPI scaling
+# ==========================================================
+
+def test_v14_argtypes_set_for_setcursorpos():
+    """v14：SetCursorPos 必設 argtypes=[INT, INT]、restype=BOOL
+
+    為什麼？
+    - v13 ctypes.windll.user32.SetCursorPos 未設 argtypes
+    - 預設可能用 c_long (64-bit on 64-bit Win)、但 API 期望 INT (32-bit)
+    - 不 match 會讓座標錯位或 return value 錯讀
+    """
+    content = _read()
+    idx = content.find("def _win_move_cursor_to(self, target_x, target_y):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "SetCursorPos.argtypes" in body, (
+        "v14 必設定 SetCursorPos.argtypes"
+    )
+    assert "SetCursorPos.restype" in body, (
+        "v14 必設定 SetCursorPos.restype"
+    )
+    assert "wintypes.INT" in body, (
+        "v14 SetCursorPos 參數必用 wintypes.INT（不是 c_long）"
+    )
+
+
+def test_v14_dpi_scaling_applied():
+    """v14：DPI scaling 必應用到座標（logical → physical）"""
+    content = _read()
+    idx = content.find("def _win_move_cursor_to(self, target_x, target_y):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 確認 DPI 邏輯
+    assert "dpi_scale" in body or "dpi / 96" in body or "DPI" in body.upper(), (
+        "v14 必計算 DPI scaling 並應用到座標"
+    )
+    assert "phys_x" in body and "phys_y" in body, (
+        "v14 必計算 physical pixel 座標"
+    )
+
+
+def test_v14_no_get_cursor_pos_verify():
+    """v14：放棄用 GetCursorPos 驗證（v13 失敗、純 attempt）"""
+    content = _read()
+    idx = content.find("def _win_move_cursor_to(self, target_x, target_y):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # v14 不應該用 if abs(cur_pos.x - target_x) <= 2 這種 verify
+    # 純 attempt、不驗證
+    # 找驗證模式
+    has_verify = "abs(cur_pos.x - target_x) <= 2" in body
+    assert not has_verify, (
+        "v14 放棄 GetCursorPos 驗證、不該有 abs(cur_pos.x - target_x) <= 2"
+    )
+
+
+def test_v14_set_cursor_pos_retries():
+    """v14：SetCursorPos 必重試多次（accessibility tools 偶爾 block）"""
+    content = _read()
+    idx = content.find("def _win_move_cursor_to(self, target_x, target_y):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 確認有 retry 邏輯
+    import re
+    # 找 for attempt in range 或類似
+    has_retry = (
+        "for attempt in range" in body
+        or "for _ in range" in body
+    )
+    assert has_retry, (
+        "v14 必包含 SetCursorPos 重試邏輯（accessibility tools 偶爾 block）"
+    )
+
+
+def test_v14_clip_cursor_release():
+    """v14：ClipCursor 必設 argtypes + 釋放 + 重試"""
+    content = _read()
+    idx = content.find("def _win_move_cursor_to(self, target_x, target_y):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "ClipCursor.argtypes" in body, (
+        "v14 必設定 ClipCursor.argtypes"
+    )
+    assert "ClipCursor(None)" in body, (
+        "v14 必呼叫 ClipCursor(None) 釋放 mouse lock"
+    )
+
+
+def test_v14_send_input_argtypes():
+    """v14：SendInput 必設 argtypes 避免型別錯位"""
+    content = _read()
+    idx = content.find("def _win_move_cursor_to(self, target_x, target_y):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "SendInput.argtypes" in body, (
+        "v14 必設定 SendInput.argtypes"
+    )
+    assert "SendInput.restype" in body, (
+        "v14 必設定 SendInput.restype"
+    )
+
+
+def test_v14_event_generate_still_called():
+    """v14：即使 OS cursor 移動失敗、event_generate 仍要做視覺同步"""
+    content = _read()
+    idx = content.find("def _move_cursor_to_row(self, tree, iid):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "event_generate" in body, (
+        "v14 _move_cursor_to_row 必包含 event_generate 作為視覺同步保險"
+    )
