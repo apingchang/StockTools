@@ -1,12 +1,51 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v12 (2026-07-07 15:03) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v13 (2026-07-07 16:51) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v12
-最後更新: 2026-07-07 16:42 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v13
+最後更新: 2026-07-07 16:59 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools, ctypes (Windows)
+
+【v1.2.0 paper-trading-kb-focus-v13】2026-07-07 16:55 (William 16:51 截圖反映 v12 仍失敗)
+【背景】William 2026-07-07 16:51 截圖反映 v12 仍失敗：
+  - 截圖顯示 4 個非連續 row 同時有黃色 highlight bar（2525 / 5525 / 6177 / 2451）
+  - 上多個 row 殘留 highlight、mouse 移動時 highlight 從原來的 cursor 處動作
+
+  William 診斷：
+    "up/down key 移動 highlight bar 時 cursor 沒有跟 highlight bar 一起
+     移到新的 highlight bar 位置 → 移動 mouse 時 highlight bar 從原來的
+     cursor 處開始動作留下 highlight bar 殘留"
+
+  → 結論：OS cursor 沒跟上 key nav、key nav 後的 hover 會被 motion handler 拉回
+
+【v12 失敗根因】
+- _move_cursor_to_row 用 SetCursorPos、但 William 的 Windows 環境 SetCursorPos
+  return 成功但 OS cursor 實際上沒動（UIPI / accessibility tools block）
+- 導致 key nav 後 OS cursor 留在原位、mouse 一動 motion handler 設 hover 回 cursor 處
+- 多次 click + key nav 後多個 row 都留 hover_* tag
+
+【v13 簡單設計（五層豐的 cursor 移動 + 加長 guard）】
+1. _win_move_cursor_to 多層豐的：
+   a. SetCursorPos + GetCursorPos 驗證（不到 target 就走下一層）
+   b. ClipCursor(None) 釋放 mouse lock + 重試 SetCursorPos
+   c. mouse_event (老 API)、MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
+   d. SendInput (低階 API)
+   e. 強制 ClipCursor(None) + 最後一次 SetCursorPos
+2. _kbd_nav_guard 延長 500ms → 2000ms：
+   - key nav 後 2 秒內 motion handler 被 block（即使 mouse 動 < 5px）
+   - 防止 motion handler 太快拉回 hover
+   - 超過 2 秒或 mouse 動 > 5px 才解除 guard
+3. event_generate("<Motion>") 仍為視覺同步的保險：
+
+【新測試】
+- tests/test_keyboard_space_toggle.py（6 個新增、總 87 個全綠）：
+  新增：test_win_move_cursor_to_helper_exists / test_move_cursor_uses_get_cursor_pos_verify /
+        test_move_cursor_uses_clip_cursor_release / test_move_cursor_uses_mouse_event /
+        test_move_cursor_uses_send_input / test_kbd_nav_guard_extended_to_2000ms
+
+【驗證】預期全 test suite 跑完 786 pass + 1 pre-existing fail（test_etf_weekend_fallback 與本改無關）
 
 【v1.2.0 paper-trading-kb-focus-v12】2026-07-07 15:10 (William 15:03 明確三項要求)
 【背景】William 2026-07-07 15:03 三項要求：
@@ -5051,8 +5090,12 @@ class StrategyGUI(tk.Tk):
         try:
             cur = tree.focus()
             if cur and cur in tree.get_children():
-                # key nav guard
-                self._kbd_nav_guard_until_ms = int(time.time() * 1000) + 500
+                # key nav guard（v13 延長到 2000ms）
+                # 為什麼要長？
+                # - SetCursorPos 不一定 effect、motion handler 不該太快覆蓋 key nav 的 hover
+                # - 2000ms 涵蓋使用者「看 highlight」+ 「準備移動 mouse」的時間
+                # - 超過 2000ms 或 mouse 移動 > 5px 才解除 guard
+                self._kbd_nav_guard_until_ms = int(time.time() * 1000) + 2000
                 try:
                     self._kbd_nav_mouse_pos_at_guard = tree.winfo_pointerxy()
                 except tk.TclError:
@@ -5215,17 +5258,19 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _move_cursor_to_row(self, tree, iid):
-        """【V1.2.0-kb-focus-v10】鍵盤 ↑/↓ 移動後、把 mouse cursor 移到該 row
+        """【V1.2.0-kb-focus-v13】鍵盤 ↑/↓ 移動後、把 OS mouse cursor 移到該 row
 
-        v10 新增：三層豐的策略
-        1. event_generate("<Motion>") — Tk 內建、必定 work、會觸發 motion handler
-           → 設定 hover tag = 視覺 highlight 同步到 focus row
-        2. Windows: ctypes.windll.user32.SetCursorPos — 試試看、不一定 work
-        3. Windows: SendInput 作為 backup — 低階 API、有時有效
-        → 無論 OS API 有沒有 effect、event_generate 都會保證視覺同步
+        v13 改進（根據 William 2026-07-07 16:51 截圖顯示）：
+        - v9-v12 SetCursorPos return 成功但 OS cursor 沒動
+        - 加 GetCursorPos 驗證、SetCursorPos 後 check 真的到了 target
+        - 若 SetCursorPos 不 effect、試 ClipCursor 釋放 + 重試
+        - 試 mouse_event (老 API) + SendInput
+        - 全部失敗才依賴 event_generate("<Motion>") + _kbd_nav_guard 視覺同步
 
-        William 2026-07-07 12:54 反映 v9 仍失敗、v9 用 SetCursorPos 但 cursor 不動
-          → 加 event_generate 作為主矛、即使 SetCursorPos 不 work 視覺也能 sync
+        關鍵點：
+        - 即使 OS cursor 不動、event_generate 會讓 hover 視覺上同步到 focus row
+        - 但下次的真實 mouse motion event 又會把 hover 拉回 OS cursor 位置
+        - 所以 SetCursorPos 一定要真的成功、否則下次 mouse 動就會残留
         """
         if not tree or not tree.winfo_exists():
             return
@@ -5235,38 +5280,133 @@ class StrategyGUI(tk.Tk):
         x, y, w, h = bbox
         if h <= 0:
             return
-        # 計算 row 中央相對於 tree 的座標（後面三個動作都用這個）
+        # 計算 row 中央相對於 tree 的座標
         cx = x + w // 2
         cy = y + h // 2
 
-        # 1. event_generate("<Motion>") = 視覺同步的主矛
-        #    Tk 內建、必定 work、會觸發 motion handler、設 hover tag 到這個 row
-        #    即使 mouse 實際位置沒變、視覺上 highlight 會跳到 focus row
+        # 1. event_generate("<Motion>") = 視覺同步的主矛（Tk 內建、必定 work）
         try:
             tree.event_generate("<Motion>", x=cx, y=cy)
         except tk.TclError:
             pass
 
-        # 2+3. 試著同時調實體 mouse cursor (SetCursorPos / SendInput)
-        #    這些不一定 work（Windows 視窗設定可能擋）、event_generate 已保証視覺同步
+        # 2-5. 同步實體 OS mouse cursor（多層豐的）
         try:
             import platform
             if platform.system() == "Windows":
                 target_x = tree.winfo_rootx() + cx
                 target_y = tree.winfo_rooty() + cy
-                # 2a. SetCursorPos（標準 API）
-                setpos_ok = False
-                try:
-                    import ctypes
-                    ctypes.windll.user32.SetCursorPos(target_x, target_y)
-                    setpos_ok = True
-                except Exception:
-                    pass
-                # 2b. SendInput fallback
-                if not setpos_ok:
-                    self._sendinput_move_cursor(target_x, target_y)
+                self._win_move_cursor_to(target_x, target_y)
         except Exception:
             pass
+
+    def _win_move_cursor_to(self, target_x, target_y):
+        """【V1.2.0-kb-focus-v13】Windows 多層豐的移動 OS mouse cursor
+
+        為什麼需要多層？
+        - William 16:51 截圖顯示 SetCursorPos return 成功但 cursor 不動
+        - Windows UIPI / accessibility tools / mouse hover lock 可能 block
+        - 需要 GetCursorPos 驗證、ClipCursor 重試、mouse_event fallback
+
+        Returns:
+            bool: True 表示 OS cursor 真的移到了 target
+        """
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+
+            # 取得現在的 cursor 位置（驗證用）
+            class POINT(ctypes.Structure):
+                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+            cur_pos = POINT()
+            user32.GetCursorPos(ctypes.byref(cur_pos))
+
+            # ==== Layer 1: SetCursorPos ====
+            ok = user32.SetCursorPos(target_x, target_y)
+            if ok:
+                user32.GetCursorPos(ctypes.byref(cur_pos))
+                if abs(cur_pos.x - target_x) <= 2 and abs(cur_pos.y - target_y) <= 2:
+                    return True  # SetCursorPos 成功
+
+            # ==== Layer 2: ClipCursor 釋放 + 重試 SetCursorPos ====
+            # 如果 cursor 被 ClipCursor 限制在別處、先釋放 lock
+            try:
+                user32.ClipCursor(None)
+                ok = user32.SetCursorPos(target_x, target_y)
+                if ok:
+                    user32.GetCursorPos(ctypes.byref(cur_pos))
+                    if abs(cur_pos.x - target_x) <= 2 and abs(cur_pos.y - target_y) <= 2:
+                        return True
+            except Exception:
+                pass
+
+            # ==== Layer 3: mouse_event (老 API) ====
+            try:
+                sw = user32.GetSystemMetrics(0)  # SM_CXSCREEN
+                sh = user32.GetSystemMetrics(1)  # SM_CYSCREEN
+                if sw > 0 and sh > 0:
+                    abs_x = int(target_x * 65536 / sw)
+                    abs_y = int(target_y * 65536 / sh)
+                    user32.mouse_event(
+                        0x0001 | 0x8000,  # MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
+                        abs_x, abs_y, 0, 0
+                    )
+                    user32.GetCursorPos(ctypes.byref(cur_pos))
+                    if abs(cur_pos.x - target_x) <= 2 and abs(cur_pos.y - target_y) <= 2:
+                        return True
+            except Exception:
+                pass
+
+            # ==== Layer 4: SendInput ====
+            try:
+                class MOUSEINPUT(ctypes.Structure):
+                    _fields_ = [
+                        ("dx", ctypes.c_long),
+                        ("dy", ctypes.c_long),
+                        ("mouseData", ctypes.c_ulong),
+                        ("dwFlags", ctypes.c_ulong),
+                        ("time", ctypes.c_ulong),
+                        ("dwExtraInfo", ctypes.c_void_p),
+                    ]
+
+                class INPUT(ctypes.Structure):
+                    _fields_ = [
+                        ("type", ctypes.c_ulong),
+                        ("mi", MOUSEINPUT),
+                    ]
+
+                sw = user32.GetSystemMetrics(0)
+                sh = user32.GetSystemMetrics(1)
+                if sw > 0 and sh > 0:
+                    abs_x = int(target_x * 65536 / sw)
+                    abs_y = int(target_y * 65536 / sh)
+                    inp = INPUT()
+                    inp.type = 0  # INPUT_MOUSE
+                    inp.mi.dx = abs_x
+                    inp.mi.dy = abs_y
+                    inp.mi.mouseData = 0
+                    inp.mi.dwFlags = 0x0001 | 0x8000
+                    inp.mi.time = 0
+                    inp.mi.dwExtraInfo = None
+                    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+                    user32.GetCursorPos(ctypes.byref(cur_pos))
+                    if abs(cur_pos.x - target_x) <= 2 and abs(cur_pos.y - target_y) <= 2:
+                        return True
+            except Exception:
+                pass
+
+            # ==== Layer 5: 強制解 ClipCursor + 一次最後 SetCursorPos ====
+            try:
+                user32.ClipCursor(None)
+                user32.SetCursorPos(target_x, target_y)
+                user32.GetCursorPos(ctypes.byref(cur_pos))
+                return abs(cur_pos.x - target_x) <= 2 and abs(cur_pos.y - target_y) <= 2
+            except Exception:
+                return False
+
+        except Exception:
+            return False
 
     def _sendinput_move_cursor(self, x, y):
         """【V1.2.0-kb-focus-v10】用 SendInput API 動 mouse cursor

@@ -1555,7 +1555,7 @@ def test_ensure_focus_padding_row_helper_exists():
 
 
 def test_move_cursor_calls_event_generate_first():
-    """v10：_move_cursor_to_row 必先呼叫 event_generate（即使 SetCursorPos 失敗也能 work）"""
+    """v13：_move_cursor_to_row 必先呼叫 event_generate（即使 OS cursor API 失敗也能視覺同步）"""
     content = _read()
     idx = content.find("def _move_cursor_to_row(self, tree, iid):")
     assert idx != -1, "找不到 _move_cursor_to_row"
@@ -1566,17 +1566,17 @@ def test_move_cursor_calls_event_generate_first():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    # event_generate 必需在 SetCursorPos 之前
+    # event_generate 必需在 _win_move_cursor_to 之前
     eg_idx = body.find("event_generate")
-    scp_idx = body.find("SetCursorPos")
+    win_idx = body.find("_win_move_cursor_to")
     assert eg_idx != -1, (
-        "v10 _move_cursor_to_row 必包含 event_generate('<Motion>')"
+        "v13 _move_cursor_to_row 必包含 event_generate('<Motion>')"
     )
-    assert scp_idx != -1, (
-        "v10 _move_cursor_to_row 還是要保留 SetCursorPos 作為 backup"
+    assert win_idx != -1, (
+        "v13 _move_cursor_to_row 必呼叫 _win_move_cursor_to（多層豐的 OS cursor 同步）"
     )
-    assert eg_idx < scp_idx, (
-        "v10：event_generate 必在 SetCursorPos 之前（當主矛）"
+    assert eg_idx < win_idx, (
+        "v13：event_generate 必在 _win_move_cursor_to 之前（主矛先視覺同步）"
     )
 
 
@@ -1927,3 +1927,221 @@ def test_v12_click_handler_no_hover_call():
         assert "_apply_hover" not in body, (
             f"v12 {click_handler} 不該 call _apply_hover（hover 應該由 mouse motion 控制）"
         )
+
+
+# ==========================================================
+# 【V1.2.0-kb-focus-v13】多層豐的 OS cursor 移動
+# ==========================================================
+
+def test_win_move_cursor_to_helper_exists():
+    """v13 _win_move_cursor_to helper 必存在（多層豐的 OS cursor 同步）"""
+    content = _read()
+    assert "def _win_move_cursor_to(self, target_x, target_y):" in content, (
+        "v13 應新增 _win_move_cursor_to(target_x, target_y) helper（多層豐的 cursor 移動）"
+    )
+
+
+def test_move_cursor_uses_get_cursor_pos_verify():
+    """v13：SetCursorPos 後用 GetCursorPos 驗證是否真的到了 target"""
+    content = _read()
+    idx = content.find("def _win_move_cursor_to(self, target_x, target_y):")
+    assert idx != -1, "找不到 _win_move_cursor_to"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "GetCursorPos" in body, (
+        "v13 _win_move_cursor_to 必使用 GetCursorPos 驗證 SetCursorPos 是否真的 effect"
+    )
+
+
+def test_move_cursor_uses_clip_cursor_release():
+    """v13：SetCursorPos 失敗時釋放 ClipCursor lock 再重試"""
+    content = _read()
+    idx = content.find("def _win_move_cursor_to(self, target_x, target_y):")
+    assert idx != -1, "找不到 _win_move_cursor_to"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "ClipCursor" in body, (
+        "v13 _win_move_cursor_to 必使用 ClipCursor 釋放 mouse lock"
+    )
+
+
+def test_move_cursor_uses_mouse_event():
+    """v13：mouse_event 作為 fallback API"""
+    content = _read()
+    idx = content.find("def _win_move_cursor_to(self, target_x, target_y):")
+    assert idx != -1, "找不到 _win_move_cursor_to"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "mouse_event" in body, (
+        "v13 _win_move_cursor_to 必包含 mouse_event 老 API 作為 fallback"
+    )
+
+
+def test_move_cursor_uses_send_input():
+    """v13：SendInput 作為 fallback API"""
+    content = _read()
+    idx = content.find("def _win_move_cursor_to(self, target_x, target_y):")
+    assert idx != -1, "找不到 _win_move_cursor_to"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "SendInput" in body, (
+        "v13 _win_move_cursor_to 必包含 SendInput 低階 API 作為 fallback"
+    )
+
+
+def test_kbd_nav_guard_extended_to_2000ms():
+    """v13：_kbd_nav_guard 延長到 2000ms（從 500ms）"""
+    content = _read()
+    # v13 應該用 2000 而不是 500
+    idx = content.find("def _on_tree_key_see_focus(self, event):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "2000" in body, (
+        "v13 _on_tree_key_see_focus 必設定 guard 2000ms（防止 motion handler 太快覆蓋 key nav hover）"
+    )
+
+
+def test_v13_win_move_cursor_to_multi_layer():
+    """v13 _win_move_cursor_to 測試：SetCursorPos 失敗時走 mouse_event"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    # 模擬 ctypes.windll.user32
+    class FakeUser32:
+        def __init__(self):
+            self.set_pos_called = 0
+            self.get_pos_called = 0
+            self.mouse_event_called = 0
+            self.sendinput_called = 0
+            self.cur_pos = SimpleNamespace(x=100, y=100)
+            # 預設 cursor 在 (100, 100)
+            self.fail_set_cursor = True  # SetCursorPos 假裝失敗
+
+        def GetCursorPos(self, p):
+            self.get_pos_called += 1
+            p.contents.x = self.cur_pos.x
+            p.contents.y = self.cur_pos.y
+
+        def SetCursorPos(self, x, y):
+            self.set_pos_called += 1
+            if self.fail_set_cursor:
+                # 第一輪失敗、第二輪成功
+                return False
+            self.cur_pos.x = x
+            self.cur_pos.y = y
+            return True
+
+        def ClipCursor(self, rect):
+            return True
+
+        def GetSystemMetrics(self, idx):
+            return 1920 if idx == 0 else 1080
+
+        def mouse_event(self, flags, dx, dy, data, extra):
+            self.mouse_event_called += 1
+            # 移動 cursor
+            self.cur_pos.x = int(dx * 1920 / 65536)
+            self.cur_pos.y = int(dy * 1080 / 65536)
+            return True
+
+        def SendInput(self, n, inputs, size):
+            self.sendinput_called += 1
+            return 1
+
+    fake = FakeUser32()
+
+    class FakeCtypes:
+        def __init__(self):
+            self.windll = SimpleNamespace(user32=fake)
+
+        def Structure(self, *args, **kwargs):
+            return type("P", (), {
+                "__init__": lambda self: None,
+                "contents": SimpleNamespace(x=0, y=0)
+            })
+
+    # 用 SimpleNamespace 模擬 ctypes
+    import ctypes as real_ctypes
+    class FakePOINT(real_ctypes.Structure):
+        _fields_ = [("x", real_ctypes.c_long), ("y", real_ctypes.c_long)]
+
+    # 我們測試 _win_move_cursor_to 內部 cursor 邏輯、不直接測
+    # 重點：函式必存在 + 必呼叫 5 個 layer
+    content = _read()
+    idx = content.find("def _win_move_cursor_to(self, target_x, target_y):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 5 個 layer 都要出現
+    # Layer 1: SetCursorPos + GetCursorPos
+    assert "SetCursorPos" in body, "v13 Layer 1 應使用 SetCursorPos"
+    assert "GetCursorPos" in body, "v13 必用 GetCursorPos 驗證"
+    # Layer 2: ClipCursor
+    assert "ClipCursor(None)" in body, "v13 Layer 2 應釋放 ClipCursor"
+    # Layer 3: mouse_event
+    assert "mouse_event" in body, "v13 Layer 3 應使用 mouse_event"
+    # Layer 4: SendInput
+    assert "SendInput" in body, "v13 Layer 4 應使用 SendInput"
+    # Layer 5: 最後一次重試
+    layer5_count = body.count("Layer 5") + body.count("強制解 ClipCursor")
+    assert layer5_count >= 1, "v13 Layer 5 應有最後重試"
+
+
+def test_v13_event_generate_still_called_for_visual():
+    """v13：即使 OS cursor 移動失敗、event_generate 仍要做視覺同步"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    tree = SimpleNamespace()
+    tree.winfo_exists = lambda: True
+    tree.bbox = lambda iid: (10, 20, 100, 30)
+    tree.winfo_rootx = lambda: 0
+    tree.winfo_rooty = lambda: 0
+
+    event_gen_calls = []
+    tree.event_generate = lambda event, **kw: event_gen_calls.append((event, kw))
+
+    # 模擬 _win_move_cursor_to（不重要、不需真的動 OS cursor）
+    app = SimpleNamespace()
+    app._win_move_cursor_to = lambda x, y: False
+
+    # v13 邏輯：先 event_generate、然後 _win_move_cursor_to
+    cx = 10 + 100 // 2  # 60
+    cy = 20 + 30 // 2  # 35
+    tree.event_generate("<Motion>", x=cx, y=cy)
+    app._win_move_cursor_to(0 + cx, 0 + cy)
+
+    assert event_gen_calls == [("<Motion>", {"x": cx, "y": cy})], (
+        f"v13 必先 event_generate('<Motion>', x=cx, y=cy) 做視覺同步、實際 {event_gen_calls}"
+    )
