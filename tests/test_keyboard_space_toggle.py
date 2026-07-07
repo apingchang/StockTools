@@ -415,3 +415,51 @@ def test_v18_no_more_after_idle():
     assert "self._move_cursor_to_row(" in body, (
         "v18 _on_tree_key_see_focus 必直接呼叫 self._move_cursor_to_row("
     )
+
+
+# ==========================================================
+# 【V1.2.0-kb-focus-v20】4 個 tree 都要有 KeyRelease binding
+# ==========================================================
+
+def test_v20_results_tree_has_keyrelease_bind():
+    """v20：results_tree (select + backtest) 必綁 KeyRelease-Up/Down/Home/End/Prior/Next"""
+    content = _read()
+    # 找 _build_tab_layout 內 results_tree.bind 區段
+    idx = content.find('results_tree.bind("<Motion>"')
+    assert idx != -1, "找不到 results_tree.bind"
+    # 找下一個 results_tree.bind 之前的範圍
+    # 或一直往下到 50 行後
+    section = content[idx:idx+3000]
+    for evt in ("<KeyRelease-Up>", "<KeyRelease-Down>",
+                "<KeyRelease-Home>", "<KeyRelease-End>",
+                "<KeyRelease-Prior>", "<KeyRelease-Next>"):
+        assert evt in section, (
+            f"v20 results_tree 必綁 {evt}（v18 之前的 bug）"
+        )
+
+
+def test_v20_etf_tree_has_keyrelease_bind():
+    """v20：_etf_tree 必綁 KeyRelease-Up/Down/Home/End/Prior/Next"""
+    content = _read()
+    idx = content.find('self._etf_tree.bind("<Motion>"')
+    assert idx != -1
+    section = content[idx:idx+3000]
+    for evt in ("<KeyRelease-Up>", "<KeyRelease-Down>",
+                "<KeyRelease-Home>", "<KeyRelease-End>",
+                "<KeyRelease-Prior>", "<KeyRelease-Next>"):
+        assert evt in section, (
+            f"v20 _etf_tree 必綁 {evt}（v18 之前的 bug）"
+        )
+
+
+def test_v20_ms_tree_still_has_keyrelease():
+    """v20：_ms_tree 既有 KeyRelease binding 必保留"""
+    content = _read()
+    idx = content.find('self._ms_tree.bind("<Motion>"')
+    assert idx != -1
+    section = content[idx:idx+3000]
+    for evt in ("<KeyRelease-Up>", "<KeyRelease-Down>",
+                "<KeyRelease-Home>", "<KeyRelease-End>"):
+        assert evt in section, (
+            f"v20 _ms_tree {evt} binding 必保留"
+        )

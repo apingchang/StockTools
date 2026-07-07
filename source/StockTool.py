@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v19 (2026-07-07 18:42) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v20 (2026-07-07 18:42) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v19
-最後更新: 2026-07-07 18:44 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v20
+最後更新: 2026-07-07 19:07 (Asia/Taipei)
 
 Python 版本: 3.8+
 
@@ -4575,6 +4575,15 @@ class StrategyGUI(tk.Tk):
         results_tree.bind("<Enter>", self._on_tree_enter_focus)
         results_tree.bind("<Button-1>", self._on_select_tree_click)
         results_tree.bind("<<TreeviewSelect>>", self._on_tree_select_sync_hover)
+        # 【V1.2.0-kb-focus-v20】補 KeyRelease binding、v18 起就遺漏
+        # v4 原文：「不需額外 bind <Up>/<Down>、也不要覆寫」
+        # 但 ↑/↓ 內建的 focus() 调用確實跟我們的 hover sync cursor 滑不在同個 handler
+        # → 綁 <KeyRelease> 給 _on_tree_key_see_focus
+        for _kb_e in ("<KeyRelease-Up>", "<KeyRelease-Down>",
+                      "<KeyRelease-Home>", "<KeyRelease-End>",
+                      "<KeyRelease-Prior>", "<KeyRelease-Next>"):
+            results_tree.bind(_kb_e, self._on_tree_key_see_focus)
+        self._v18_log("[v20] bind KeyRelease to results_tree（system select + backtest）")
         # 【V1.2.0-keyboard-toggle】Space 鍵 toggle focus row 勾選
         # 【V1.2.0-kb-focus-v4】Treeview selectmode="browse" 下、↑/↓ 自動會切 focus + scroll
         #             不需額外 bind <Up>/<Down>、也不要覆寫（要 return "break"）
@@ -6071,6 +6080,12 @@ class StrategyGUI(tk.Tk):
         self._etf_tree.bind("<Enter>", self._on_tree_enter_focus)
         self._etf_tree.bind("<Button-1>", self._etf_toggle_check)
         self._etf_tree.bind("<<TreeviewSelect>>", self._on_tree_select_sync_hover)
+        # 【V1.2.0-kb-focus-v20】補 _etf_tree KeyRelease binding
+        for _kb_e in ("<KeyRelease-Up>", "<KeyRelease-Down>",
+                      "<KeyRelease-Home>", "<KeyRelease-End>",
+                      "<KeyRelease-Prior>", "<KeyRelease-Next>"):
+            self._etf_tree.bind(_kb_e, self._on_tree_key_see_focus)
+        self._v18_log("[v20] bind KeyRelease to _etf_tree")
         # 【V1.2.0-keyboard-toggle】Space 鍵 toggle focus row 勾選
         # 【V1.2.0-kb-focus-v4】selectmode="browse" 下、↑/↓ 自動會切 focus + scroll
         self._etf_tree.bind("<space>", self._on_tree_space_toggle)
