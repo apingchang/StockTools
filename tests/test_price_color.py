@@ -241,47 +241,46 @@ def test_etf_tree_insert_uses_price_tag():
 # ──────────────────── hover 保留 price tag 守護 ────────────────────
 
 def test_select_hover_preserves_price_tag():
-    """select_tree hover_<price> tag 由 _on_tree_select_sync_hover 管理（v7）
+    """v8：hover_<price> tag 由 _apply_hover 統一管理（單一真相）
 
-    【V1.2.0-kb-focus-v7】2026-07-07 01:08 重構：
-    v6：motion handler + <<TreeviewSelect>> 兩個來源同時設 hover → race condition
-    v7：motion handler 只設 focus、hover_<price> 完全由 <<TreeviewSelect>> handler 管
-    所以改成檢查 _on_tree_select_sync_hover 讀 _select_price_tags
+    【V1.2.0-kb-focus-v8】2026-07-07 11:00 重構：
+    v7：<<TreeviewSelect>> handler 設 hover_<price> tag
+    v8：抽出 _apply_hover(tree, iid) 統一函式、<<TreeviewSelect>> / motion / key 都呼叫
+    驗證：_apply_hover 內部讀 _get_price_tag_for_tree（保留 price_* 色彩）
     """
     content = _read(STOCKTOOL_PY)
     m = re.search(
-        r'def _on_tree_select_sync_hover\(self, event\):(.*?)(?=\n    def |\Z)',
+        r'def _apply_hover\(self, tree, iid\):(.*?)(?=\n    def |\Z)',
         content,
         re.DOTALL,
     )
-    assert m, "找不到 _on_tree_select_sync_hover"
+    assert m, "找不到 _apply_hover 函式（v8 統一管理 hover_<price>）"
     body = m.group(1)
     assert "_get_price_tag_for_tree" in body, (
-        "_on_tree_select_sync_hover 應讀 _get_price_tag_for_tree（內部讀 _select_price_tags）"
+        "_apply_hover 應讀 _get_price_tag_for_tree（內部讀 _select_price_tags）"
     )
-    assert "hover_" in body, "_on_tree_select_sync_hover 應設 hover_<price> tag"
+    assert "hover_" in body, "_apply_hover 應設 hover_<price> tag"
 
 
 def test_ms_hover_preserves_price_tag():
     """_ms_tree hover 進入要保留 price_* tag
 
-    【V1.2.0-kb-focus-v4】2026-07-06 21:55 重構：
-    v3 設計：hover handler 直接讀 _ms_price_tags 並設 hover_<price> tag
-    v4 設計：hover 用 selection_set() + <<TreeviewSelect>> 事件統一處理 hover_<price> tag
-    所以改成檢查 <<TreeviewSelect>> 事件 handler (_on_tree_select_sync_hover) 讀 price_tags
+    【V1.2.0-kb-focus-v8】2026-07-07 11:00 重構：
+    統一透過 _apply_hover(tree, iid) 設 hover_<price> tag
+    驗證：_apply_hover 內部讀 _get_price_tag_for_tree（保留 price_* 色彩）
     """
     content = _read(STOCKTOOL_PY)
     m = re.search(
-        r'def _on_tree_select_sync_hover\(self, event\):(.*?)(?=\n    def |\Z)',
+        r'def _apply_hover\(self, tree, iid\):(.*?)(?=\n    def |\Z)',
         content,
         re.DOTALL,
     )
-    assert m, "找不到 _on_tree_select_sync_hover handler"
+    assert m, "找不到 _apply_hover 函式"
     body = m.group(1)
-    assert "_get_price_tag_for_tree" in body or "_ms_price_tags" in body, (
-        "_on_tree_select_sync_hover 應讀 price_tags dict（透過 _get_price_tag_for_tree）"
+    assert "_get_price_tag_for_tree" in body, (
+        "_apply_hover 應讀 _get_price_tag_for_tree（保留 _ms_price_tags 色彩）"
     )
-    assert "hover_" in body, "_on_tree_select_sync_hover 應設 hover_<price> tag"
+    assert "hover_" in body, "_apply_hover 應設 hover_<price> tag"
 
 
 
@@ -387,22 +386,23 @@ def test_all_files_compile():
             pytest.fail(f"❌ {f} 編譯失敗：\n{e}")
 
 def test_etf_hover_combined_uses_price_tag():
-    """【V1.1-price-color-fix3 + V1.2.0-kb-focus-v7】
-    ETF hover_<price> tag 由 _on_tree_select_sync_hover 統一管（v7）
+    """【V1.1-price-color-fix3 + V1.2.0-kb-focus-v8】
+    ETF hover_<price> tag 由 _apply_hover 統一管（v8）
 
     Bug 歷史：William 15:49 反映 cursor 移到第一行再移開後變黑
     v4：hover 用 selection_set()、<<TreeviewSelect>> handler 讀 price_tags 設 hover_<price> tag
-    v7：motion handler 只設 focus、不動 tags
+    v7：motion handler 只設 focus、<<TreeviewSelect>> 設 hover_<price>
+    v8：抽 _apply_hover 統一函式、motion / <<TreeviewSelect>> / 鍵盤 都呼叫
     """
     content = _read(STOCKTOOL_PY)
     m = re.search(
-        r'def _on_tree_select_sync_hover\(self, event\):(.*?)(?=\n    def |\Z)',
+        r'def _apply_hover\(self, tree, iid\):(.*?)(?=\n    def |\Z)',
         content,
         re.DOTALL,
     )
-    assert m, "找不到 _on_tree_select_sync_hover handler（v7 統一處理 hover_<price>）"
+    assert m, "找不到 _apply_hover 函式（v8 統一處理 hover_<price>）"
     body = m.group(1)
-    assert "_get_price_tag_for_tree" in body or "_etf_price_tags" in body, (
-        "_on_tree_select_sync_hover 應讀 price_tags dict"
+    assert "_get_price_tag_for_tree" in body, (
+        "_apply_hover 應讀 _get_price_tag_for_tree（保留 _etf_price_tags 色彩）"
     )
-    assert "hover_" in body, "_on_tree_select_sync_hover 應設 hover_<price> tag"
+    assert "hover_" in body, "_apply_hover 應設 hover_<price> tag"

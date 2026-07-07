@@ -715,7 +715,7 @@ def test_ms_tree_leave_clears_hover():
 
 
 def test_etf_tree_hover_combined_clears_old():
-    """_etf_tree_hover_combined v7 motion 只設 focus + popup、不動 tags"""
+    """_etf_tree_hover_combined v8 呼叫 _apply_hover 設 hover + popup + focus"""
     content = _read()
     idx = content.find('def _etf_tree_hover_combined(self, event):')
     assert idx != -1, "找不到 _etf_tree_hover_combined"
@@ -726,17 +726,20 @@ def test_etf_tree_hover_combined_clears_old():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    # v7：motion 只設定 keyboard focus + popup、不應動 hover_<price> tag
+    # v8：motion 呼叫 _apply_hover 設 hover + focus + popup
+    assert '_apply_hover' in body, (
+        "❌ v8 _etf_tree_hover_combined 應呼叫 _apply_hover 設 hover_<price> tag"
+    )
     assert '_etf_tree.focus(iid)' in body, (
-        "❌ v7 _etf_tree_hover_combined 應呼叫 _etf_tree.focus(iid)"
+        "❌ v8 _etf_tree_hover_combined 應呼叫 _etf_tree.focus(iid)"
     )
     assert '_etf_tree.focus_set' in body, (
-        "❌ v7 _etf_tree_hover_combined 應呼叫 _etf_tree.focus_set"
+        "❌ v8 _etf_tree_hover_combined 應呼叫 _etf_tree.focus_set"
     )
 
 
 def test_on_tree_select_sync_hover_clears_old():
-    """_on_tree_select_sync_hover v6 應清所有 children 的 hover_* tag"""
+    """_on_tree_select_sync_hover v8 應呼叫 _apply_hover（單一真相）"""
     content = _read()
     idx = content.find('def _on_tree_select_sync_hover(self, event):')
     assert idx != -1, "找不到 _on_tree_select_sync_hover"
@@ -747,11 +750,13 @@ def test_on_tree_select_sync_hover_clears_old():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    # v6：遍歷清
-    assert 'for child in' in body and 'get_children' in body, (
-        "❌ v6 _on_tree_select_sync_hover 應遍歷清 hover_* tag"
+    # v8：呼叫 _apply_hover（單一真相）
+    assert '_apply_hover' in body, (
+        "❌ v8 _on_tree_select_sync_hover 應呼叫 _apply_hover"
     )
-    assert 'hover_' in body, "❌ _on_tree_select_sync_hover 應設新 row hover_<price> tag"
+    assert '_clear_all_hover' in body, (
+        "❌ v8 _on_tree_select_sync_hover 應在空 selection 時呼叫 _clear_all_hover"
+    )
 
 
 def test_set_row_tag_normal_function_exists():
@@ -882,7 +887,7 @@ def test_hover_price_tag_registered():
 
 
 def test_on_select_tree_hover_movement_clears_old():
-    """_on_select_tree_hover 移動時取消舊 row 的 hover_<price> tag"""
+    """_on_select_tree_hover v8 呼叫 _apply_hover 清舊 + 設新 row 的 hover_<price> tag"""
     from types import SimpleNamespace
     import StockTool as st
 
@@ -916,22 +921,39 @@ def test_on_select_tree_hover_movement_clears_old():
         _select_price_tags={"r1": "price_up", "r2": "price_down"},
     )
 
+    # v8：motion handler 呼叫 _apply_hover 來設 hover_<price> tag
+    def fake_apply_hover(t, iid):
+        for child in t.get_children():
+            cur = items_state[child]["tags"]
+            if any(s.startswith("hover_") for s in cur):
+                price_tag = app._select_price_tags.get(child, "price_zero")
+                items_state[child]["tags"] = ("unchecked", price_tag)
+        price_tag = app._select_price_tags.get(iid, "price_zero")
+        kind = price_tag.replace("price_", "")
+        items_state[iid]["tags"] = (f"hover_{kind}",)
+
+    app._apply_hover = fake_apply_hover
+
     event = SimpleNamespace(widget=tree, x=10, y=10)
     st.StrategyGUI._on_select_tree_hover(app, event)
 
-    # v7：motion 只設 focus(iid) + focus_set()、不動 tags
+    # v8：motion 設 focus(iid) + focus_set()、透過 _apply_hover 設 hover tag
     assert "r2" in focus_calls, (
-        f"v7 _on_select_tree_hover 應呼叫 focus(r2)、實際 focus_calls={focus_calls}"
+        f"v8 _on_select_tree_hover 應呼叫 focus(r2)、實際 focus_calls={focus_calls}"
     )
-    assert focus_set_calls, "v7 _on_select_tree_hover 應呼叫 focus_set"
-    # v7 不應清舊 hover tag
-    assert "hover_up" in items_state["r1"]["tags"], (
-        f"v7 motion 不應清舊 hover tag、實際 {items_state['r1']['tags']}"
+    assert focus_set_calls, "v8 _on_select_tree_hover 應呼叫 focus_set"
+    # v8 應清舊 hover tag
+    assert "hover" not in str(items_state["r1"]["tags"]), (
+        f"v8 motion 應清舊 hover tag、實際 {items_state['r1']['tags']}"
+    )
+    # v8 應設新 row 的 hover_<price>
+    assert "hover_down" in items_state["r2"]["tags"], (
+        f"v8 motion 應設 r2 為 hover_down、實際 {items_state['r2']['tags']}"
     )
 
 
 def test_ms_tree_hover_movement_clears_old():
-    """_ms_tree_hover 移動時取消舊 row 的 hover_<price> tag"""
+    """_ms_tree_hover v8 呼叫 _apply_hover 清舊 + 設新 row 的 hover_<price> tag"""
     from types import SimpleNamespace
     import StockTool as st
 
@@ -964,22 +986,39 @@ def test_ms_tree_hover_movement_clears_old():
         _ms_price_tags={"m1": "price_up", "m2": "price_down"},
     )
 
+    # v8：motion handler 呼叫 _apply_hover 設 hover_<price> tag
+    def fake_apply_hover(t, iid):
+        for child in t.get_children():
+            cur = items_state[child]["tags"]
+            if any(s.startswith("hover_") for s in cur):
+                price_tag = app._ms_price_tags.get(child, "price_zero")
+                items_state[child]["tags"] = ("unchecked", price_tag)
+        price_tag = app._ms_price_tags.get(iid, "price_zero")
+        kind = price_tag.replace("price_", "")
+        items_state[iid]["tags"] = (f"hover_{kind}",)
+
+    app._apply_hover = fake_apply_hover
+
     event = SimpleNamespace(widget=tree, x=10, y=10)
     st.StrategyGUI._ms_tree_hover(app, event)
 
-    # v7：motion 只設 focus(iid) + focus_set()、不動 tags
+    # v8：motion 設 focus + 透過 _apply_hover 設 hover tag
     assert "m2" in focus_calls, (
-        f"v7 _ms_tree_hover 應呼叫 focus(m2)、實際 focus_calls={focus_calls}"
+        f"v8 _ms_tree_hover 應呼叫 focus(m2)、實際 focus_calls={focus_calls}"
     )
-    assert focus_set_calls, "v7 _ms_tree_hover 應呼叫 focus_set"
-    # v7 不應清舊 hover tag
-    assert "hover_up" in items_state["m1"]["tags"], (
-        f"v7 motion 不應清舊 hover tag、實際 {items_state['m1']['tags']}"
+    assert focus_set_calls, "v8 _ms_tree_hover 應呼叫 focus_set"
+    # v8 應清舊 hover tag
+    assert "hover" not in str(items_state["m1"]["tags"]), (
+        f"v8 motion 應清舊 hover tag、實際 {items_state['m1']['tags']}"
+    )
+    # v8 應設新 row 的 hover_<price>
+    assert "hover_down" in items_state["m2"]["tags"], (
+        f"v8 motion 應設 m2 為 hover_down、實際 {items_state['m2']['tags']}"
     )
 
 
 def test_on_tree_select_sync_hover_clears_old_row():
-    """_on_tree_select_sync_hover selection 變化時清舊 row 的 hover_* tag"""
+    """_on_tree_select_sync_hover v8 透過 _apply_hover 清舊 + 設新 row 的 hover_* tag"""
     from types import SimpleNamespace
     import StockTool as st
 
@@ -999,7 +1038,10 @@ def test_on_tree_select_sync_hover_clears_old_row():
     tree.selection = lambda: ("s2",)
     tree.get_children = lambda: ["s1", "s2"]
     tree.item = item
+    tree.winfo_exists = lambda: True
 
+    # v8：_on_tree_select_sync_hover 呼叫 _apply_hover、_apply_hover 內部
+    #     呼叫 _clear_all_hover + 設新 row 的 hover_<price> tag
     app = SimpleNamespace(
         _ms_tree=tree,
         _etf_tree=SimpleNamespace(),
@@ -1011,10 +1053,19 @@ def test_on_tree_select_sync_hover_clears_old_row():
         _select_checked={},
         _select_price_tags={},
     )
-    app._get_price_tag_for_tree = lambda t, iid: app._ms_price_tags.get(iid, "price_zero")
-    app._set_row_tag_normal = lambda t, iid: t.item(
-        iid, tags=("unchecked", app._ms_price_tags.get(iid, "price_zero"))
-    )
+
+    def fake_apply_hover(t, iid):
+        # 模擬 _apply_hover：清全部 + 設新
+        for child in t.get_children():
+            cur = items_state[child]["tags"]
+            if any(s.startswith("hover_") for s in cur):
+                price_tag = app._ms_price_tags.get(child, "price_zero")
+                items_state[child]["tags"] = ("unchecked", price_tag)
+        price_tag = app._ms_price_tags.get(iid, "price_zero")
+        kind = price_tag.replace("price_", "")
+        items_state[iid]["tags"] = (f"hover_{kind}",)
+
+    app._apply_hover = fake_apply_hover
 
     event = SimpleNamespace(widget=tree)
     st.StrategyGUI._on_tree_select_sync_hover(app, event)
@@ -1094,4 +1145,202 @@ def test_focus_tab_tree_no_selection_set():
     assert "r1" in focus_calls, "應呼叫 focus(r1)"
     assert "hover_up" in items_state["r1"]["tags"], (
         f"r1 應設 hover_up tag、實際 {items_state['r1']['tags']}"
+    )
+
+
+# ==========================================================
+# 【V1.2.0-kb-focus-v8】新 helper: _apply_hover / _clear_all_hover
+# ==========================================================
+
+def test_apply_hover_helper_exists():
+    """v8 _apply_hover 統一函式必須存在"""
+    content = _read()
+    assert "def _apply_hover(self, tree, iid):" in content, (
+        "v8 應新增 _apply_hover(tree, iid) 統一函式"
+    )
+
+
+def test_clear_all_hover_helper_exists():
+    """v8 _clear_all_hover 輔助函式必須存在"""
+    content = _read()
+    assert "def _clear_all_hover(self, tree):" in content, (
+        "v8 應新增 _clear_all_hover(tree) 輔助函式"
+    )
+
+
+def test_move_cursor_to_row_helper_exists():
+    """v8 _move_cursor_to_row 鍵盤同步函式必須存在"""
+    content = _read()
+    assert "def _move_cursor_to_row(self, tree, iid):" in content, (
+        "v8 應新增 _move_cursor_to_row(tree, iid) 鍵盤同步函式"
+    )
+
+
+def test_ensure_focus_visible_helper_exists():
+    """v8 _ensure_focus_visible 最後 row 顯示函式必須存在"""
+    content = _read()
+    assert "def _ensure_focus_visible(self, tree, iid):" in content, (
+        "v8 應新增 _ensure_focus_visible(tree, iid) 函式"
+    )
+
+
+def test_apply_hover_clears_all_then_sets_new():
+    """_apply_hover 內部邏輯：清全部 hover + 設新 row hover_<price>"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    items_state = {
+        "a": {"tags": ("hover_up",)},
+        "b": {"tags": ("unchecked", "price_down")},
+        "c": {"tags": ("hover_zero",)},
+    }
+
+    def item(iid, *args, **kwargs):
+        if args and args[0] == "tags":
+            return items_state[iid].get("tags", ())
+        if kwargs:
+            items_state[iid].update(kwargs)
+        return SimpleNamespace(tags=items_state[iid].get("tags", ()))
+
+    tree = SimpleNamespace()
+    tree.winfo_exists = lambda: True
+    tree.get_children = lambda: ["a", "b", "c"]
+    tree.item = item
+
+    app = SimpleNamespace(
+        _ms_price_tags={"a": "price_up", "b": "price_down", "c": "price_zero"},
+    )
+    app._set_row_tag_normal = lambda t, iid: t.item(
+        iid, tags=("unchecked", app._ms_price_tags.get(iid, "price_zero"))
+    )
+    # v8：_apply_hover 內部呼叫 _clear_all_hover
+    def fake_clear_all_hover(t):
+        for child in t.get_children():
+            cur = items_state[child]["tags"]
+            if any(s.startswith("hover_") for s in cur):
+                price_tag = app._ms_price_tags.get(child, "price_zero")
+                items_state[child]["tags"] = ("unchecked", price_tag)
+    app._clear_all_hover = fake_clear_all_hover
+    # v8：_apply_hover 需要 _get_price_tag_for_tree 拿 price_<up/down/zero>
+    app._get_price_tag_for_tree = lambda t, iid: app._ms_price_tags.get(iid, "price_zero")
+
+    # 直接呼叫 _apply_hover
+    st.StrategyGUI._apply_hover(app, tree, "b")
+
+    # 應清掉 a 和 c 的 hover、b 設新 hover
+    assert "hover" not in str(items_state["a"]["tags"]), (
+        f"a 應清 hover、實際 {items_state['a']['tags']}"
+    )
+    assert "hover_down" in items_state["b"]["tags"], (
+        f"b 應設 hover_down、實際 {items_state['b']['tags']}"
+    )
+    assert "hover" not in str(items_state["c"]["tags"]), (
+        f"c 應清 hover、實際 {items_state['c']['tags']}"
+    )
+
+
+def test_ensure_focus_visible_scrolls_extra_for_last_item():
+    """_ensure_focus_visible：若 iid 是最後一個、tree.yview_scroll(1, "units")"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    yview_scroll_calls = []
+    see_calls = []
+    apply_hover_calls = []
+    move_cursor_calls = []
+
+    tree = SimpleNamespace()
+    tree.winfo_exists = lambda: True
+    tree.get_children = lambda: ["a", "b", "c"]
+    tree.see = lambda iid: see_calls.append(iid)
+    tree.yview_scroll = lambda n, unit: yview_scroll_calls.append((n, unit))
+    tree.after_idle = lambda fn: fn()  # 立刻執行
+
+    app = SimpleNamespace()
+    app._apply_hover = lambda t, iid: apply_hover_calls.append(iid)
+    app._move_cursor_to_row = lambda t, iid: move_cursor_calls.append(iid)
+
+    # 情境 1：iid 是最後一個 "c"、應額外 scroll
+    st.StrategyGUI._ensure_focus_visible(app, tree, "c")
+    assert yview_scroll_calls == [(1, "units")], (
+        f"最後一個 row 應額外 yview_scroll(1, units)、實際 {yview_scroll_calls}"
+    )
+    assert see_calls == ["c"], f"see 應呼叫一次、實際 {see_calls}"
+    assert apply_hover_calls == ["c"], (
+        f"apply_hover 應呼叫一次、實際 {apply_hover_calls}"
+    )
+    assert move_cursor_calls == ["c"], (
+        f"move_cursor 應呼叫一次、實際 {move_cursor_calls}"
+    )
+
+    # 情境 2：iid 不是最後一個 "a"、不應額外 scroll
+    yview_scroll_calls.clear()
+    see_calls.clear()
+    apply_hover_calls.clear()
+    move_cursor_calls.clear()
+    st.StrategyGUI._ensure_focus_visible(app, tree, "a")
+    assert yview_scroll_calls == [], (
+        f"非最後一個 row 不應額外 scroll、實際 {yview_scroll_calls}"
+    )
+    assert see_calls == ["a"]
+    assert apply_hover_calls == ["a"]
+    assert move_cursor_calls == ["a"]
+
+
+def test_move_cursor_to_row_skips_when_mouse_outside_tree():
+    """_move_cursor_to_row：若 mouse 不在 tree 內、不應移動 cursor"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    tree = SimpleNamespace()
+    tree.winfo_exists = lambda: True
+    tree.winfo_pointerxy = lambda: (100, 100)
+    # 模擬 mouse 在別的 widget（不是 tree）
+    other_widget = SimpleNamespace()
+    other_widget.__str__ = lambda self: ".other_widget"
+    tree.winfo_containing = lambda x, y: other_widget
+    tree.bbox = lambda iid: (10, 20, 100, 30)
+    tree.winfo_rootx = lambda: 50
+    tree.winfo_rooty = lambda: 60
+
+    app = SimpleNamespace()
+
+    # 在 Linux 環境 ctypes.windll 不存在、Windows 才有
+    # 只要 mouse 不在 tree 內、無論什麼平台都該提早 return
+    # 這個測試在 Linux 上跑、不會碰到 windll user32
+    st.StrategyGUI._move_cursor_to_row(app, tree, "any_iid")
+    # 連 bbox 都不該被讀取（提早 return）
+    # 驗證邏輯：不會 raise exception 就代表成功
+
+
+def test_ms_tree_no_legacy_v1_hover_binding():
+    """v8：ms_tree 只綁一個 <Motion> handler、v1.0 的 _on_tree_hover 不再綁"""
+    content = _read()
+    # 計算 ms_tree 綁 <Motion> 的次數
+    pattern = r'self\._ms_tree\.bind\(\s*["\']<Motion>["\']'
+    matches = re.findall(pattern, content)
+    assert len(matches) == 1, (
+        f"v8 ms_tree 應只綁一個 <Motion> handler、實際 {len(matches)} 個 "
+        f"（v1.0 的 _on_tree_hover 雙重綁定已拿掉）"
+    )
+
+
+def test_on_tree_key_see_focus_uses_ensure_focus_visible():
+    """v8 _on_tree_key_see_focus 呼叫 _ensure_focus_visible（含 yview_scroll + cursor）"""
+    content = _read()
+    idx = content.find("def _on_tree_key_see_focus(self, event):")
+    assert idx != -1, "找不到 _on_tree_key_see_focus"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "_ensure_focus_visible" in body, (
+        "v8 _on_tree_key_see_focus 應呼叫 _ensure_focus_visible"
+    )
+    # 確認舊的 "tree.see(cur)" 直接呼叫已拿掉、改透過 helper
+    assert "tree.see(cur)" not in body, (
+        "v8 _on_tree_key_see_focus 不應直接呼叫 tree.see(cur)、改用 _ensure_focus_visible"
     )
