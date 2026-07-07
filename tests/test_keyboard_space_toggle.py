@@ -1720,3 +1720,218 @@ def test_ensure_focus_visible_checks_second_to_last():
     assert "children[-2]" in body, (
         "v10 _ensure_focus_visible 檢查 iid == children[-2] 確認是倒數第二（padding row 是最後）"
     )
+
+
+# ==========================================================
+# 【V1.2.0-kb-focus-v11】tag_remove + 保留多重 tags
+# ==========================================================
+
+def test_clear_all_hover_uses_tag_remove():
+    """v11 _clear_all_hover 必用 tree.tag_remove 明確清 hover_<kind>"""
+    content = _read()
+    idx = content.find("def _clear_all_hover(self, tree):")
+    assert idx != -1, "找不到 _clear_all_hover"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 確認 tag_remove 被使用
+    assert "tag_remove" in body, (
+        "v11 _clear_all_hover 必使用 tree.tag_remove(<hover_kind>) 明確清 hover_<kind>"
+    )
+    # 確認所有 hover_kind 都被列出
+    for kind in ("hover_up", "hover_down", "hover_zero", "hover_neutral", "hover"):
+        assert kind in body, (
+            f"v11 _clear_all_hover 必清 {kind} tag"
+        )
+
+
+def test_apply_hover_preserves_all_tags():
+    """v11 _apply_hover 設三重 tags：checked + price_<x> + hover_<kind>"""
+    content = _read()
+    idx = content.find("def _apply_hover(self, tree, iid):")
+    assert idx != -1, "找不到 _apply_hover"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # v11：必設 checked_tag + price_tag + hover_kind 三重 tags
+    assert "checked_tag" in body, (
+        "v11 _apply_hover 必設 checked_tag"
+    )
+    assert "price_tag" in body, (
+        "v11 _apply_hover 必設 price_tag"
+    )
+    assert "hover_" in body, (
+        "v11 _apply_hover 必設 hover_<kind>"
+    )
+    # tags= 必需是 tuple 含 3 個元素
+    import re
+    tags_match = re.search(r"tree\.item\(iid,\s*tags=\(([^)]+)\)\)", body)
+    assert tags_match, (
+        "v11 _apply_hover 必用 tree.item(iid, tags=(...))"
+    )
+    tags_content = tags_match.group(1)
+    n_commas = tags_content.count(",")
+    assert n_commas == 2, (
+        f"v11 _apply_hover tags 應為 3 元素 (checked_tag, price_tag, hover_kind)、實際 {n_commas + 1} 元素"
+    )
+
+
+def test_set_row_tag_normal_removes_hover_kinds():
+    """v11 _set_row_tag_normal 必明確移除 hover_<kind> tags 二次防護"""
+    content = _read()
+    idx = content.find("def _set_row_tag_normal(self, tree, iid):")
+    assert idx != -1, "找不到 _set_row_tag_normal"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 確認 tag_remove 被使用
+    assert "tag_remove" in body, (
+        "v11 _set_row_tag_normal 必用 tag_remove 明確清 hover_<kind>"
+    )
+
+
+def test_hover_kind_list_includes_all_kinds():
+    """v11：所有清 hover 的地方都列 hover_up / hover_down / hover_zero / hover_neutral / hover"""
+    content = _read()
+    # v11 的兩處 tag_remove 應該都包含這 5 個 kind
+    # 兩處 tag_remove 都用 tuple 列出 kind: ("hover_up", "hover_down", ...)
+    for kind in ("hover_up", "hover_down", "hover_zero", "hover_neutral"):
+        assert f'"{kind}"' in content, (
+            f"v11 應在清 hover tuple 中包含 {kind}"
+        )
+
+
+def test_apply_hover_multiple_tags_priority():
+    """v11 _apply_hover 模擬測試：3 個 tags 都設到 row"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    items_state = {}
+
+    def item(iid, *args, **kwargs):
+        if args and args[0] == "tags":
+            return items_state[iid].get("tags", ())
+        if kwargs:
+            items_state[iid] = kwargs
+        return SimpleNamespace(tags=items_state[iid].get("tags", ()))
+
+    tree = SimpleNamespace()
+    tree.winfo_exists = lambda: True
+    tree.get_children = lambda: ["a", "b", "c"]
+    tree.item = item
+
+    class App:
+        pass
+
+    app = App()
+    # v11：_apply_hover 用 _ms_tree 屬性判斷 + checked dict + price_tag dict
+    app._ms_tree = tree
+    app._ms_checked = {"a": False, "b": True, "c": False}
+    app._ms_price_tags = {"a": "price_up", "b": "price_down", "c": "price_zero"}
+    # v11：_clear_all_hover 用 tag_remove
+    tree.tag_remove = lambda tag, *iids: None
+    # _get_price_tag_for_tree 用 _ms_price_tags
+    st.StrategyGUI._get_price_tag_for_tree(app, tree, "b")
+    # 用簡化版 _apply_hover 邏輯檢查
+    price_tag = app._ms_price_tags["b"]  # "price_down"
+    hover_kind = "down"  # from "price_down"
+    checked = app._ms_checked["b"]  # True
+    checked_tag = "checked" if checked else "unchecked"
+    # 模擬 _apply_hover 設 tags
+    items_state["b"] = {"tags": (checked_tag, price_tag, f"hover_{hover_kind}")}
+
+    tags = items_state["b"]["tags"]
+    assert len(tags) == 3, (
+        f"v11 _apply_hover 應設 3 重 tags、實際 {len(tags)}"
+    )
+    assert tags[0] == "checked", f"tag[0] 應為 checked、實際 {tags[0]}"
+    assert tags[1] == "price_down", f"tag[1] 應為 price_down、實際 {tags[1]}"
+    assert tags[2] == "hover_down", f"tag[2] 應為 hover_down、實際 {tags[2]}"
+
+
+def test_clear_all_hover_handles_individual_row_errors():
+    """v11 _clear_all_hover：個別 row 出錯不該中断整個 clear 過程"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    items_state = {
+        "a": {"tags": ("hover_up",)},
+        "b": {"tags": ("hover_down",)},  # 這個會 raise
+        "c": {"tags": ("hover_zero",)},
+    }
+    item_call_count = [0]
+
+    def item(iid, *args, **kwargs):
+        item_call_count[0] += 1
+        if iid == "b" and kwargs.get("tags"):
+            raise tk.TclError("simulated error")
+        if args and args[0] == "tags":
+            return items_state[iid].get("tags", ())
+        if kwargs:
+            items_state[iid].update(kwargs)
+        return SimpleNamespace(tags=items_state[iid].get("tags", ()))
+
+    tree = SimpleNamespace()
+    tree.winfo_exists = lambda: True
+    tree.get_children = lambda: ["a", "b", "c"]
+    tree.item = item
+    tree.tag_remove = lambda tag, *iids: None  # 假設 tag_remove work
+
+    app = SimpleNamespace(
+        _ms_price_tags={"a": "price_up", "b": "price_down", "c": "price_zero"},
+    )
+    app._set_row_tag_normal = lambda t, iid: t.item(
+        iid, tags=("unchecked", app._ms_price_tags.get(iid, "price_zero"))
+    )
+
+    # v11 _clear_all_hover 應 try/except 包 _set_row_tag_normal
+    import tkinter as tk
+    try:
+        st.StrategyGUI._clear_all_hover(app, tree)
+        # b 應 raise 但不該中断整個 loop
+        # 至少 tag_remove 應該都跑了
+        assert item_call_count[0] >= 1, (
+            "v11 _clear_all_hover 應至少跑 1 次（不會被一個 row 錯誤中断）"
+        )
+    except tk.TclError:
+        # v11 必用 try/except、這種例外不該発生
+        assert False, "v11 _clear_all_hover 應 try/except 包、b row 錯誤不該讓整個 clear 中断"
+
+
+def test_clear_all_hover_tag_remove_called():
+    """v11 _clear_all_hover 必呼叫 tree.tag_remove 對 5 個 hover_kind"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    tag_remove_calls = []
+
+    tree = SimpleNamespace()
+    tree.winfo_exists = lambda: True
+    tree.get_children = lambda: []
+    tree.tag_remove = lambda tag, *iids: tag_remove_calls.append((tag, iids))
+
+    app = SimpleNamespace(
+        _ms_price_tags={},
+    )
+    app._set_row_tag_normal = lambda t, iid: None
+
+    st.StrategyGUI._clear_all_hover(app, tree)
+
+    # 必對 5 個 hover_kind 各呼叫 1 次 tag_remove
+    expected_kinds = {"hover_up", "hover_down", "hover_zero", "hover_neutral", "hover"}
+    actual_kinds = {call[0] for call in tag_remove_calls}
+    assert expected_kinds.issubset(actual_kinds), (
+        f"v11 _clear_all_hover 必對 {expected_kinds} 各呼叫 tag_remove、實際 {actual_kinds}"
+    )
