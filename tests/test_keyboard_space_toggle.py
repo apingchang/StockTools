@@ -372,8 +372,8 @@ def test_v18_move_cursor_to_row_logs():
     )
 
 
-def test_v18_on_tree_key_see_focus_logs():
-    """v18：_on_tree_key_see_focus 開頭必 log、函式被 trigger"""
+def test_v21_on_tree_key_see_focus_applies_hover():
+    """v21：_on_tree_key_see_focus 必直接呼叫 _apply_hover（不依賴 mouse motion）"""
     content = _read()
     idx = content.find("def _on_tree_key_see_focus(self, event):")
     assert idx != -1
@@ -384,8 +384,10 @@ def test_v18_on_tree_key_see_focus_logs():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    assert "_v18_log" in body, (
-        "v18 _on_tree_key_see_focus 必呼叫 self._v18_log"
+    # v21 必直接 _apply_hover 才能讓 highlight bar 出現
+    assert "self._apply_hover(" in body, (
+        "v21 _on_tree_key_see_focus 必直接呼叫 self._apply_hover(\
+        \n        tree, cur \n    ))"
     )
 
 

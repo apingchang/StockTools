@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v20 (2026-07-07 18:42) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v21 (2026-07-07 18:42) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v20
-最後更新: 2026-07-07 19:07 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v21
+最後更新: 2026-07-07 19:27 (Asia/Taipei)
 
 Python 版本: 3.8+
 
@@ -5416,9 +5416,9 @@ class StrategyGUI(tk.Tk):
     def _move_cursor_to_row(self, tree, iid):
         """【V1.2.0-kb-focus-v18】鍵盤 ↑/↓ 移動後、把 OS mouse cursor 移到該 row
 
-        v18 變更：
-        - 換成 _v18_log 寫到 stdout + 檔、避免 PyCharm buffer 看不到
-        - 開頭必 log、確保 function 進來了
+        v21 變更：
+        - 直接 self._apply_hover(tree, cur)、不依賴 mouse motion
+        - v18 _v18_log 因為 PyCharm 都看不到、已拿掉
         """
         self._v18_log(f"[v18 _move_cursor_to_row] 進入 iid={iid}")
         if not tree or not tree.winfo_exists():
@@ -9245,35 +9245,35 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _on_tree_key_see_focus(self, event):
-        """【V1.2.0-kb-focus-v18】Down/Up/Home/End/Prior/Next key release 時主動 see + sync highlight
+        """【V1.2.0-kb-focus-v21】Down/Up/Home/End/Prior/Next key release 時主動 see + sync highlight
 
-        v18 變更（William 18:28 反映 _v17_[log] 完全沒出現在 console）：
-        1. 加強 logging — print 到 stdout + 寫檔 /tmp/stocktool_v18.log
-        2. 取消 after_idle、改為同步呼叫（after_idle 在 busy mainloop 可能 queue 不會執行）
-        3. 開頭就 log、確保 function 是被觸發的
+        v21 簡單設計：
+        1. _apply_hover(tree, cur) 直接設 yellow bg + colored fg 的 highlight bar
+           (v18 之前沒 call、導致 key-nav 後 highlight 文字變黑 → 因為只有 (checked, price_x) 但 hover tag 沒了)
+        2. _ensure_focus_visible scroll
+        3. _move_cursor_to_row 真的動 OS cursor
+        4. 全同步、不依賴 mouse <Motion>
         """
-        self._v18_log(f"[v18 _on_tree_key_see_focus] 進入 keysym={getattr(event, 'keysym', '?')}")
         tree = event.widget
         try:
             cur = tree.focus()
-            self._v18_log(f"[v18 _on_tree_key_see_focus] cur={cur}")
             if cur and cur in tree.get_children():
-                # 設 guard、滑鼠只要未動 200ms 內不覆蓋 hover
+                # 設 guard、滑鼠只要未動 200ms 內 motion handler 不覆蓋
                 self._kbd_nav_guard_until_ms = int(time.time() * 1000) + 200
                 try:
                     self._kbd_nav_mouse_pos_at_guard = tree.winfo_pointerxy()
                 except tk.TclError:
                     self._kbd_nav_mouse_pos_at_guard = (0, 0)
-                # v18：改用同步呼叫、不再 after_idle
-                self._v18_log(f"[v18 _on_tree_key_see_focus] 同步呼叫 _ensure_focus_visible")
+                # === v21 重要: 直接設 hover、不要等 mouse motion ===
+                self._apply_hover(tree, cur)
+                # scroll to make row visible
                 self._ensure_focus_visible(tree, cur)
-                self._v18_log(f"[v18 _on_tree_key_see_focus] 同步呼叫 _move_cursor_to_row")
+                # 真的動 OS cursor
                 self._move_cursor_to_row(tree, cur)
-                self._v18_log(f"[v18 _on_tree_key_see_focus] 完成")
-        except tk.TclError as e:
-            self._v18_log(f"[v18 _on_tree_key_see_focus] TclError: {e}")
-        except Exception as e:
-            self._v18_log(f"[v18 _on_tree_key_see_focus] except: {e}")
+        except tk.TclError:
+            pass
+        except Exception:
+            pass
 
     def _kbd_nav_guard_should_block(self, tree):
         """v16：200ms 短 guard、避免 motion handler 速率覆蓋 key nav 剛設的 hover
