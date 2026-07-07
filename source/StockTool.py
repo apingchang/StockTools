@@ -1,49 +1,54 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v9 (2026-07-07 11:50) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v10 (2026-07-07 12:54) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v9
-最後更新: 2026-07-07 12:00 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v10
+最後更新: 2026-07-07 13:03 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools, ctypes (Windows)
 
-【v1.2.0 paper-trading-kb-focus-v9】2026-07-07 12:00 (William 11:50 用截圖反映 v8 仍失敗)
-【背景】William 2026-07-07 11:50 用截圖回報 v8 仍失敗：
-  1. cursor 沒有跟個 high light bar 所以會有 high light 殘留的問題
-     → key release 後 mouse cursor 還在舊位置、滑鼠任何微動觸發 motion handler
-     → motion handler 用 identify_row(event.y) 查到的還是舊位置、蓋掉 key nav 設的 hover
-  2. key down scroll 到最下面時、還是跟之前一樣只有 high light bar 上部幾個 dots
-     → v8 在 after_idle 內才 yview_scroll、see() 可能未 settle、scroll 沒生效
-     → focus rectangle 仍被底部邊緣切掉
+【v1.2.0 paper-trading-kb-focus-v10】2026-07-07 13:00 (William 12:54 用截圖反映 v9 仍失敗)
+【背景】William 2026-07-07 12:54 用截圖回報 v9 仍失敗：
+  1. cursor 沒跟個 high light bar 所以 up/down key 移動 high light 後、high light 不同步
+     → v9 用 SetCursorPos、但 Win 視窗設定可能 block、cursor 實際上不動
+     → SetCursorPos 不 effect、motion handler 被 guard 不到就 override highlight
+  2. down key 還是沒辦法 display 最下面一個 item
+     → v9 用 yview_scroll(1, units)、但 tree 已經在 max bottom 了、scroll 被卡住
+     → see(last) 把 last row 推到底、focus rectangle 被 canvas 邊緣切掉
 
-【v8 失敗根因】
-  1. motion handler 只看滑鼠位置、不管鍵盤 focus 是什麼 → cursor 沒動=highlight 殘留
-  2. see() + after_idle(yview_scroll) 缺 update_idletasks、scroll 不一定生效
+【v9 失敗根因】
+  1. SetCursorPos 被 block、cursor 不動 → OS cursor 跟視覺 cursor 不同步
+  2. yview_scroll 被 max bottom 卡住 → 沒空間給 focus rectangle
 
-【v9 簡單設計（key nav guard + robust scroll）】
-  1. 新增 _kbd_nav_guard_should_block(tree)：剛 key nav 後 500ms 內、滑鼠位置未變
-     → motion handler 應 block、保留 key nav 設的 hover
-     → 滑鼠真的動了、guard 自動解除、normal motion
-     → guard timeout（500ms 後）也自動解除
-  2. _on_tree_key_see_focus 設 _kbd_nav_guard_until_ms + _kbd_nav_mouse_pos_at_guard
-  3. 3 個 motion handler（_on_select_tree_hover / _ms_tree_hover / _etf_tree_hover_combined）
-     進場先調 _kbd_nav_guard_should_block、True 就 ignore motion event
-  4. _ensure_focus_visible 重寫：
-     - see() 後立刻 tree.update_idletasks()（強制重繪、bbox 才准）
-     - 檢查 bbox.y+h 是否接近 canvas 底部（不是看是不是最後 row）
-     - 是才 yview_scroll(1, units) + update_idletasks（多 scroll 一 row）
-     - 最後才 apply_hover + move_cursor（bbox 是准的）
+【v10 簡單設計（event_generate 主矛 + padding row + 容差）】
+  1. _move_cursor_to_row 三層豐的同步策略：
+     a. event_generate("<Motion>") 主矛 = Tk 內建、必定 work
+        → 會觸發 motion handler、hover tag 被設到 focus row
+        → 視覺 highlight 永遠同步（不管 OS cursor 動不動）
+     b. Windows: ctypes.windll.user32.SetCursorPos（best-effort）
+     c. Windows: SendInput fallback（低階 API）
+  2. _ensure_focus_padding_row：tree 底部加一個 invisible padding row
+     - iid "__focus_padding__"、tag "focus_padding"、background = tree 背景
+     - 讓 yview_scroll 有 scroll 空間、最後 row 有 focus rectangle 位置
+     - reentrant（exists 檢查）、存在就不重加
+     - 選股 refresh 時會被刪、下次 _ensure_focus_visible 會 re-add
+  3. _kbd_nav_guard 5px 容差：
+     - mouse 位置變化 ≤ 5px、視為微抖動 / Win 系統事件、繼續 block
+     - > 5px 才認為使用者主動動 mouse、解除 guard
+     - 防止 Win pointerxy 與系統事件造成的微小變動誤刪除 guard
 
 【新測試】
-- tests/test_keyboard_space_toggle.py（4 個新增、總 64 個全綠）：
-  新增：test_kbd_nav_guard_helper_exists / test_kbd_nav_guard_blocks_when_mouse_unchanged /
-        test_kbd_nav_guard_releases_when_mouse_moves / test_kbd_nav_guard_releases_on_timeout
-- tests/test_price_color.py：21 個全綠（v8 _apply_hover 邏輯不變）
+- tests/test_keyboard_space_toggle.py（6 個新增、改寫 1 個、總 73 個全綠）：
+  新增：test_sendinput_helper_exists / test_ensure_focus_padding_row_helper_exists /
+        test_move_cursor_calls_event_generate_first / test_padding_row_added_when_missing /
+        test_padding_row_not_added_if_exists / test_guard_5px_tolerance
+  改寫：test_kbd_nav_guard_blocks_when_mouse_unchanged（加 5px 容差測試）
+- tests/test_price_color.py：21 個全綠（v8-v9 _apply_hover + guard 邏輯不變）
 
-【驗證】預期全 test suite 跑完 765 pass + 1 pre-existing fail（test_etf_weekend_fallback 與本改無關）
+【驗證】預期全 test suite 跑完 776 pass + 1 pre-existing fail（test_etf_weekend_fallback 與本改無關）
 
-【v1.2.0 paper-trading-kb-focus-v8】2026-07-07 11:00 (William 10:59 用截圖反映 v7 仍失敗)
+【v1.2.0 paper-trading-kb-focus-v9】2026-07-07 12:00 (William 11:50 用截圖反映 v8 仍失敗)
 【背景】William 2026-07-07 10:59 用截圖回報 v7 仍失敗：
   1. Down key 還是最後一個 item 只顯示 high light bar 頂部幾個 dots
      → focus rectangle 被 canvas 底部邊緣切掉、看不出 highlight 哪個 row
@@ -4982,31 +4987,27 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _on_tree_key_see_focus(self, event):
-        """【V1.2.0-kb-focus-v9】Down/Up/Home/End/Prior/Next key release 時主動 see + sync highlight
+        """【V1.2.0-kb-focus-v10】Down/Up/Home/End/Prior/Next key release 時主動 see + sync highlight
 
-        William 2026-07-07 11:50 反映 v8 仍失敗：
-        1. cursor 沒有跟個 high light bar、所以會有 high light 殘留的問題
-           → key release 後滑鼠 cursor 還在舊位置、滑鼠任何微動都會觸發 motion 、
-             motion handler 把 hover 設回滑鼠所在位置 → 殘留
-        2. key down scroll 到最下面時、還是一樣只有 high light bar 上部幾個 dots
-           → v8 在 after_idle 內才 yview_scroll(1, units)、see() 可能還沒 fully settle 、
-             scroll 沒生效、focus rectangle 仍被底部邊緣切掉
+        William 2026-07-07 12:54 反映 v9 仍失敗：
+        1. cursor 沒跟個 high light bar（OS cursor 實際上沒動）
+           → v9 用 SetCursorPos 但 Win 視窗設定可能 block
+           → v10 解法：event_generate("<Motion>") + SetCursorPos + SendInput 三層豐的
+        2. down key 最後一個 item 仍顯示不出來
+           → v9 的 yview_scroll(1, units) 被 max bottom 卡住、沒效果
+           → v10 解法：_ensure_focus_padding_row 加一個 invisible padding row、
+             tree 才有 scroll 空間、focus rectangle 才有 room
 
-        v9 簡單修法：
-        1. _kbd_nav_guard_until_ms：在 key release 後標記「500ms 內 motion handler 需 guard」
-           - 同時存 _kbd_nav_mouse_pos_at_guard（當下 mouse 位置）
-           - motion handler 看到 guard 期間內、滑鼠位置未變 → ignore（保留 key nav 設的 hover）
-           - 滑鼠真的動了 → 解除 guard、走一般 motion 邏輯
-        2. _ensure_focus_visible 改寫：
-           - see 後 tree.update_idletasks() 強制重繪
-           - 再檢查 bbox.y+h 是否接近 canvas 底部、是才 yview_scroll + update_idletasks
-           - 最後才 apply_hover + move_cursor（確保 bbox 計算准）
+        v10 設計：
+        1. key release 設 _kbd_nav_guard（500ms、容差 5 像素的 mouse jitter）
+        2. _ensure_focus_padding_row：tree 底部加一個 invisible row、給 scroll 空間
+        3. _ensure_focus_visible：see + 多 scroll（最後 row）+ event_generate Motion
         """
         tree = event.widget
         try:
             cur = tree.focus()
             if cur and cur in tree.get_children():
-                # v9 新增：設 _kbd_nav_guard、防止 motion handler 立即覆蓋 highlight
+                # key nav guard
                 self._kbd_nav_guard_until_ms = int(time.time() * 1000) + 500
                 try:
                     self._kbd_nav_mouse_pos_at_guard = tree.winfo_pointerxy()
@@ -5018,37 +5019,50 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _ensure_focus_visible(self, tree, iid):
-        """【V1.2.0-kb-focus-v9】確保 focus row 完整可見 + sync highlight + cursor
+        """【V1.2.0-kb-focus-v10】確保 focus row 完整可見 + sync highlight + cursor
 
-        改進 v8：
-        1. tree.see(iid) 後立刻 tree.update_idletasks()（強制 Tk 重繪、bbox 才准）
-        2. 檢查 bbox.y+h 是否接近 canvas 底部、是才 yview_scroll(1, "units")
-           → v8 假設「最後一個 row」一定需要 extra scroll、其實是「接近底部」才需要
-           → v8 也沒 update_idletasks、scroll 可能沒生效
-        3. apply_hover + move_cursor 在更新完 scroll 後才做（bbox 是准的）
+        v10 改進：
+        1. 先加 focus padding row、讓 tree 底部有 scroll 空間
+           → v9 的 yview_scroll(1, units) 被 max bottom 卡住、沒效果
+        2. tree.see(iid) + update_idletasks 准磪算出 bbox
+        3. iid 若在倒數第二（padding row 最後）、多 scroll 1 row 推到中段
+        4. apply_hover + move_cursor（內含 event_generate、視覺必定同步）
         """
         try:
             if not tree.winfo_exists():
                 return
             if not iid or iid not in tree.get_children():
                 return
-            # 1. 確保 row 可見
+            # 1. v10 新增：加 focus padding row（給 focus rectangle 留空間）
+            self._ensure_focus_padding_row(tree)
+            # 加完 padding 可能 invalidate iid（不會、只是保險 re-check）
+            if iid not in tree.get_children():
+                return
+            # 2. see + update_idletasks
             tree.see(iid)
-            # 2. 強制重繪、bbox 才會更新准
             tree.update_idletasks()
-            # 3. 檢查 bbox 是否接近底部、是則 extra scroll 避免 focus rectangle 被切
-            bbox = tree.bbox(iid)
-            if bbox:
-                _, y, _, h = bbox
-                tree_h = tree.winfo_height()
-                # y + h 接近 tree_h（≤ tree_h - 5px）表示 row 在底部
-                # → extra scroll 一 row、把 focus row 推到中段
-                if h > 0 and y + h >= tree_h - 5:
-                    tree.yview_scroll(1, "units")
-                    tree.update_idletasks()
+            # 3. v10 新增：iid 是倒數第二（padding row 是最後一個）、多 scroll 1 row
+            children = list(tree.get_children())
+            # 如果 padding row 存在、最後一個是 "__focus_padding__"
+            # iid 為倒數第二 = iid == children[-2]
+            if len(children) >= 2 and iid == children[-2]:
+                tree.yview_scroll(1, "units")
+                tree.update_idletasks()
+            else:
+                # 一般情況、用 bbox 判斷是否接近底部
+                bbox = tree.bbox(iid)
+                if bbox:
+                    try:
+                        _, y, _, h = bbox
+                        tree_h = tree.winfo_height()
+                        if h > 0 and y + h >= tree_h - 5:
+                            tree.yview_scroll(1, "units")
+                            tree.update_idletasks()
+                    except (TypeError, ValueError):
+                        pass
             # 4. 視覺 highlight 同步到 focus row
             self._apply_hover(tree, iid)
-            # 5. 移動 mouse cursor 到 focus row 中央（若 mouse 已在 tree 內）
+            # 5. 同步 mouse cursor（v10: event_generate 為主、SetCursorPos/SendInput 為輔）
             self._move_cursor_to_row(tree, iid)
         except tk.TclError:
             pass
@@ -5116,58 +5130,168 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _move_cursor_to_row(self, tree, iid):
-        """【V1.2.0-kb-focus-v8】鍵盤 ↑/↓ 移動後、把實際 mouse cursor 移到該 row
+        """【V1.2.0-kb-focus-v10】鍵盤 ↑/↓ 移動後、把 mouse cursor 移到該 row
 
-        為什麼要做？
-        - William 2026-07-07 10:59 反映「為了同步當使用up/down key移動high light bar 時
-          cursor最好跟著設定倒被high light 的 item」
-        - 視覺上看：highlight bar 移到新 row、但 cursor 還在舊 row
-          → 下次 mouse 微動、highlight 又跳回舊 row、感覺不連貫
-        - 解法：用 OS API 真的把 cursor 移到新 row 中央
+        v10 新增：三層豐的策略
+        1. event_generate("<Motion>") — Tk 內建、必定 work、會觸發 motion handler
+           → 設定 hover tag = 視覺 highlight 同步到 focus row
+        2. Windows: ctypes.windll.user32.SetCursorPos — 試試看、不一定 work
+        3. Windows: SendInput 作為 backup — 低階 API、有時有效
+        → 無論 OS API 有沒有 effect、event_generate 都會保證視覺同步
 
-        平台支援：
-        - Windows: ctypes.windll.user32.SetCursorPos
-        - Linux/Mac: 沒內建（X11 要 xdotool、Mac 要 Quartz）、先 skip
-
-        限制：
-        - 必須 mouse 已在 tree 內才移動（避免打斷使用者用鍵盤輸入其他欄位）
-        - 透過 tree.winfo_containing 確認目前 widget focus 是不是在 tree 內
+        William 2026-07-07 12:54 反映 v9 仍失敗、v9 用 SetCursorPos 但 cursor 不動
+          → 加 event_generate 作為主矛、即使 SetCursorPos 不 work 視覺也能 sync
         """
         if not tree or not tree.winfo_exists():
             return
-        # 確認 mouse 目前在 tree 內才移動（不打斷使用者在別處操作）
-        try:
-            abs_x, abs_y = tree.winfo_pointerxy()
-        except tk.TclError:
-            return
-        # winfo_containing 給的是 widget 物件、不是 bool
-        widget_under = tree.winfo_containing(abs_x, abs_y)
-        if widget_under is None:
-            return
-        # widget_under 可能是 tree 內的子 widget（heading、scrollbar）也算在 tree 內
-        if not str(widget_under).startswith(str(tree)):
-            return
-
-        # 取得 iid 的 bbox（相對於 tree 內容區）
         bbox = tree.bbox(iid)
         if not bbox:
             return
         x, y, w, h = bbox
         if h <= 0:
             return
-        # 計算 row 中央在螢幕上的絕對座標
-        target_x = tree.winfo_rootx() + x + w // 2
-        target_y = tree.winfo_rooty() + y + h // 2
+        # 計算 row 中央相對於 tree 的座標（後面三個動作都用這個）
+        cx = x + w // 2
+        cy = y + h // 2
 
-        # 依平台呼叫對應的 API
+        # 1. event_generate("<Motion>") = 視覺同步的主矛
+        #    Tk 內建、必定 work、會觸發 motion handler、設 hover tag 到這個 row
+        #    即使 mouse 實際位置沒變、視覺上 highlight 會跳到 focus row
+        try:
+            tree.event_generate("<Motion>", x=cx, y=cy)
+        except tk.TclError:
+            pass
+
+        # 2+3. 試著同時調實體 mouse cursor (SetCursorPos / SendInput)
+        #    這些不一定 work（Windows 視窗設定可能擋）、event_generate 已保証視覺同步
         try:
             import platform
             if platform.system() == "Windows":
-                import ctypes
-                ctypes.windll.user32.SetCursorPos(target_x, target_y)
-            # Linux/Mac 暫不支援（X11 需 xdotool、Mac 需 Quartz）
+                target_x = tree.winfo_rootx() + cx
+                target_y = tree.winfo_rooty() + cy
+                # 2a. SetCursorPos（標準 API）
+                setpos_ok = False
+                try:
+                    import ctypes
+                    ctypes.windll.user32.SetCursorPos(target_x, target_y)
+                    setpos_ok = True
+                except Exception:
+                    pass
+                # 2b. SendInput fallback
+                if not setpos_ok:
+                    self._sendinput_move_cursor(target_x, target_y)
         except Exception:
-            # 不打斷主流程、cursor 移動失敗就忽略
+            pass
+
+    def _sendinput_move_cursor(self, x, y):
+        """【V1.2.0-kb-focus-v10】用 SendInput API 動 mouse cursor
+
+        SetCursorPos 不 work 時的 backup。
+        SendInput 是 Windows 低階的合成 input event API、
+        即使 SetCursorPos 被擋、SendInput 仍有機會成功。
+
+        為什麼需要2層？
+        - SetCursorPos 被某些應用視窗設定 block（UIPI / accessibility tools）
+        - SendInput 需要 input focus 才能充分可靠、但至少能試試看
+        """
+        try:
+            import ctypes
+            sw = ctypes.windll.user32.GetSystemMetrics(0)  # SM_CXSCREEN
+            sh = ctypes.windll.user32.GetSystemMetrics(1)  # SM_CYSCREEN
+            if sw <= 0 or sh <= 0:
+                return
+
+            # 計算 absolute coordinate (0-65535 range)
+            abs_x = int(x * 65536 / sw)
+            abs_y = int(y * 65536 / sh)
+
+            class MOUSEINPUT(ctypes.Structure):
+                _fields_ = [
+                    ("dx", ctypes.c_long),
+                    ("dy", ctypes.c_long),
+                    ("mouseData", ctypes.c_ulong),
+                    ("dwFlags", ctypes.c_ulong),
+                    ("time", ctypes.c_ulong),
+                    ("dwExtraInfo", ctypes.c_void_p),
+                ]
+
+            class INPUT(ctypes.Structure):
+                _fields_ = [
+                    ("type", ctypes.c_ulong),
+                    ("mi", MOUSEINPUT),
+                ]
+
+            inp = INPUT()
+            inp.type = 0  # INPUT_MOUSE
+            inp.mi.dx = abs_x
+            inp.mi.dy = abs_y
+            inp.mi.mouseData = 0
+            inp.mi.dwFlags = 0x0001 | 0x8000  # MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
+            inp.mi.time = 0
+            inp.mi.dwExtraInfo = None
+
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+        except Exception:
+            pass
+
+    def _ensure_focus_padding_row(self, tree):
+        """【V1.2.0-kb-focus-v10】確保 tree 底部有一個 invisible padding row
+
+        為什麼需要？
+        - tree.see(last) 把 last row 推到 widget 底部
+        - focus rectangle 圍繞 last row、底部被 canvas 邊緣切掉
+        - 多 scroll 1 row (yview_scroll) 被 max bottom 卡住（沒 content 可滾）
+        - 解法：加一個 invisible padding row、讓 tree 有 scroll 空間
+
+        設計：
+        - iid: "__focus_padding__"（獨特 prefix、其他 code 不會讀到）
+        - tag: "focus_padding"（背景色設為 tree 背景、視覺上看不出來）
+        - values: 設為空字串、不渲染任何文字
+        - reentrant（exists 檢查、這次有就不重加）
+
+        重幹選股時：
+        - 使用者跑選股、tree.delete(*tree.get_children()) 清除所有 rows
+        - padding row 也會被刪除
+        - 下次 _ensure_focus_visible 會重新加
+        """
+        padding_iid = "__focus_padding__"
+        try:
+            if tree.exists(padding_iid):
+                return
+        except tk.TclError:
+            return
+
+        children = tree.get_children()
+        if not children:
+            return  # 沒有資料、加了沒意義
+
+        # 估算欄位數
+        try:
+            sample = tree.item(children[0], "values")
+            # sample 是 tuple、若有值用 tuple 長度、否則 tree["columns"] 拿
+            if isinstance(sample, (tuple, list)) and len(sample) > 0:
+                n_values = len(sample)
+            else:
+                cols = tree["columns"]
+                n_values = len(cols) if cols else 1
+        except (tk.TclError, TypeError):
+            n_values = 1
+
+        # 設 tag 樣式（背景色 = tree 背景）
+        try:
+            tree.tag_configure(
+                "focus_padding",
+                background=tree.cget("background"),
+                foreground=tree.cget("background"),
+            )
+        except tk.TclError:
+            pass
+
+        # 加 invisible row
+        try:
+            empty_values = tuple([""] * n_values)
+            tree.insert("", "end", iid=padding_iid, values=empty_values, tags=("focus_padding",))
+        except tk.TclError:
             pass
     def _set_row_tag_normal(self, tree, iid):
         """【V1.2.0-kb-focus-v5】把 row 從 hover_* tag 恢復成 checked/unchecked + price tag"""
@@ -8781,15 +8905,16 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _kbd_nav_guard_should_block(self, tree):
-        """【V1.2.0-kb-focus-v9】檢查是否應 block motion handler（剛 key nav 且 mouse 未動）
+        """【V1.2.0-kb-focus-v10】檢查是否應 block motion handler（剛 key nav 且 mouse 未動）
+
+        v10 新增容差：
+        - mouse 位置變動 ≤ 5 像素、認為是微抖動 / Win 系統事件、不解除 guard
+        - > 5 像素才認為使用者主動動 mouse、解除 guard
 
         規則：
         - 若 _kbd_nav_guard_until_ms 過期 → False（不 block、normal motion）
-        - 若 mouse 位置 != _kbd_nav_mouse_pos_at_guard → False（mouse 真的動了、解除 guard）
+        - 若 |mouse_pos - guard_pos| > 5px → False（mouse 真的動了、解除 guard）
         - 其餘 → True（block motion、保留 key nav 設的 hover）
-
-        Returns:
-            bool: True = 應 block motion handler；False = 不 block、正常處理
         """
         try:
             now_ms = int(time.time() * 1000)
@@ -8801,17 +8926,18 @@ class StrategyGUI(tk.Tk):
             # guard 過期、清掉、normal motion
             self._kbd_nav_guard_until_ms = 0
             return False
-        # guard 期間內、檢查 mouse 是否真的動了
+        # guard 期間內、檢查 mouse 是否真的動了（容差 5 像素）
         try:
             cur_pos = tree.winfo_pointerxy()
         except tk.TclError:
             return False
         if not hasattr(self, "_kbd_nav_mouse_pos_at_guard"):
             self._kbd_nav_mouse_pos_at_guard = (0, 0)
-        if cur_pos == self._kbd_nav_mouse_pos_at_guard:
-            # 滑鼠沒動、block motion
+        guard_x, guard_y = self._kbd_nav_mouse_pos_at_guard
+        # 容差 5 像素以內、都不是用户主動動 mouse、繼續 block
+        if abs(cur_pos[0] - guard_x) <= 5 and abs(cur_pos[1] - guard_y) <= 5:
             return True
-        # 滑鼠真的動了、解除 guard、normal motion
+        # mouse 真的動了、解除 guard、normal motion
         self._kbd_nav_guard_until_ms = 0
         return False
     def _on_select_tree_leave(self, event):

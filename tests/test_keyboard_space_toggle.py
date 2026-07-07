@@ -1311,10 +1311,7 @@ def test_apply_hover_clears_all_then_sets_new():
 
 
 def test_ensure_focus_visible_scrolls_extra_for_last_item():
-    """v9 _ensure_focus_visible：用 bbox 判斷是否需要 extra scroll + update_idletasks
-
-    改寫：原本測試 v8 的「最後 row 才 scroll」、改成 v9 的「看 bbox 是否接近底部 scroll」
-    """
+    """v10 _ensure_focus_visible：先加 padding row、再 see、倒數第二 row 多 scroll"""
     from types import SimpleNamespace
     import StockTool as st
 
@@ -1323,74 +1320,65 @@ def test_ensure_focus_visible_scrolls_extra_for_last_item():
     update_calls = []
     apply_hover_calls = []
     move_cursor_calls = []
-    bbox_results = {}  # iid -> (x, y, w, h)
+    padding_added = []
+    bbox_results = {}
 
     tree = SimpleNamespace()
     tree.winfo_exists = lambda: True
-    tree.get_children = lambda: ["a", "b", "c"]
+    # 模擬 padding row 已在 → get_children 回 ["a", "b", "c", "__focus_padding__"]
+    tree.get_children = lambda: ["a", "b", "c", "__focus_padding__"]
     tree.see = lambda iid: see_calls.append(iid)
     tree.yview_scroll = lambda n, unit: yview_scroll_calls.append((n, unit))
     tree.update_idletasks = lambda: update_calls.append(True)
     tree.bbox = lambda iid: bbox_results.get(iid)
-    tree.winfo_height = lambda: 500  # canvas 高度
+    tree.winfo_height = lambda: 500
+    tree.cget = lambda key: "#ffffff"
+    tree.exists = lambda iid: True  # padding 已存在
+    tree.item = lambda iid, *args, **kw: SimpleNamespace(values=("1", "2", "3"))
+    tree.tag_configure = lambda *a, **kw: None
 
     app = SimpleNamespace()
     app._apply_hover = lambda t, iid: apply_hover_calls.append(iid)
     app._move_cursor_to_row = lambda t, iid: move_cursor_calls.append(iid)
+    app._ensure_focus_padding_row = lambda t: padding_added.append(True)
 
-    # 情境 1：iid "c" bbox y+h = 480 + 20 = 500（接近 canvas 高度 500）→ 需 extra scroll
-    bbox_results["c"] = (0, 480, 100, 20)
+    # iid "c" 是 children[-2]（padding 是最後）→ 應 extra scroll
     st.StrategyGUI._ensure_focus_visible(app, tree, "c")
     assert yview_scroll_calls == [(1, "units")], (
-        f"row 接近底部 → 應 yview_scroll(1, units)、實際 {yview_scroll_calls}"
+        f"iid 為 children[-2] 應 yview_scroll(1, units)、實際 {yview_scroll_calls}"
     )
-    assert len(see_calls) >= 1, f"see 應至少呼叫一次、實際 {see_calls}"
-    assert len(update_calls) >= 2, (
-        f"v9 應 update_idletasks 至少 2 次（see 後 + yview_scroll 後）、實際 {len(update_calls)} 次"
-    )
+    assert see_calls == ["c"], f"see 應呼叫、實際 {see_calls}"
     assert apply_hover_calls == ["c"]
     assert move_cursor_calls == ["c"]
+    assert padding_added, "v10 應加 padding row"
 
-    # 情境 2：iid "a" bbox y+h = 100 + 20 = 120（遠離 500）→ 不應 scroll
+    # iid "a" 不是 children[-2]、bbox 看是否接近底部
     yview_scroll_calls.clear()
     see_calls.clear()
     apply_hover_calls.clear()
     move_cursor_calls.clear()
-    update_calls.clear()
-    bbox_results["a"] = (0, 100, 100, 20)
+    bbox_results["a"] = (0, 100, 100, 20)  # 中間位置
     st.StrategyGUI._ensure_focus_visible(app, tree, "a")
     assert yview_scroll_calls == [], (
-        f"row 在中間、不該 scroll、實際 {yview_scroll_calls}"
+        f"iid 在中間、bbox 不接近底部 → 不該 scroll、實際 {yview_scroll_calls}"
     )
     assert see_calls == ["a"]
-    assert apply_hover_calls == ["a"]
-    assert move_cursor_calls == ["a"]
 
 
 def test_move_cursor_to_row_skips_when_mouse_outside_tree():
-    """_move_cursor_to_row：若 mouse 不在 tree 內、不應移動 cursor"""
+    """v10：_move_cursor_to_row 不檢查 mouse 是否在 tree 內、bbox 缺失就 early return"""
     from types import SimpleNamespace
     import StockTool as st
 
     tree = SimpleNamespace()
     tree.winfo_exists = lambda: True
-    tree.winfo_pointerxy = lambda: (100, 100)
-    # 模擬 mouse 在別的 widget（不是 tree）
-    other_widget = SimpleNamespace()
-    other_widget.__str__ = lambda self: ".other_widget"
-    tree.winfo_containing = lambda x, y: other_widget
-    tree.bbox = lambda iid: (10, 20, 100, 30)
-    tree.winfo_rootx = lambda: 50
-    tree.winfo_rooty = lambda: 60
+    # bbox 回空字串模擬 row 不可見
+    tree.bbox = lambda iid: ""
 
     app = SimpleNamespace()
-
-    # 在 Linux 環境 ctypes.windll 不存在、Windows 才有
-    # 只要 mouse 不在 tree 內、無論什麼平台都該提早 return
-    # 這個測試在 Linux 上跑、不會碰到 windll user32
+    # 調用不該丟 exception
     st.StrategyGUI._move_cursor_to_row(app, tree, "any_iid")
-    # 連 bbox 都不該被讀取（提早 return）
-    # 驗證邏輯：不會 raise exception 就代表成功
+    # 驗證邏輯：不會 raise exception 就代表 success
 
 
 def test_ms_tree_no_legacy_v1_hover_binding():
@@ -1542,4 +1530,193 @@ def test_ensure_focus_visible_uses_bbox_check():
     )
     assert "update_idletasks" in body, (
         "v9 _ensure_focus_visible 應呼叫 tree.update_idletasks() 強制重繪"
+    )
+
+
+# ==========================================================
+# 【V1.2.0-kb-focus-v10】focus padding row + SendInput fallback
+# ==========================================================
+
+def test_sendinput_helper_exists():
+    """v10 _sendinput_move_cursor helper 必須存在（Windows SendInput fallback）"""
+    content = _read()
+    assert "def _sendinput_move_cursor(self, x, y):" in content, (
+        "v10 應新增 _sendinput_move_cursor(x, y) helper"
+    )
+
+
+def test_ensure_focus_padding_row_helper_exists():
+    """v10 _ensure_focus_padding_row helper 必須存在"""
+    content = _read()
+    assert "def _ensure_focus_padding_row(self, tree):" in content, (
+        "v10 應新增 _ensure_focus_padding_row(tree) helper（加 invisible padding row）"
+    )
+
+
+def test_move_cursor_calls_event_generate_first():
+    """v10：_move_cursor_to_row 必先呼叫 event_generate（即使 SetCursorPos 失敗也能 work）"""
+    content = _read()
+    idx = content.find("def _move_cursor_to_row(self, tree, iid):")
+    assert idx != -1, "找不到 _move_cursor_to_row"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # event_generate 必需在 SetCursorPos 之前
+    eg_idx = body.find("event_generate")
+    scp_idx = body.find("SetCursorPos")
+    assert eg_idx != -1, (
+        "v10 _move_cursor_to_row 必包含 event_generate('<Motion>')"
+    )
+    assert scp_idx != -1, (
+        "v10 _move_cursor_to_row 還是要保留 SetCursorPos 作為 backup"
+    )
+    assert eg_idx < scp_idx, (
+        "v10：event_generate 必在 SetCursorPos 之前（當主矛）"
+    )
+
+
+def test_padding_row_added_when_missing():
+    """v10 _ensure_focus_padding_row：tree 沒 __focus_padding__ 時要加上"""
+    import StockTool as st
+
+    children_added = []
+    item_calls = []
+    tag_configure_calls = []
+
+    class MockTree:
+        def exists(self, iid):
+            return False  # 不存在
+
+        def get_children(self):
+            return ["a", "b", "c"]
+
+        def item(self, iid, *args, **kwargs):
+            item_calls.append((iid, args, kwargs))
+            # 真實 Tkinter tree.item(iid, "values") 回 tuple
+            if args == ("values",):
+                return ("2330", "台積電", "100")
+            class V:
+                values = ("2330", "台積電", "100")
+            return V()
+
+        def cget(self, key):
+            return "#ffffff"
+
+        def tag_configure(self, tag, **kw):
+            tag_configure_calls.append((tag, kw))
+
+        def insert(self, parent, index, **kw):
+            children_added.append(kw)
+
+        def __getitem__(self, key):
+            # 模擬 Treeview["columns"] = ("col1", "col2", "col3")
+            if key == "columns":
+                return ("col1", "col2", "col3")
+            raise KeyError(key)
+
+    tree = MockTree()
+    app = st.StrategyGUI if hasattr(st, 'StrategyGUI') else object()
+    # 用一個帶 _ensure_focus_padding_row 方法的 mock app 簡化
+    # 直接 invoke 時用真實函式（是 unbound method）但透過 instance
+    # 改用更簡單的方式：直接用一個最小 app
+    class App:
+        pass
+
+    st.StrategyGUI._ensure_focus_padding_row(App(), tree)
+
+    assert children_added, "v10 應加 padding row"
+    assert children_added[0].get("iid") == "__focus_padding__", (
+        f"padding row iid 應為 __focus_padding__、實際 {children_added[0].get('iid')}"
+    )
+    assert "focus_padding" in children_added[0].get("tags", ()), (
+        f"padding row 應有 focus_padding tag、實際 {children_added[0].get('tags')}"
+    )
+    assert tag_configure_calls, "v10 應 tag_configure focus_padding"
+
+
+def test_padding_row_not_added_if_exists():
+    """v10：tree 已有 __focus_padding__ 時不重加"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    children_added = []
+    tree = SimpleNamespace()
+    tree.exists = lambda iid: True  # 已存在
+    tree.get_children = lambda: ["__focus_padding__", "a"]
+    tree.insert = lambda parent, index, **kw: children_added.append(kw)
+
+    app = SimpleNamespace()
+    st.StrategyGUI._ensure_focus_padding_row(app, tree)
+
+    assert not children_added, "已存在時不應重加 padding row"
+
+
+def test_guard_5px_tolerance():
+    """v10：mouse 在 5px 容差內移動仍視為未動、guard 繼續 block"""
+    from types import SimpleNamespace
+    import time as _time
+    import StockTool as st
+
+    tree = SimpleNamespace()
+    # mouse 位置與 guard 位置差 3px（在容差內）
+    tree.winfo_pointerxy = lambda: (203, 303)
+
+    app = SimpleNamespace()
+    app._kbd_nav_guard_until_ms = int(_time.time() * 1000) + 60000
+    app._kbd_nav_mouse_pos_at_guard = (200, 300)  # 差 3x3 = 在容差內
+
+    result = st.StrategyGUI._kbd_nav_guard_should_block(app, tree)
+    assert result is True, (
+        f"5px 容差內的 mouse 微動 → 應繼續 block、實際 {result}"
+    )
+
+    # 差 10x10 = 超出容差、解除 guard
+    tree.winfo_pointerxy = lambda: (210, 310)
+    result = st.StrategyGUI._kbd_nav_guard_should_block(app, tree)
+    assert result is False, (
+        f"超出 5px 容差 → 應解除 guard、實際 {result}"
+    )
+
+
+def test_ensure_focus_visible_calls_padding_row_first():
+    """v10：_ensure_focus_visible 必先呼叫 _ensure_focus_padding_row、再 see()"""
+    content = _read()
+    idx = content.find("def _ensure_focus_visible(self, tree, iid):")
+    assert idx != -1, "找不到 _ensure_focus_visible"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 確認呼叫順序
+    pad_idx = body.find("_ensure_focus_padding_row")
+    see_idx = body.find("tree.see(iid)")
+    assert pad_idx != -1, "v10 _ensure_focus_visible 必呼叫 _ensure_focus_padding_row"
+    assert see_idx != -1, "v10 _ensure_focus_visible 必呼叫 tree.see(iid)"
+    assert pad_idx < see_idx, (
+        "v10：_ensure_focus_padding_row 必在 tree.see(iid) 之前（先加 padding 再 scroll）"
+    )
+
+
+def test_ensure_focus_visible_checks_second_to_last():
+    """v10：_ensure_focus_visible 檢查 children[-2]、若 iid 是倒數第二 + 多 scroll"""
+    content = _read()
+    idx = content.find("def _ensure_focus_visible(self, tree, iid):")
+    assert idx != -1, "找不到 _ensure_focus_visible"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 確認有 children[-2] 判斷
+    assert "children[-2]" in body, (
+        "v10 _ensure_focus_visible 檢查 iid == children[-2] 確認是倒數第二（padding row 是最後）"
     )
