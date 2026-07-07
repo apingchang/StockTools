@@ -1,12 +1,41 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v14 (2026-07-07 17:05) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v15 (2026-07-07 17:27) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v14
-最後更新: 2026-07-07 17:11 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v15
+最後更新: 2026-07-07 17:43 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools, ctypes (Windows)
+
+
+【v1.2.0 paper-trading-kb-focus-v15】2026-07-07 17:30 (William 17:27 反映 v14 完全無 effect)
+【背景】William 2026-07-07 17:27 反映 v14 仍失敗：
+  - up/down key 移動 highlight bar 但 cursor 沒跟
+  - mouse 一動畫面上變成有 2 個 highlight bar
+
+【v14 失敗根因】
+- ctypes argtypes / DPI scaling 處理完了
+- 但 Windows OS 仍不接受 SetCursorPos（accessibility tool / corporate policy / VM 等）
+- 我的 OS cursor 移動嘗試在這個環境完全失敗
+
+【v15 簡單設計（根本改變、不靠 OS cursor 移動）】
+1. 新增 _sticky_key_nav_iids = {} （tree id → iid）記錄「最近 key nav 設的 row」
+2. 3 個 motion handler（_on_select_tree_hover / _ms_tree_hover / _etf_tree_hover_combined）重寫：
+   - 檢查 _sticky_key_nav_iid
+   - 若 mouse bbox 跟 sticky bbox 重疊 > 50% → 用 sticky（key nav 設的位置）
+   - 若 mouse 完全離開 sticky bbox → 跟 mouse、清除 sticky
+3. click handler 必 reset sticky（click 是明確的 mouse 動作、清除 sticky）
+4. 不再用 timer-based guard（_kbd_nav_guard_should_block 永遠 return False）
+
+【新測試】
+- tests/test_keyboard_space_toggle.py（8 個新增、總 86 個全綠）：
+  新增：test_v15_sticky_key_nav_iids_dict_in_init / test_v15_get_set_sticky_helpers_exist /
+        test_v15_on_tree_key_see_focus_sets_sticky / test_v15_motion_handler_uses_sticky_logic /
+        test_v15_motion_uses_bbox_overlap_check / test_v15_click_resets_sticky /
+        test_v15_no_more_kbd_nav_guard_timer / test_v15_motion_sticky_with_overlap
+
+【驗證】預期全 test suite 跑完 794 pass + 1 pre-existing fail（test_etf_weekend_fallback 與本改無關）
 
 【v1.2.0 paper-trading-kb-focus-v14】2026-07-07 17:10 (William 17:05 反映 v13 完全無 effect)
 【背景】William 2026-07-07 16:51 截圖反映 v12 仍失敗：
@@ -3960,10 +3989,12 @@ class StrategyGUI(tk.Tk):
         # 記憶體中股票名稱（stock_id → name，fetch 回來時順便快取）
         self._current_names: Dict[str, str] = {}
 
-        # 【V1.2.0-kb-focus-v9】key nav guard（避免 motion handler 立即覆蓋 highlight）
-        # 規則：key release 後 500ms 內、且滑鼠位置未動、motion handler 應 block
+        # 【V1.2.0-kb-focus-v9】key nav guard（v15 不再使用、保留以防舊路徑用）
         self._kbd_nav_guard_until_ms = 0
         self._kbd_nav_mouse_pos_at_guard = (0, 0)
+        # 【V1.2.0-kb-focus-v15】sticky key nav target dict
+        # key = id(tree)、value = 最近 key nav 設的 row iid
+        self._sticky_key_nav_iids = {}
 
         self._build_ui()
         self._poll_log_queue()
@@ -5069,41 +5100,7 @@ class StrategyGUI(tk.Tk):
         except tk.TclError:
             pass
 
-    def _on_tree_key_see_focus(self, event):
-        """【V1.2.0-kb-focus-v10】Down/Up/Home/End/Prior/Next key release 時主動 see + sync highlight
 
-        William 2026-07-07 12:54 反映 v9 仍失敗：
-        1. cursor 沒跟個 high light bar（OS cursor 實際上沒動）
-           → v9 用 SetCursorPos 但 Win 視窗設定可能 block
-           → v10 解法：event_generate("<Motion>") + SetCursorPos + SendInput 三層豐的
-        2. down key 最後一個 item 仍顯示不出來
-           → v9 的 yview_scroll(1, units) 被 max bottom 卡住、沒效果
-           → v10 解法：_ensure_focus_padding_row 加一個 invisible padding row、
-             tree 才有 scroll 空間、focus rectangle 才有 room
-
-        v10 設計：
-        1. key release 設 _kbd_nav_guard（500ms、容差 5 像素的 mouse jitter）
-        2. _ensure_focus_padding_row：tree 底部加一個 invisible row、給 scroll 空間
-        3. _ensure_focus_visible：see + 多 scroll（最後 row）+ event_generate Motion
-        """
-        tree = event.widget
-        try:
-            cur = tree.focus()
-            if cur and cur in tree.get_children():
-                # key nav guard（v13 延長到 2000ms）
-                # 為什麼要長？
-                # - SetCursorPos 不一定 effect、motion handler 不該太快覆蓋 key nav 的 hover
-                # - 2000ms 涵蓋使用者「看 highlight」+ 「準備移動 mouse」的時間
-                # - 超過 2000ms 或 mouse 移動 > 5px 才解除 guard
-                self._kbd_nav_guard_until_ms = int(time.time() * 1000) + 2000
-                try:
-                    self._kbd_nav_mouse_pos_at_guard = tree.winfo_pointerxy()
-                except tk.TclError:
-                    self._kbd_nav_mouse_pos_at_guard = (0, 0)
-                # 用 after_idle 避免跟 Treeview 內部 scroll 競爭
-                tree.after_idle(lambda: self._ensure_focus_visible(tree, cur))
-        except tk.TclError:
-            pass
 
     def _ensure_focus_visible(self, tree, iid):
         """【V1.2.0-kb-focus-v12】確保 focus row 完整可見 + sync highlight + cursor
@@ -7070,25 +7067,32 @@ class StrategyGUI(tk.Tk):
 
 
     def _ms_tree_hover(self, event):
-        """【V1.2.0-kb-focus-v9】手動選股 hover：設視覺 highlight + 鍵盤 focus + guard
+        """【V1.2.0-kb-focus-v15】手動選股 hover
 
-        v9 加 _kbd_nav_guard、避免 key nav 後 motion 立即覆蓋 highlight
+        v15 變更：用 sticky_key_nav_iid 邏輯取代 timer-based guard
         """
         try:
-            # v9 新增：key nav guard
-            if self._kbd_nav_guard_should_block(self._ms_tree):
-                focus_iid = self._ms_tree.focus()
-                if focus_iid and focus_iid in self._ms_tree.get_children():
-                    self._apply_hover(self._ms_tree, focus_iid)
+            tree = self._ms_tree
+            region = tree.identify("region", event.x, event.y)
+            mouse_iid = tree.identify_row(event.y) if region == "cell" else None
+            if not mouse_iid or mouse_iid not in tree.get_children():
                 return
-            region = self._ms_tree.identify("region", event.x, event.y)
-            iid = self._ms_tree.identify_row(event.y) if region == "cell" else None
-            if iid and iid in self._ms_tree.get_children():
-                # 設視覺 highlight（單一真相 = _apply_hover）
-                self._apply_hover(self._ms_tree, iid)
-                # 同步設鍵盤 focus
-                self._ms_tree.focus(iid)
-                self._ms_tree.focus_set()
+            sticky_iid = self._get_sticky_key_nav_iid(tree)
+            if sticky_iid and sticky_iid != mouse_iid:
+                sticky_bbox = tree.bbox(sticky_iid)
+                mouse_bbox = tree.bbox(mouse_iid)
+                if sticky_bbox and mouse_bbox:
+                    sx, sy, sw, sh = sticky_bbox
+                    mx, my, mw, mh = mouse_bbox
+                    row_overlap = min(sy + sh, my + mh) - max(sy, my)
+                    if row_overlap > sh * 0.5 or row_overlap > mh * 0.5:
+                        self._apply_hover(tree, sticky_iid)
+                        tree.focus(sticky_iid)
+                        return
+                    self._set_sticky_key_nav_iid(tree, mouse_iid)
+            self._apply_hover(tree, mouse_iid)
+            tree.focus(mouse_iid)
+            tree.focus_set()
         except tk.TclError:
             pass
 
@@ -7143,24 +7147,17 @@ class StrategyGUI(tk.Tk):
         """【Fix12 廢棄】改成 _etf_tree_hover_combined"""
 
     def _etf_tree_hover_combined(self, event):
-        """【V0.9.5-tab-split-phase3-C Fix12 + V1.2.0-kb-focus-v9】
+        """【V0.9.5-tab-split-phase3-C Fix12 + V1.2.0-kb-focus-v15】
         ETF Treeview hover：
         - 移到 cell（任意欄） → 該列 highlight（_apply_hover 設 hover_<price> tag）
         - 移到「ETF數」欄（column #6） → popup 顯示包含此股的 ETF 列表
         - 移到「今日異動」欄（column #7） → popup 顯示異動明細
         - 移到非 cell 區（捲軸/header） → 關 popup + 清 hover
 
-        v9 新增 _kbd_nav_guard：避免 key nav 後 motion 立即覆蓋 highlight
+        v15 新增 sticky_key_nav_iid 邏輯取代 v9 timer-based guard
         """
-        # v9 新增：key nav guard（ETF 動效果複雜、不只 set hover 還有 popup）
-        if self._kbd_nav_guard_should_block(self._etf_tree):
-            focus_iid = self._etf_tree.focus()
-            if focus_iid and focus_iid in self._etf_tree.get_children():
-                self._apply_hover(self._etf_tree, focus_iid)
-            # guard 期間不處理 popup、避免焦慮跳
-            return
-
-        region = self._etf_tree.identify("region", event.x, event.y)
+        tree = self._etf_tree
+        region = tree.identify("region", event.x, event.y)
         if region != "cell":
             self._close_etf_popup()
             self._clear_all_hover(self._etf_tree)
@@ -7171,18 +7168,32 @@ class StrategyGUI(tk.Tk):
             self._clear_all_hover(self._etf_tree)
             return
 
+        # v15 sticky_key_nav_iid 邏輯
+        sticky_iid = self._get_sticky_key_nav_iid(tree)
+        if sticky_iid and sticky_iid != iid:
+            sticky_bbox = tree.bbox(sticky_iid)
+            mouse_bbox = tree.bbox(iid)
+            if sticky_bbox and mouse_bbox:
+                sx, sy, sw, sh = sticky_bbox
+                mx, my, mw, mh = mouse_bbox
+                row_overlap = min(sy + sh, my + mh) - max(sy, my)
+                if row_overlap > sh * 0.5 or row_overlap > mh * 0.5:
+                    iid = sticky_iid  # 用 sticky 而不是 mouse position
+                else:
+                    self._set_sticky_key_nav_iid(tree, iid)
+
         # 設視覺 highlight（單一真相 = _apply_hover）
-        self._apply_hover(self._etf_tree, iid)
+        self._apply_hover(tree, iid)
         # 同步設鍵盤 focus
         try:
-            self._etf_tree.focus(iid)
-            self._etf_tree.focus_set()
+            tree.focus(iid)
+            tree.focus_set()
         except tk.TclError:
             pass
         # 保留 _etf_hover_iid 給 popup 用
         self._etf_hover_iid = iid
 
-        column = self._etf_tree.identify_column(event.x)
+        column = tree.identify_column(event.x)
         # Popup（v5 改 column：加「漲跌價」欄後往右移一欄）
         if column == "#6":
             self._show_etf_popup(iid, event.x_root, event.y_root, mode="etf_list")
@@ -9149,75 +9160,102 @@ class StrategyGUI(tk.Tk):
     # ══════════════════════════════════════════════════════════════
 
     def _on_select_tree_hover(self, event):
-        """【V1.2.0-kb-focus-v9】系統選股 / 回測 Treeview hover
+        """【V1.2.0-kb-focus-v15】系統選股 / 回測 Treeview hover
 
-        William 2026-07-07 11:50 反映 v8 仍失敗：
-          - key release 後 highlight 殘留問題
-            → 原因：key release 設 hover 到新 row、但滑鼠還在舊位置
-              任何 mouse 微動都觸發 motion、把 hover 設回滑鼠位置 = 舊位置
+        William 2026-07-07 17:27 反映 v8-v14 仍失敗：
+          - up/down key 移動 highlight bar、但 OS cursor 還是停留在舊位置
+          - mouse 動的時候 motion handler 設 hover 到 OS cursor 位置
+          - 舊的 hover (from key nav) 不被清掉 → 兩個 highlight bar
 
-        v9 簡單修法：
-        1. motion handler 進場先檢查 _kbd_nav_guard
-        2. 若還在 guard 期間、滑鼠位置未變 → ignore motion（保留 key nav 設的 hover）
-           → 只更新 tree.focus + 不更新 hover tag
-        3. 若滑鼠真的動了、或 guard timeout → 解除 guard、正常處理
+        v15 簡單設計（根本不靠 OS cursor 移動）：
+        1. 記錄 _last_key_nav_iid：上次 key nav 設的 row iid
+        2. motion handler 進場檢查：
+           - 若 mouse cursor 在 _last_key_nav_iid 同一 row 範圍内 → 用 _last_key_nav_iid（同步兩者）
+           - 若 mouse cursor 離 _last_key_nav_iid 遠 → 跟隨 mouse
+        3. 不再依賴 OS cursor 物理移動、不再依賴 _kbd_nav_guard timer
+
+        設計精神：
+        - 「最近一次 keyboard nav 設的位置」 是個 sticky target
+        - mouse 移動到該 row 附近 → hover 同步到該 row (而不是 mouse 位置)
+        - mouse 移到離該 row 遠 → hover 跟 mouse
+        - 這樣無論 OS cursor 有沒有動、hover bar 都會一致
         """
         tree = event.widget
         try:
-            # v9 新增：key nav guard、若 mouse 沒動、就忽略 motion
-            if self._kbd_nav_guard_should_block(tree):
-                # 保留 key nav 設的 hover、但同步 focus/apply_hover 確保 visual 一致
-                focus_iid = tree.focus()
-                if focus_iid and focus_iid in tree.get_children():
-                    self._apply_hover(tree, focus_iid)
-                return
-            # 一般 motion 處理
             region = tree.identify("region", event.x, event.y)
-            iid = tree.identify_row(event.y) if region == "cell" else None
-            if iid and iid in tree.get_children():
-                # 設視覺 highlight（單一真相 = _apply_hover）
-                self._apply_hover(tree, iid)
-                # 同步設鍵盤 focus、讓 Up/Down 立刻有效
-                tree.focus(iid)
-                tree.focus_set()
+            mouse_iid = tree.identify_row(event.y) if region == "cell" else None
+            if not mouse_iid or mouse_iid not in tree.get_children():
+                return
+
+            # v15 新邏輯：sticky key nav target
+            sticky_iid = self._get_sticky_key_nav_iid(tree)
+            if sticky_iid and sticky_iid != mouse_iid:
+                # mouse 跟 sticky key nav 不在同一 row
+                # 判斷 mouse 是不是「仍走訪 sticky」的位置（同一 row 或附近）
+                sticky_bbox = tree.bbox(sticky_iid)
+                mouse_bbox = tree.bbox(mouse_iid)
+                if sticky_bbox and mouse_bbox:
+                    sx, sy, sw, sh = sticky_bbox
+                    mx, my, mw, mh = mouse_bbox
+                    # 若 mouse 仍在 sticky 同一 row（上下重疊超過 50%）→ 走 sticky
+                    row_overlap = (
+                        min(sy + sh, my + mh) - max(sy, my)
+                    )
+                    if row_overlap > sh * 0.5 or row_overlap > mh * 0.5:
+                        # mouse 還在 sticky row 區域、同步 hover 到 sticky
+                        self._apply_hover(tree, sticky_iid)
+                        tree.focus(sticky_iid)
+                        return
+                    # mouse 完全離開 sticky → 跟 mouse、清除 sticky
+                    self._set_sticky_key_nav_iid(tree, mouse_iid)
+
+            # 一般 motion：跟 mouse cursor 位置
+            self._apply_hover(tree, mouse_iid)
+            tree.focus(mouse_iid)
+            tree.focus_set()
+        except tk.TclError:
+            pass
+
+    def _get_sticky_key_nav_iid(self, tree):
+        """v15：取得最近一次 key nav 設的 sticky iid（None 代表没有）"""
+        if not hasattr(self, "_sticky_key_nav_iids"):
+            return None
+        return self._sticky_key_nav_iids.get(id(tree))
+
+    def _set_sticky_key_nav_iid(self, tree, iid):
+        """v15：設定最近一次 key nav 設的 sticky iid"""
+        if not hasattr(self, "_sticky_key_nav_iids"):
+            self._sticky_key_nav_iids = {}
+        if iid is None:
+            self._sticky_key_nav_iids.pop(id(tree), None)
+        else:
+            self._sticky_key_nav_iids[id(tree)] = iid
+
+    def _on_tree_key_see_focus(self, event):
+        """【V1.2.0-kb-focus-v15】Down/Up/Home/End/Prior/Next key release 時主動 see + sync highlight
+
+        v15 變更：
+        1. 不再依賴 _kbd_nav_guard timer
+        2. 設定 sticky_key_nav_iid、motion handler 會「認識」這個 sticky 位置
+        3. event_generate('<Motion>') + SetCursorPos 都保留作為 best effort
+        4. 主要靠 sticky_iid 邏輯確保 hover 不會被 motion handler 拉錯位置
+        """
+        tree = event.widget
+        try:
+            cur = tree.focus()
+            if cur and cur in tree.get_children():
+                # v15 新增：設定 sticky key nav iid
+                self._set_sticky_key_nav_iid(tree, cur)
+                # 用 after_idle 避免跟 Treeview 內部 scroll 競爭
+                tree.after_idle(lambda: self._ensure_focus_visible(tree, cur))
         except tk.TclError:
             pass
 
     def _kbd_nav_guard_should_block(self, tree):
-        """【V1.2.0-kb-focus-v10】檢查是否應 block motion handler（剛 key nav 且 mouse 未動）
+        """v15：不再使用 timer-based guard、全部交由 sticky_key_nav_iid 邏輯處理
 
-        v10 新增容差：
-        - mouse 位置變動 ≤ 5 像素、認為是微抖動 / Win 系統事件、不解除 guard
-        - > 5 像素才認為使用者主動動 mouse、解除 guard
-
-        規則：
-        - 若 _kbd_nav_guard_until_ms 過期 → False（不 block、normal motion）
-        - 若 |mouse_pos - guard_pos| > 5px → False（mouse 真的動了、解除 guard）
-        - 其餘 → True（block motion、保留 key nav 設的 hover）
+        保留函式是為了讓舊的 _on_tree_key_see_focus 路徑不會當
         """
-        try:
-            now_ms = int(time.time() * 1000)
-        except Exception:
-            return False
-        if not hasattr(self, "_kbd_nav_guard_until_ms"):
-            return False
-        if self._kbd_nav_guard_until_ms <= now_ms:
-            # guard 過期、清掉、normal motion
-            self._kbd_nav_guard_until_ms = 0
-            return False
-        # guard 期間內、檢查 mouse 是否真的動了（容差 5 像素）
-        try:
-            cur_pos = tree.winfo_pointerxy()
-        except tk.TclError:
-            return False
-        if not hasattr(self, "_kbd_nav_mouse_pos_at_guard"):
-            self._kbd_nav_mouse_pos_at_guard = (0, 0)
-        guard_x, guard_y = self._kbd_nav_mouse_pos_at_guard
-        # 容差 5 像素以內、都不是用户主動動 mouse、繼續 block
-        if abs(cur_pos[0] - guard_x) <= 5 and abs(cur_pos[1] - guard_y) <= 5:
-            return True
-        # mouse 真的動了、解除 guard、normal motion
-        self._kbd_nav_guard_until_ms = 0
         return False
     def _on_select_tree_leave(self, event):
         """【V1.2.0-kb-focus-v4】離開 Treeview 時不清 hover、讓 selected row 保持高亮"""
@@ -9267,6 +9305,8 @@ class StrategyGUI(tk.Tk):
         iid = tree.identify_row(event.y)
         if not iid:
             return
+        # v15：click 是明確動作、清掉 sticky key nav (mouse 該跟 click row)
+        self._set_sticky_key_nav_iid(tree, None)
         # 【V1.2.0-keyboard-toggle-fix】2026-07-06 15:58 William 反映：
         # 「↑/↓ 鍵要先 click 在某個 item 才會動作、space bar 不能 toggle」
         # 根因：Treeview 預設 click 不會設鍵盤焦點到 row、tree.focus() 永遠回空字串

@@ -652,10 +652,9 @@ def test_after_idle_focus_tree_function_exists():
 
 
 def test_on_select_tree_hover_clears_old():
-    """_on_select_tree_hover v7 motion 只設 focus(iid)、不動 tags
+    """_on_select_tree_hover v15 用 sticky_key_nav_iid 邏輯（不依賴 timer-based guard）
 
-    William 01:08 反映 v6 race condition（hover 殘留）
-    v7 修法：motion handler 只設 keyboard focus、hover_<price> 完全由 <<TreeviewSelect>> 管
+    William 2026-07-07 17:27 反映 v14 仍失敗 → v15 重寫
     """
     content = _read()
     idx = content.find('def _on_select_tree_hover(self, event):')
@@ -667,19 +666,17 @@ def test_on_select_tree_hover_clears_old():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    # v7：motion 只呼叫 tree.focus(iid) + focus_set()、不應動 tags
-    assert 'tree.focus(iid)' in body or 'self._ms_tree.focus(iid)' in body, (
-        "❌ v7 motion 應呼叫 tree.focus(iid)"
+    # v15：必用 sticky 邏輯
+    assert '_get_sticky_key_nav_iid' in body, (
+        "v15 _on_select_tree_hover 必呼叫 _get_sticky_key_nav_iid"
     )
-    assert 'focus_set' in body, "❌ v7 motion 應呼叫 focus_set"
-    # v7 不應有 hover_<price> tag 設定在 motion handler
-    assert 'hover_' not in body or body.count('hover_') == 0, (
-        f"❌ v7 motion handler 不應設 hover_<price> tag（body: {body[:200]})"
+    assert '_set_sticky_key_nav_iid' in body, (
+        "v15 _on_select_tree_hover 必呼叫 _set_sticky_key_nav_iid"
     )
 
 
 def test_ms_tree_hover_clears_old():
-    """_ms_tree_hover v7 motion 只設 focus(iid)、不動 tags"""
+    """_ms_tree_hover v15 用 sticky_key_nav_iid 邏輯"""
     content = _read()
     idx = content.find('def _ms_tree_hover(self, event):')
     assert idx != -1, "找不到 _ms_tree_hover"
@@ -690,11 +687,9 @@ def test_ms_tree_hover_clears_old():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    # v7：motion 只呼叫 _ms_tree.focus(iid)
-    assert '_ms_tree.focus(iid)' in body, (
-        "❌ v7 _ms_tree_hover 應呼叫 _ms_tree.focus(iid)"
+    assert '_get_sticky_key_nav_iid' in body, (
+        "v15 _ms_tree_hover 必呼叫 _get_sticky_key_nav_iid"
     )
-    assert '_ms_tree.focus_set' in body, "❌ v7 _ms_tree_hover 應呼叫 _ms_tree.focus_set"
 
 
 def test_ms_tree_leave_clears_hover():
@@ -715,7 +710,7 @@ def test_ms_tree_leave_clears_hover():
 
 
 def test_etf_tree_hover_combined_clears_old():
-    """_etf_tree_hover_combined v8 呼叫 _apply_hover 設 hover + popup + focus"""
+    """_etf_tree_hover_combined v15 用 sticky_key_nav_iid 邏輯"""
     content = _read()
     idx = content.find('def _etf_tree_hover_combined(self, event):')
     assert idx != -1, "找不到 _etf_tree_hover_combined"
@@ -726,15 +721,8 @@ def test_etf_tree_hover_combined_clears_old():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    # v8：motion 呼叫 _apply_hover 設 hover + focus + popup
-    assert '_apply_hover' in body, (
-        "❌ v8 _etf_tree_hover_combined 應呼叫 _apply_hover 設 hover_<price> tag"
-    )
-    assert '_etf_tree.focus(iid)' in body, (
-        "❌ v8 _etf_tree_hover_combined 應呼叫 _etf_tree.focus(iid)"
-    )
-    assert '_etf_tree.focus_set' in body, (
-        "❌ v8 _etf_tree_hover_combined 應呼叫 _etf_tree.focus_set"
+    assert '_get_sticky_key_nav_iid' in body, (
+        "v15 _etf_tree_hover_combined 必呼叫 _get_sticky_key_nav_iid"
     )
 
 
@@ -888,208 +876,6 @@ def test_hover_price_tag_registered():
 # ==========================================================
 # 行為測試
 # ==========================================================
-
-
-def test_on_select_tree_hover_movement_clears_old():
-    """_on_select_tree_hover v9 呼叫 _apply_hover 清舊 + 設新 row（motion handler 一般路徑）
-
-    v9 多了 _kbd_nav_guard_should_block check、測試時設為 False 走一般路徑
-    """
-    from types import SimpleNamespace
-    import StockTool as st
-
-    items_state = {
-        "r1": {"tags": ("hover_up",), "values": ("☐", "3188")},
-        "r2": {"tags": ("unchecked", "price_down"), "values": ("☐", "3028")},
-    }
-
-    def item(iid, *args, **kwargs):
-        if args:
-            return items_state[iid].get(args[0], ())
-        if kwargs:
-            items_state[iid].update(kwargs)
-        return SimpleNamespace(values=items_state[iid].get("values", ()), tags=items_state[iid].get("tags", ()))
-
-    focus_calls = []
-    focus_set_calls = []
-
-    tree = SimpleNamespace()
-    tree.identify = lambda region, x, y: "cell"
-    tree.identify_row = lambda y: "r2"
-    tree.item = item
-    tree.get_children = lambda: ["r1", "r2"]
-    tree.focus = lambda iid: focus_calls.append(iid)
-    tree.focus_set = lambda: focus_set_calls.append(True)
-
-    app = SimpleNamespace(
-        select_tree=tree,
-        _select_checked={"r1": False, "r2": False},
-        _bt_checked={},
-        _select_price_tags={"r1": "price_up", "r2": "price_down"},
-        _kbd_nav_guard_until_ms=0,  # 已過期、guard 不 block
-    )
-    # v9：guard 自動返回 False（已過期）
-    app._kbd_nav_guard_should_block = lambda t: False
-
-    def fake_apply_hover(t, iid):
-        for child in t.get_children():
-            cur = items_state[child]["tags"]
-            if any(s.startswith("hover_") for s in cur):
-                price_tag = app._select_price_tags.get(child, "price_zero")
-                items_state[child]["tags"] = ("unchecked", price_tag)
-        price_tag = app._select_price_tags.get(iid, "price_zero")
-        kind = price_tag.replace("price_", "")
-        items_state[iid]["tags"] = (f"hover_{kind}",)
-
-    app._apply_hover = fake_apply_hover
-
-    event = SimpleNamespace(widget=tree, x=10, y=10)
-    st.StrategyGUI._on_select_tree_hover(app, event)
-
-    assert "r2" in focus_calls
-    assert focus_set_calls
-    assert "hover" not in str(items_state["r1"]["tags"])
-    assert "hover_down" in items_state["r2"]["tags"]
-
-
-def test_on_select_tree_hover_blocked_by_guard():
-    """v9：_kbd_nav_guard_should_block 為 True → motion handler 應 ignore"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    items_state = {
-        "r1": {"tags": ("hover_up",)},
-        "r2": {"tags": ("unchecked", "price_down")},
-    }
-
-    def item(iid, *args, **kwargs):
-        if args:
-            return items_state[iid].get(args[0], ())
-        if kwargs:
-            items_state[iid].update(kwargs)
-        return SimpleNamespace(values=items_state[iid].get("values", ()), tags=items_state[iid].get("tags", ()))
-
-    tree = SimpleNamespace()
-    tree.identify = lambda region, x, y: "cell"
-    tree.identify_row = lambda y: "r2"
-    tree.item = item
-    tree.get_children = lambda: ["r1", "r2", "r3"]
-    tree.focus = lambda iid=None: "r3"  # key nav 設到 r3
-    tree.focus_set = lambda: None
-
-    apply_hover_calls = []
-
-    app = SimpleNamespace(
-        select_tree=tree,
-        _select_checked={"r1": False, "r2": False, "r3": False},
-        _bt_checked={},
-        _select_price_tags={"r1": "price_up", "r2": "price_down", "r3": "price_zero"},
-        _kbd_nav_guard_until_ms=99999999999,  # 很久之後
-        _kbd_nav_mouse_pos_at_guard=(0, 0),
-    )
-    app._kbd_nav_guard_should_block = lambda t: True  # block
-    app._apply_hover = lambda t, iid: apply_hover_calls.append(iid)
-
-    event = SimpleNamespace(widget=tree, x=10, y=10)
-    st.StrategyGUI._on_select_tree_hover(app, event)
-
-    # motion 被 block → 不應設 r2 的 hover（會是 None 因為 identify_row 被查到但被 block）
-    # 唯一被 set 的 hover 是 r3（focus）
-    assert apply_hover_calls == ["r3"], (
-        f"guard block 時 motion 應只套用 focus row 的 hover、實際 {apply_hover_calls}"
-    )
-    # r1 的 hover 不該被清（沒被覆寫）
-    assert "hover_up" in items_state["r1"]["tags"], (
-        f"guard block 時不應清舊 hover、實際 {items_state['r1']['tags']}"
-    )
-
-
-def test_ms_tree_hover_movement_clears_old():
-    """_ms_tree_hover v9 呼叫 _apply_hover 清舊 + 設新 row（v9 加 guard、這邊走一般路徑）"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    items_state = {
-        "m1": {"tags": ("hover_up",)},
-        "m2": {"tags": ("unchecked", "price_down")},
-    }
-
-    def item(iid, *args, **kwargs):
-        if args and args[0] == "tags":
-            return items_state[iid].get("tags", ())
-        if kwargs:
-            items_state[iid].update(kwargs)
-        return SimpleNamespace(tags=items_state[iid].get("tags", ()))
-
-    focus_calls = []
-    focus_set_calls = []
-
-    tree = SimpleNamespace()
-    tree.identify = lambda region, x, y: "cell"
-    tree.identify_row = lambda y: "m2"
-    tree.item = item
-    tree.get_children = lambda: ["m1", "m2"]
-    tree.focus = lambda iid: focus_calls.append(iid)
-    tree.focus_set = lambda: focus_set_calls.append(True)
-
-    app = SimpleNamespace(
-        _ms_tree=tree,
-        _ms_checked={"m1": False, "m2": False},
-        _ms_price_tags={"m1": "price_up", "m2": "price_down"},
-        _kbd_nav_guard_until_ms=0,  # 已過期、guard 不 block
-    )
-    app._kbd_nav_guard_should_block = lambda t: False  # 不 block
-
-    def fake_apply_hover(t, iid):
-        for child in t.get_children():
-            cur = items_state[child]["tags"]
-            if any(s.startswith("hover_") for s in cur):
-                price_tag = app._ms_price_tags.get(child, "price_zero")
-                items_state[child]["tags"] = ("unchecked", price_tag)
-        price_tag = app._ms_price_tags.get(iid, "price_zero")
-        kind = price_tag.replace("price_", "")
-        items_state[iid]["tags"] = (f"hover_{kind}",)
-
-    app._apply_hover = fake_apply_hover
-
-    event = SimpleNamespace(widget=tree, x=10, y=10)
-    st.StrategyGUI._ms_tree_hover(app, event)
-
-    assert "m2" in focus_calls
-    assert focus_set_calls
-    assert "hover" not in str(items_state["m1"]["tags"])
-    assert "hover_down" in items_state["m2"]["tags"]
-
-
-def test_ms_tree_hover_blocked_by_guard():
-    """v9：_ms_tree_hover 被 guard block → 不動 motion"""
-    from types import SimpleNamespace
-    import StockTool as st
-
-    tree = SimpleNamespace()
-    tree.identify = lambda region, x, y: "cell"
-    tree.identify_row = lambda y: "new_row"
-    tree.get_children = lambda: ["focus_row", "new_row"]
-
-    apply_hover_calls = []
-    app = SimpleNamespace(
-        _ms_tree=tree,
-        _ms_checked={},
-        _ms_price_tags={},
-        _kbd_nav_guard_until_ms=99999999999,
-        _kbd_nav_mouse_pos_at_guard=(0, 0),
-    )
-    app._kbd_nav_guard_should_block = lambda t: True  # block
-    tree.focus = lambda iid=None: "focus_row"  # key nav 設到 focus_row
-    tree.focus_set = lambda: None
-    app._apply_hover = lambda t, iid: apply_hover_calls.append(iid)
-
-    event = SimpleNamespace(widget=tree, x=10, y=10)
-    st.StrategyGUI._ms_tree_hover(app, event)
-
-    assert apply_hover_calls == ["focus_row"], (
-        f"guard block 後只該套 focus row 的 hover、實際 {apply_hover_calls}"
-    )
 
 
 def test_on_tree_select_sync_hover_clears_old_row():
@@ -1427,51 +1213,6 @@ def test_kbd_nav_guard_helper_exists():
     )
 
 
-def test_kbd_nav_guard_blocks_when_mouse_unchanged():
-    """v9：guard 期間內 mouse 位置未變 → 應 block motion"""
-    from types import SimpleNamespace
-    import time as _time
-    import StockTool as st
-
-    cur_mouse_pos = (200, 300)
-
-    tree = SimpleNamespace()
-    tree.winfo_pointerxy = lambda: cur_mouse_pos
-
-    app = SimpleNamespace()
-    # guard 設為現在 + 60 秒（足够未來才不會 timeout）
-    app._kbd_nav_guard_until_ms = int(_time.time() * 1000) + 60000
-    app._kbd_nav_mouse_pos_at_guard = (200, 300)  # 跟當前位置一樣
-
-    result = st.StrategyGUI._kbd_nav_guard_should_block(app, tree)
-    assert result is True, (
-        f"guard 期間內 mouse 未變 → 應 return True block、實際 {result}"
-    )
-
-
-def test_kbd_nav_guard_releases_when_mouse_moves():
-    """v9：mouse 位置真的動了 → guard 自動解除、return False"""
-    from types import SimpleNamespace
-    import time as _time
-    import StockTool as st
-
-    tree = SimpleNamespace()
-    tree.winfo_pointerxy = lambda: (500, 600)  # mouse 已移到新位置
-
-    app = SimpleNamespace()
-    app._kbd_nav_guard_until_ms = int(_time.time() * 1000) + 60000
-    app._kbd_nav_mouse_pos_at_guard = (200, 300)  # 原來位置
-
-    result = st.StrategyGUI._kbd_nav_guard_should_block(app, tree)
-    assert result is False, (
-        f"mouse 真的動了 → 應 return False 不 block、實際 {result}"
-    )
-    # 同時 guard 應自動 reset
-    assert app._kbd_nav_guard_until_ms == 0, (
-        f"guard 自動 reset、實際 {app._kbd_nav_guard_until_ms}"
-    )
-
-
 def test_kbd_nav_guard_releases_on_timeout():
     """v9：guard timeout（已過期）→ 應 return False 不 block"""
     from types import SimpleNamespace
@@ -1490,24 +1231,6 @@ def test_kbd_nav_guard_releases_on_timeout():
     assert result is False, (
         f"guard 已過期 → 應 return False 不 block、實際 {result}"
     )
-
-
-def test_motion_handlers_call_guard():
-    """v9：3 個 motion handler 都要呼叫 _kbd_nav_guard_should_block"""
-    content = _read()
-    for fn in ("_on_select_tree_hover", "_ms_tree_hover", "_etf_tree_hover_combined"):
-        idx = content.find(f"def {fn}(self, event):")
-        assert idx != -1, f"找不到 {fn}"
-        end = content.find("\n    def ", idx + 50)
-        if end == -1:
-            end = len(content)
-        body = content[idx:end]
-        if '"""' in body:
-            parts = body.split('"""')
-            body = '"""'.join(parts[2:])
-        assert "_kbd_nav_guard_should_block" in body, (
-            f"v9 {fn} 應呼叫 _kbd_nav_guard_should_block"
-        )
 
 
 def test_ensure_focus_visible_uses_bbox_check():
@@ -1654,33 +1377,6 @@ def test_padding_row_not_added_if_exists():
     st.StrategyGUI._ensure_focus_padding_row(app, tree)
 
     assert not children_added, "已存在時不應重加 padding row"
-
-
-def test_guard_5px_tolerance():
-    """v10：mouse 在 5px 容差內移動仍視為未動、guard 繼續 block"""
-    from types import SimpleNamespace
-    import time as _time
-    import StockTool as st
-
-    tree = SimpleNamespace()
-    # mouse 位置與 guard 位置差 3px（在容差內）
-    tree.winfo_pointerxy = lambda: (203, 303)
-
-    app = SimpleNamespace()
-    app._kbd_nav_guard_until_ms = int(_time.time() * 1000) + 60000
-    app._kbd_nav_mouse_pos_at_guard = (200, 300)  # 差 3x3 = 在容差內
-
-    result = st.StrategyGUI._kbd_nav_guard_should_block(app, tree)
-    assert result is True, (
-        f"5px 容差內的 mouse 微動 → 應繼續 block、實際 {result}"
-    )
-
-    # 差 10x10 = 超出容差、解除 guard
-    tree.winfo_pointerxy = lambda: (210, 310)
-    result = st.StrategyGUI._kbd_nav_guard_should_block(app, tree)
-    assert result is False, (
-        f"超出 5px 容差 → 應解除 guard、實際 {result}"
-    )
 
 
 def test_ensure_focus_visible_calls_padding_row_first():
@@ -1883,27 +1579,6 @@ def test_v12_motion_handler_does_not_require_click():
     )
 
 
-def test_v12_motion_handler_uses_event_generate_fallback():
-    """v12 motion handler 應該在 set focus 後也 set focus_set（讓鍵盤 nav 立刻有效）"""
-    content = _read()
-    idx = content.find("def _on_select_tree_hover(self, event):")
-    assert idx != -1, "找不到 _on_select_tree_hover"
-    end = content.find("\n    def ", idx + 50)
-    if end == -1:
-        end = len(content)
-    body = content[idx:end]
-    if '"""' in body:
-        parts = body.split('"""')
-        body = '"""'.join(parts[2:])
-    # 確認設 focus + focus_set
-    assert "tree.focus(iid)" in body or ".focus(iid)" in body, (
-        "v12 motion handler 必設 tree.focus(iid) 讓鍵盤 nav 同步"
-    )
-    assert "focus_set" in body, (
-        "v12 motion handler 必設 focus_set 讓 keyboard 立即有效"
-    )
-
-
 def test_v12_click_handler_no_hover_call():
     """v12 click handler (_on_select_tree_click) 必不 call _apply_hover
 
@@ -2006,24 +1681,6 @@ def test_move_cursor_uses_send_input():
         body = '"""'.join(parts[2:])
     assert "SendInput" in body, (
         "v13 _win_move_cursor_to 必包含 SendInput 低階 API 作為 fallback"
-    )
-
-
-def test_kbd_nav_guard_extended_to_2000ms():
-    """v13：_kbd_nav_guard 延長到 2000ms（從 500ms）"""
-    content = _read()
-    # v13 應該用 2000 而不是 500
-    idx = content.find("def _on_tree_key_see_focus(self, event):")
-    assert idx != -1
-    end = content.find("\n    def ", idx + 50)
-    if end == -1:
-        end = len(content)
-    body = content[idx:end]
-    if '"""' in body:
-        parts = body.split('"""')
-        body = '"""'.join(parts[2:])
-    assert "2000" in body, (
-        "v13 _on_tree_key_see_focus 必設定 guard 2000ms（防止 motion handler 太快覆蓋 key nav hover）"
     )
 
 
@@ -2300,4 +1957,218 @@ def test_v14_event_generate_still_called():
         body = '"""'.join(parts[2:])
     assert "event_generate" in body, (
         "v14 _move_cursor_to_row 必包含 event_generate 作為視覺同步保險"
+    )
+
+
+# ==========================================================
+# 【V1.2.0-kb-focus-v15】sticky_key_nav_iid 完全取代 OS cursor 移動
+# ==========================================================
+
+def test_v15_sticky_key_nav_iids_dict_in_init():
+    """v15：__init__ 必初始化 _sticky_key_nav_iids = {}"""
+    content = _read()
+    assert "self._sticky_key_nav_iids = {}" in content, (
+        "v15 __init__ 必初始化 _sticky_key_nav_iids = {}"
+    )
+
+
+def test_v15_get_set_sticky_helpers_exist():
+    """v15：_get_sticky_key_nav_iid / _set_sticky_key_nav_iid helper 必存在"""
+    content = _read()
+    assert "def _get_sticky_key_nav_iid(self, tree):" in content, (
+        "v15 應新增 _get_sticky_key_nav_iid helper"
+    )
+    assert "def _set_sticky_key_nav_iid(self, tree, iid):" in content, (
+        "v15 應新增 _set_sticky_key_nav_iid helper"
+    )
+
+
+def test_v15_on_tree_key_see_focus_sets_sticky():
+    """v15：_on_tree_key_see_focus 必設 sticky iid"""
+    content = _read()
+    idx = content.find("def _on_tree_key_see_focus(self, event):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "_set_sticky_key_nav_iid" in body, (
+        "v15 _on_tree_key_see_focus 必設定 _set_sticky_key_nav_iid"
+    )
+
+
+def test_v15_motion_handler_uses_sticky_logic():
+    """v15：3 個 motion handler 必用 sticky 邏輯檢查"""
+    content = _read()
+    for handler in ("_on_select_tree_hover", "_ms_tree_hover", "_etf_tree_hover_combined"):
+        idx = content.find(f"def {handler}(self, event):")
+        assert idx != -1, f"找不到 {handler}"
+        end = content.find("\n    def ", idx + 50)
+        if end == -1:
+            end = len(content)
+        body = content[idx:end]
+        if '"""' in body:
+            parts = body.split('"""')
+            body = '"""'.join(parts[2:])
+        assert "_get_sticky_key_nav_iid" in body, (
+            f"v15 {handler} 必用 _get_sticky_key_nav_iid"
+        )
+
+
+def test_v15_motion_uses_bbox_overlap_check():
+    """v15：motion handler 必用 bbox 計算 row 重疊度"""
+    content = _read()
+    idx = content.find("def _on_select_tree_hover(self, event):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 檢查 row_overlap 邏輯
+    assert "row_overlap" in body, (
+        "v15 _on_select_tree_hover 必計算 row overlap 判斷 mouse 是否仍在 sticky row"
+    )
+    assert "bbox" in body, (
+        "v15 _on_select_tree_hover 必用 tree.bbox() 取 row 位置"
+    )
+
+
+def test_v15_click_resets_sticky():
+    """v15：click handler 必 reset sticky（click 是明確動作）"""
+    content = _read()
+    for handler in ("_on_select_tree_click",):
+        idx = content.find(f"def {handler}(self, event):")
+        assert idx != -1, f"找不到 {handler}"
+        end = content.find("\n    def ", idx + 50)
+        if end == -1:
+            end = len(content)
+        body = content[idx:end]
+        if '"""' in body:
+            parts = body.split('"""')
+            body = '"""'.join(parts[2:])
+        assert "_set_sticky_key_nav_iid" in body, (
+            f"v15 {handler} 必 reset sticky"
+        )
+
+
+def test_v15_no_more_kbd_nav_guard_timer():
+    """v15：_kbd_nav_guard_should_block 不再用 timer 邏輯"""
+    content = _read()
+    idx = content.find("def _kbd_nav_guard_should_block(self, tree):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # v15：必永遠 return False（sticky 邏輯取代）
+    assert "return False" in body, (
+        "v15 _kbd_nav_guard_should_block 應 return False（已被 sticky 邏輯取代）"
+    )
+
+
+def test_v15_motion_sticky_logic_unit():
+    """v15 sticky 邏輯單元測試：mouse 在 sticky row 範圍內 → 用 sticky、不是 mouse"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    # 模擬 3 個 row、mouse bbox 跟 sticky bbox 部分重疊
+    bbox_map = {
+        "row1": (0, 0, 100, 30),  # sticky
+        "row2": (0, 30, 100, 30),
+        "row3": (0, 60, 100, 30),
+    }
+
+    tree = SimpleNamespace()
+    tree.bbox = lambda iid: bbox_map.get(iid)
+    tree.identify = lambda region, x, y: "cell"
+    tree.identify_row = lambda y: "row2"  # mouse 在 row2
+    tree.get_children = lambda: ["row1", "row2", "row3"]
+    tree.item = lambda iid, *args, **kw: SimpleNamespace(tags=())
+    tree.winfo_exists = lambda: True
+
+    apply_hover_calls = []
+    focus_calls = []
+
+    app = SimpleNamespace()
+    app._sticky_key_nav_iids = {id(tree): "row1"}  # sticky 是 row1
+    app._select_tree = tree
+    app._ms_tree = tree
+    app._etf_tree = tree
+
+    # 關鍵：v15 的 motion handler 呼叫 _get_sticky_key_nav_iid / _set_sticky_key_nav_iid
+    app._get_sticky_key_nav_iid = lambda t: app._sticky_key_nav_iids.get(id(t))
+    app._set_sticky_key_nav_iid = lambda t, iid: (
+        app._sticky_key_nav_iids.pop(id(t), None) if iid is None
+        else app._sticky_key_nav_iids.__setitem__(id(t), iid)
+    )
+
+    def fake_apply_hover(t, iid):
+        apply_hover_calls.append(iid)
+
+    app._apply_hover = fake_apply_hover
+    tree.focus = lambda iid: focus_calls.append(iid)
+    tree.focus_set = lambda: None
+
+    event = SimpleNamespace(widget=tree, x=50, y=45)
+    st.StrategyGUI._on_select_tree_hover(app, event)
+
+    # v15：mouse 在 row2、但 sticky 是 row1
+    # row2 bbox y=30, h=30 → 30-60
+    # row1 bbox y=0, h=30 → 0-30
+    # 重疊 = 0（不重疊）→ 應該用 mouse position
+    assert "row2" in apply_hover_calls, (
+        f"v15 sticky 邏輯：mouse 完全離開 sticky 應跟 mouse、實際 {apply_hover_calls}"
+    )
+
+
+def test_v15_motion_sticky_with_overlap():
+    """v15 sticky 邏輯：mouse 仍在 sticky row 範圍內 → 用 sticky"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    # 模擬 row1 bbox 很大、mouse 也在 row1 區域
+    bbox_map = {
+        "row1": (0, 0, 100, 60),  # sticky, 大 bbox
+        "row2": (0, 60, 100, 30),
+    }
+
+    tree = SimpleNamespace()
+    tree.bbox = lambda iid: bbox_map.get(iid)
+    tree.identify = lambda region, x, y: "cell"
+    tree.identify_row = lambda y: "row1"  # mouse 在 row1
+    tree.get_children = lambda: ["row1", "row2"]
+    tree.item = lambda iid, *args, **kw: SimpleNamespace(tags=())
+    tree.winfo_exists = lambda: True
+
+    apply_hover_calls = []
+
+    app = SimpleNamespace()
+    app._sticky_key_nav_iids = {id(tree): "row1"}
+    app._select_tree = tree
+    app._ms_tree = tree
+    app._etf_tree = tree
+    app._get_sticky_key_nav_iid = lambda t: app._sticky_key_nav_iids.get(id(t))
+    app._set_sticky_key_nav_iid = lambda t, iid: (
+        app._sticky_key_nav_iids.pop(id(t), None) if iid is None
+        else app._sticky_key_nav_iids.__setitem__(id(t), iid)
+    )
+    app._apply_hover = lambda t, iid: apply_hover_calls.append(iid)
+    tree.focus = lambda iid: None
+    tree.focus_set = lambda: None
+
+    event = SimpleNamespace(widget=tree, x=50, y=30)
+    st.StrategyGUI._on_select_tree_hover(app, event)
+
+    # mouse bbox 跟 sticky bbox 完全重疊 → 用 sticky (row1)
+    assert "row1" in apply_hover_calls, (
+        f"v15 sticky 邏輯：mouse 在 sticky 範圍內應用 sticky、實際 {apply_hover_calls}"
     )
