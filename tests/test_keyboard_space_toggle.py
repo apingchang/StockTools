@@ -887,7 +887,10 @@ def test_hover_price_tag_registered():
 
 
 def test_on_select_tree_hover_movement_clears_old():
-    """_on_select_tree_hover v8 呼叫 _apply_hover 清舊 + 設新 row 的 hover_<price> tag"""
+    """_on_select_tree_hover v9 呼叫 _apply_hover 清舊 + 設新 row（motion handler 一般路徑）
+
+    v9 多了 _kbd_nav_guard_should_block check、測試時設為 False 走一般路徑
+    """
     from types import SimpleNamespace
     import StockTool as st
 
@@ -919,9 +922,11 @@ def test_on_select_tree_hover_movement_clears_old():
         _select_checked={"r1": False, "r2": False},
         _bt_checked={},
         _select_price_tags={"r1": "price_up", "r2": "price_down"},
+        _kbd_nav_guard_until_ms=0,  # 已過期、guard 不 block
     )
+    # v9：guard 自動返回 False（已過期）
+    app._kbd_nav_guard_should_block = lambda t: False
 
-    # v8：motion handler 呼叫 _apply_hover 來設 hover_<price> tag
     def fake_apply_hover(t, iid):
         for child in t.get_children():
             cur = items_state[child]["tags"]
@@ -937,23 +942,66 @@ def test_on_select_tree_hover_movement_clears_old():
     event = SimpleNamespace(widget=tree, x=10, y=10)
     st.StrategyGUI._on_select_tree_hover(app, event)
 
-    # v8：motion 設 focus(iid) + focus_set()、透過 _apply_hover 設 hover tag
-    assert "r2" in focus_calls, (
-        f"v8 _on_select_tree_hover 應呼叫 focus(r2)、實際 focus_calls={focus_calls}"
+    assert "r2" in focus_calls
+    assert focus_set_calls
+    assert "hover" not in str(items_state["r1"]["tags"])
+    assert "hover_down" in items_state["r2"]["tags"]
+
+
+def test_on_select_tree_hover_blocked_by_guard():
+    """v9：_kbd_nav_guard_should_block 為 True → motion handler 應 ignore"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    items_state = {
+        "r1": {"tags": ("hover_up",)},
+        "r2": {"tags": ("unchecked", "price_down")},
+    }
+
+    def item(iid, *args, **kwargs):
+        if args:
+            return items_state[iid].get(args[0], ())
+        if kwargs:
+            items_state[iid].update(kwargs)
+        return SimpleNamespace(values=items_state[iid].get("values", ()), tags=items_state[iid].get("tags", ()))
+
+    tree = SimpleNamespace()
+    tree.identify = lambda region, x, y: "cell"
+    tree.identify_row = lambda y: "r2"
+    tree.item = item
+    tree.get_children = lambda: ["r1", "r2", "r3"]
+    tree.focus = lambda iid=None: "r3"  # key nav 設到 r3
+    tree.focus_set = lambda: None
+
+    apply_hover_calls = []
+
+    app = SimpleNamespace(
+        select_tree=tree,
+        _select_checked={"r1": False, "r2": False, "r3": False},
+        _bt_checked={},
+        _select_price_tags={"r1": "price_up", "r2": "price_down", "r3": "price_zero"},
+        _kbd_nav_guard_until_ms=99999999999,  # 很久之後
+        _kbd_nav_mouse_pos_at_guard=(0, 0),
     )
-    assert focus_set_calls, "v8 _on_select_tree_hover 應呼叫 focus_set"
-    # v8 應清舊 hover tag
-    assert "hover" not in str(items_state["r1"]["tags"]), (
-        f"v8 motion 應清舊 hover tag、實際 {items_state['r1']['tags']}"
+    app._kbd_nav_guard_should_block = lambda t: True  # block
+    app._apply_hover = lambda t, iid: apply_hover_calls.append(iid)
+
+    event = SimpleNamespace(widget=tree, x=10, y=10)
+    st.StrategyGUI._on_select_tree_hover(app, event)
+
+    # motion 被 block → 不應設 r2 的 hover（會是 None 因為 identify_row 被查到但被 block）
+    # 唯一被 set 的 hover 是 r3（focus）
+    assert apply_hover_calls == ["r3"], (
+        f"guard block 時 motion 應只套用 focus row 的 hover、實際 {apply_hover_calls}"
     )
-    # v8 應設新 row 的 hover_<price>
-    assert "hover_down" in items_state["r2"]["tags"], (
-        f"v8 motion 應設 r2 為 hover_down、實際 {items_state['r2']['tags']}"
+    # r1 的 hover 不該被清（沒被覆寫）
+    assert "hover_up" in items_state["r1"]["tags"], (
+        f"guard block 時不應清舊 hover、實際 {items_state['r1']['tags']}"
     )
 
 
 def test_ms_tree_hover_movement_clears_old():
-    """_ms_tree_hover v8 呼叫 _apply_hover 清舊 + 設新 row 的 hover_<price> tag"""
+    """_ms_tree_hover v9 呼叫 _apply_hover 清舊 + 設新 row（v9 加 guard、這邊走一般路徑）"""
     from types import SimpleNamespace
     import StockTool as st
 
@@ -984,9 +1032,10 @@ def test_ms_tree_hover_movement_clears_old():
         _ms_tree=tree,
         _ms_checked={"m1": False, "m2": False},
         _ms_price_tags={"m1": "price_up", "m2": "price_down"},
+        _kbd_nav_guard_until_ms=0,  # 已過期、guard 不 block
     )
+    app._kbd_nav_guard_should_block = lambda t: False  # 不 block
 
-    # v8：motion handler 呼叫 _apply_hover 設 hover_<price> tag
     def fake_apply_hover(t, iid):
         for child in t.get_children():
             cur = items_state[child]["tags"]
@@ -1002,18 +1051,40 @@ def test_ms_tree_hover_movement_clears_old():
     event = SimpleNamespace(widget=tree, x=10, y=10)
     st.StrategyGUI._ms_tree_hover(app, event)
 
-    # v8：motion 設 focus + 透過 _apply_hover 設 hover tag
-    assert "m2" in focus_calls, (
-        f"v8 _ms_tree_hover 應呼叫 focus(m2)、實際 focus_calls={focus_calls}"
+    assert "m2" in focus_calls
+    assert focus_set_calls
+    assert "hover" not in str(items_state["m1"]["tags"])
+    assert "hover_down" in items_state["m2"]["tags"]
+
+
+def test_ms_tree_hover_blocked_by_guard():
+    """v9：_ms_tree_hover 被 guard block → 不動 motion"""
+    from types import SimpleNamespace
+    import StockTool as st
+
+    tree = SimpleNamespace()
+    tree.identify = lambda region, x, y: "cell"
+    tree.identify_row = lambda y: "new_row"
+    tree.get_children = lambda: ["focus_row", "new_row"]
+
+    apply_hover_calls = []
+    app = SimpleNamespace(
+        _ms_tree=tree,
+        _ms_checked={},
+        _ms_price_tags={},
+        _kbd_nav_guard_until_ms=99999999999,
+        _kbd_nav_mouse_pos_at_guard=(0, 0),
     )
-    assert focus_set_calls, "v8 _ms_tree_hover 應呼叫 focus_set"
-    # v8 應清舊 hover tag
-    assert "hover" not in str(items_state["m1"]["tags"]), (
-        f"v8 motion 應清舊 hover tag、實際 {items_state['m1']['tags']}"
-    )
-    # v8 應設新 row 的 hover_<price>
-    assert "hover_down" in items_state["m2"]["tags"], (
-        f"v8 motion 應設 m2 為 hover_down、實際 {items_state['m2']['tags']}"
+    app._kbd_nav_guard_should_block = lambda t: True  # block
+    tree.focus = lambda iid=None: "focus_row"  # key nav 設到 focus_row
+    tree.focus_set = lambda: None
+    app._apply_hover = lambda t, iid: apply_hover_calls.append(iid)
+
+    event = SimpleNamespace(widget=tree, x=10, y=10)
+    st.StrategyGUI._ms_tree_hover(app, event)
+
+    assert apply_hover_calls == ["focus_row"], (
+        f"guard block 後只該套 focus row 的 hover、實際 {apply_hover_calls}"
     )
 
 
@@ -1240,47 +1311,56 @@ def test_apply_hover_clears_all_then_sets_new():
 
 
 def test_ensure_focus_visible_scrolls_extra_for_last_item():
-    """_ensure_focus_visible：若 iid 是最後一個、tree.yview_scroll(1, "units")"""
+    """v9 _ensure_focus_visible：用 bbox 判斷是否需要 extra scroll + update_idletasks
+
+    改寫：原本測試 v8 的「最後 row 才 scroll」、改成 v9 的「看 bbox 是否接近底部 scroll」
+    """
     from types import SimpleNamespace
     import StockTool as st
 
     yview_scroll_calls = []
     see_calls = []
+    update_calls = []
     apply_hover_calls = []
     move_cursor_calls = []
+    bbox_results = {}  # iid -> (x, y, w, h)
 
     tree = SimpleNamespace()
     tree.winfo_exists = lambda: True
     tree.get_children = lambda: ["a", "b", "c"]
     tree.see = lambda iid: see_calls.append(iid)
     tree.yview_scroll = lambda n, unit: yview_scroll_calls.append((n, unit))
-    tree.after_idle = lambda fn: fn()  # 立刻執行
+    tree.update_idletasks = lambda: update_calls.append(True)
+    tree.bbox = lambda iid: bbox_results.get(iid)
+    tree.winfo_height = lambda: 500  # canvas 高度
 
     app = SimpleNamespace()
     app._apply_hover = lambda t, iid: apply_hover_calls.append(iid)
     app._move_cursor_to_row = lambda t, iid: move_cursor_calls.append(iid)
 
-    # 情境 1：iid 是最後一個 "c"、應額外 scroll
+    # 情境 1：iid "c" bbox y+h = 480 + 20 = 500（接近 canvas 高度 500）→ 需 extra scroll
+    bbox_results["c"] = (0, 480, 100, 20)
     st.StrategyGUI._ensure_focus_visible(app, tree, "c")
     assert yview_scroll_calls == [(1, "units")], (
-        f"最後一個 row 應額外 yview_scroll(1, units)、實際 {yview_scroll_calls}"
+        f"row 接近底部 → 應 yview_scroll(1, units)、實際 {yview_scroll_calls}"
     )
-    assert see_calls == ["c"], f"see 應呼叫一次、實際 {see_calls}"
-    assert apply_hover_calls == ["c"], (
-        f"apply_hover 應呼叫一次、實際 {apply_hover_calls}"
+    assert len(see_calls) >= 1, f"see 應至少呼叫一次、實際 {see_calls}"
+    assert len(update_calls) >= 2, (
+        f"v9 應 update_idletasks 至少 2 次（see 後 + yview_scroll 後）、實際 {len(update_calls)} 次"
     )
-    assert move_cursor_calls == ["c"], (
-        f"move_cursor 應呼叫一次、實際 {move_cursor_calls}"
-    )
+    assert apply_hover_calls == ["c"]
+    assert move_cursor_calls == ["c"]
 
-    # 情境 2：iid 不是最後一個 "a"、不應額外 scroll
+    # 情境 2：iid "a" bbox y+h = 100 + 20 = 120（遠離 500）→ 不應 scroll
     yview_scroll_calls.clear()
     see_calls.clear()
     apply_hover_calls.clear()
     move_cursor_calls.clear()
+    update_calls.clear()
+    bbox_results["a"] = (0, 100, 100, 20)
     st.StrategyGUI._ensure_focus_visible(app, tree, "a")
     assert yview_scroll_calls == [], (
-        f"非最後一個 row 不應額外 scroll、實際 {yview_scroll_calls}"
+        f"row 在中間、不該 scroll、實際 {yview_scroll_calls}"
     )
     assert see_calls == ["a"]
     assert apply_hover_calls == ["a"]
@@ -1343,4 +1423,123 @@ def test_on_tree_key_see_focus_uses_ensure_focus_visible():
     # 確認舊的 "tree.see(cur)" 直接呼叫已拿掉、改透過 helper
     assert "tree.see(cur)" not in body, (
         "v8 _on_tree_key_see_focus 不應直接呼叫 tree.see(cur)、改用 _ensure_focus_visible"
+    )
+
+
+# ==========================================================
+# 【V1.2.0-kb-focus-v9】key nav guard 機制
+# ==========================================================
+
+def test_kbd_nav_guard_helper_exists():
+    """v9 _kbd_nav_guard_should_block helper 必須存在"""
+    content = _read()
+    assert "def _kbd_nav_guard_should_block(self, tree):" in content, (
+        "v9 應新增 _kbd_nav_guard_should_block(tree) helper"
+    )
+
+
+def test_kbd_nav_guard_blocks_when_mouse_unchanged():
+    """v9：guard 期間內 mouse 位置未變 → 應 block motion"""
+    from types import SimpleNamespace
+    import time as _time
+    import StockTool as st
+
+    cur_mouse_pos = (200, 300)
+
+    tree = SimpleNamespace()
+    tree.winfo_pointerxy = lambda: cur_mouse_pos
+
+    app = SimpleNamespace()
+    # guard 設為現在 + 60 秒（足够未來才不會 timeout）
+    app._kbd_nav_guard_until_ms = int(_time.time() * 1000) + 60000
+    app._kbd_nav_mouse_pos_at_guard = (200, 300)  # 跟當前位置一樣
+
+    result = st.StrategyGUI._kbd_nav_guard_should_block(app, tree)
+    assert result is True, (
+        f"guard 期間內 mouse 未變 → 應 return True block、實際 {result}"
+    )
+
+
+def test_kbd_nav_guard_releases_when_mouse_moves():
+    """v9：mouse 位置真的動了 → guard 自動解除、return False"""
+    from types import SimpleNamespace
+    import time as _time
+    import StockTool as st
+
+    tree = SimpleNamespace()
+    tree.winfo_pointerxy = lambda: (500, 600)  # mouse 已移到新位置
+
+    app = SimpleNamespace()
+    app._kbd_nav_guard_until_ms = int(_time.time() * 1000) + 60000
+    app._kbd_nav_mouse_pos_at_guard = (200, 300)  # 原來位置
+
+    result = st.StrategyGUI._kbd_nav_guard_should_block(app, tree)
+    assert result is False, (
+        f"mouse 真的動了 → 應 return False 不 block、實際 {result}"
+    )
+    # 同時 guard 應自動 reset
+    assert app._kbd_nav_guard_until_ms == 0, (
+        f"guard 自動 reset、實際 {app._kbd_nav_guard_until_ms}"
+    )
+
+
+def test_kbd_nav_guard_releases_on_timeout():
+    """v9：guard timeout（已過期）→ 應 return False 不 block"""
+    from types import SimpleNamespace
+    import time as _time
+    import StockTool as st
+
+    tree = SimpleNamespace()
+    tree.winfo_pointerxy = lambda: (200, 300)
+
+    app = SimpleNamespace()
+    # guard 在 1 分鐘前就過期了
+    app._kbd_nav_guard_until_ms = int(_time.time() * 1000) - 60000
+    app._kbd_nav_mouse_pos_at_guard = (200, 300)
+
+    result = st.StrategyGUI._kbd_nav_guard_should_block(app, tree)
+    assert result is False, (
+        f"guard 已過期 → 應 return False 不 block、實際 {result}"
+    )
+
+
+def test_motion_handlers_call_guard():
+    """v9：3 個 motion handler 都要呼叫 _kbd_nav_guard_should_block"""
+    content = _read()
+    for fn in ("_on_select_tree_hover", "_ms_tree_hover", "_etf_tree_hover_combined"):
+        idx = content.find(f"def {fn}(self, event):")
+        assert idx != -1, f"找不到 {fn}"
+        end = content.find("\n    def ", idx + 50)
+        if end == -1:
+            end = len(content)
+        body = content[idx:end]
+        if '"""' in body:
+            parts = body.split('"""')
+            body = '"""'.join(parts[2:])
+        assert "_kbd_nav_guard_should_block" in body, (
+            f"v9 {fn} 應呼叫 _kbd_nav_guard_should_block"
+        )
+
+
+def test_ensure_focus_visible_uses_bbox_check():
+    """v9 _ensure_focus_visible 用 bbox.y+h 判斷是否需要 extra scroll"""
+    content = _read()
+    idx = content.find("def _ensure_focus_visible(self, tree, iid):")
+    assert idx != -1, "找不到 _ensure_focus_visible"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # v9 用 bbox.y+h 判斷（不是看是不是最後 row）
+    assert "tree.bbox(iid)" in body, (
+        "v9 _ensure_focus_visible 應呼叫 tree.bbox(iid)"
+    )
+    assert "tree.winfo_height" in body, (
+        "v9 _ensure_focus_visible 應呼叫 tree.winfo_height() 算 canvas 高度"
+    )
+    assert "update_idletasks" in body, (
+        "v9 _ensure_focus_visible 應呼叫 tree.update_idletasks() 強制重繪"
     )

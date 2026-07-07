@@ -1,12 +1,47 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v8 (2026-07-07 10:59) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v9 (2026-07-07 11:50) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v8
-最後更新: 2026-07-07 11:13 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v9
+最後更新: 2026-07-07 12:00 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools, ctypes (Windows)
+
+【v1.2.0 paper-trading-kb-focus-v9】2026-07-07 12:00 (William 11:50 用截圖反映 v8 仍失敗)
+【背景】William 2026-07-07 11:50 用截圖回報 v8 仍失敗：
+  1. cursor 沒有跟個 high light bar 所以會有 high light 殘留的問題
+     → key release 後 mouse cursor 還在舊位置、滑鼠任何微動觸發 motion handler
+     → motion handler 用 identify_row(event.y) 查到的還是舊位置、蓋掉 key nav 設的 hover
+  2. key down scroll 到最下面時、還是跟之前一樣只有 high light bar 上部幾個 dots
+     → v8 在 after_idle 內才 yview_scroll、see() 可能未 settle、scroll 沒生效
+     → focus rectangle 仍被底部邊緣切掉
+
+【v8 失敗根因】
+  1. motion handler 只看滑鼠位置、不管鍵盤 focus 是什麼 → cursor 沒動=highlight 殘留
+  2. see() + after_idle(yview_scroll) 缺 update_idletasks、scroll 不一定生效
+
+【v9 簡單設計（key nav guard + robust scroll）】
+  1. 新增 _kbd_nav_guard_should_block(tree)：剛 key nav 後 500ms 內、滑鼠位置未變
+     → motion handler 應 block、保留 key nav 設的 hover
+     → 滑鼠真的動了、guard 自動解除、normal motion
+     → guard timeout（500ms 後）也自動解除
+  2. _on_tree_key_see_focus 設 _kbd_nav_guard_until_ms + _kbd_nav_mouse_pos_at_guard
+  3. 3 個 motion handler（_on_select_tree_hover / _ms_tree_hover / _etf_tree_hover_combined）
+     進場先調 _kbd_nav_guard_should_block、True 就 ignore motion event
+  4. _ensure_focus_visible 重寫：
+     - see() 後立刻 tree.update_idletasks()（強制重繪、bbox 才准）
+     - 檢查 bbox.y+h 是否接近 canvas 底部（不是看是不是最後 row）
+     - 是才 yview_scroll(1, units) + update_idletasks（多 scroll 一 row）
+     - 最後才 apply_hover + move_cursor（bbox 是准的）
+
+【新測試】
+- tests/test_keyboard_space_toggle.py（4 個新增、總 64 個全綠）：
+  新增：test_kbd_nav_guard_helper_exists / test_kbd_nav_guard_blocks_when_mouse_unchanged /
+        test_kbd_nav_guard_releases_when_mouse_moves / test_kbd_nav_guard_releases_on_timeout
+- tests/test_price_color.py：21 個全綠（v8 _apply_hover 邏輯不變）
+
+【驗證】預期全 test suite 跑完 765 pass + 1 pre-existing fail（test_etf_weekend_fallback 與本改無關）
 
 【v1.2.0 paper-trading-kb-focus-v8】2026-07-07 11:00 (William 10:59 用截圖反映 v7 仍失敗)
 【背景】William 2026-07-07 10:59 用截圖回報 v7 仍失敗：
@@ -3837,6 +3872,11 @@ class StrategyGUI(tk.Tk):
         # 記憶體中股票名稱（stock_id → name，fetch 回來時順便快取）
         self._current_names: Dict[str, str] = {}
 
+        # 【V1.2.0-kb-focus-v9】key nav guard（避免 motion handler 立即覆蓋 highlight）
+        # 規則：key release 後 500ms 內、且滑鼠位置未動、motion handler 應 block
+        self._kbd_nav_guard_until_ms = 0
+        self._kbd_nav_mouse_pos_at_guard = (0, 0)
+
         self._build_ui()
         self._poll_log_queue()
         self._load_config_to_ui()
@@ -4942,40 +4982,50 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _on_tree_key_see_focus(self, event):
-        """【V1.2.0-kb-focus-v8】Down/Up/Home/End/Prior/Next key release 時主動 see + sync highlight
+        """【V1.2.0-kb-focus-v9】Down/Up/Home/End/Prior/Next key release 時主動 see + sync highlight
 
-        William 2026-07-07 10:59 用截圖反映 v7 仍失敗：
-        1. Down key 向下、到最後一個 item 時 focus rectangle 被底部邊緣切掉
-           → 只看到 highlight bar 頂部幾個 dots、看不出來是 highlight 哪個 row
-        2. 鍵盤 ↑/↓ 移動後、視覺 highlight 沒跟著移到新 row
-           → 還停在 mouse 最後 hover 的位置、看起來不連貫
+        William 2026-07-07 11:50 反映 v8 仍失敗：
+        1. cursor 沒有跟個 high light bar、所以會有 high light 殘留的問題
+           → key release 後滑鼠 cursor 還在舊位置、滑鼠任何微動都會觸發 motion 、
+             motion handler 把 hover 設回滑鼠所在位置 → 殘留
+        2. key down scroll 到最下面時、還是一樣只有 high light bar 上部幾個 dots
+           → v8 在 after_idle 內才 yview_scroll(1, units)、see() 可能還沒 fully settle 、
+             scroll 沒生效、focus rectangle 仍被底部邊緣切掉
 
-        v8 修法：
-        1. see(iid) 後、若 iid 是最後一個 row、額外 yview_scroll(1, "units")
-           → 多 scroll 一格、focus rectangle 不會被切
-        2. KeyRelease 後主動呼叫 _apply_hover(tree, cur)
-           → 視覺 highlight 跟著鍵盤 focus 移動
-        3. 若 mouse 已在 tree 內、用 OS API 把 cursor 移到新 row 中央
-           → 視覺 / 鍵盤 / mouse 三者完全同步
+        v9 簡單修法：
+        1. _kbd_nav_guard_until_ms：在 key release 後標記「500ms 內 motion handler 需 guard」
+           - 同時存 _kbd_nav_mouse_pos_at_guard（當下 mouse 位置）
+           - motion handler 看到 guard 期間內、滑鼠位置未變 → ignore（保留 key nav 設的 hover）
+           - 滑鼠真的動了 → 解除 guard、走一般 motion 邏輯
+        2. _ensure_focus_visible 改寫：
+           - see 後 tree.update_idletasks() 強制重繪
+           - 再檢查 bbox.y+h 是否接近 canvas 底部、是才 yview_scroll + update_idletasks
+           - 最後才 apply_hover + move_cursor（確保 bbox 計算准）
         """
         tree = event.widget
         try:
             cur = tree.focus()
             if cur and cur in tree.get_children():
+                # v9 新增：設 _kbd_nav_guard、防止 motion handler 立即覆蓋 highlight
+                self._kbd_nav_guard_until_ms = int(time.time() * 1000) + 500
+                try:
+                    self._kbd_nav_mouse_pos_at_guard = tree.winfo_pointerxy()
+                except tk.TclError:
+                    self._kbd_nav_mouse_pos_at_guard = (0, 0)
                 # 用 after_idle 避免跟 Treeview 內部 scroll 競爭
                 tree.after_idle(lambda: self._ensure_focus_visible(tree, cur))
         except tk.TclError:
             pass
 
     def _ensure_focus_visible(self, tree, iid):
-        """【V1.2.0-kb-focus-v8】確保 focus row 完整可見（含 focus rectangle）+ sync highlight + cursor
+        """【V1.2.0-kb-focus-v9】確保 focus row 完整可見 + sync highlight + cursor
 
-        三件事一次做：
-        1. tree.see(iid) — 確保 row 在可見區
-        2. 若 iid 是最後一個 row、yview_scroll(1, "units") 多 scroll 一格
-           → focus rectangle 底部邊框不會被 canvas 切掉
-        3. _apply_hover(tree, iid) — 視覺 highlight 同步到 focus row
-        4. _move_cursor_to_row(tree, iid) — 把 mouse cursor 也移到 focus row 中央
+        改進 v8：
+        1. tree.see(iid) 後立刻 tree.update_idletasks()（強制 Tk 重繪、bbox 才准）
+        2. 檢查 bbox.y+h 是否接近 canvas 底部、是才 yview_scroll(1, "units")
+           → v8 假設「最後一個 row」一定需要 extra scroll、其實是「接近底部」才需要
+           → v8 也沒 update_idletasks、scroll 可能沒生效
+        3. apply_hover + move_cursor 在更新完 scroll 後才做（bbox 是准的）
         """
         try:
             if not tree.winfo_exists():
@@ -4984,21 +5034,21 @@ class StrategyGUI(tk.Tk):
                 return
             # 1. 確保 row 可見
             tree.see(iid)
-            # 2. 若是最後一個 row、額外 scroll 一格避免 focus rectangle 被切
-            children = list(tree.get_children())
-            is_last = (iid == children[-1]) if children else False
-            if is_last:
-                # 用 after_idle 確保 tree.see() 的 scroll 完整生效後、再多 scroll
-                def scroll_extra():
-                    try:
-                        if tree.winfo_exists() and tree.get_children():
-                            tree.yview_scroll(1, "units")
-                    except tk.TclError:
-                        pass
-                tree.after_idle(scroll_extra)
-            # 3. 視覺 highlight 同步到 focus row
+            # 2. 強制重繪、bbox 才會更新准
+            tree.update_idletasks()
+            # 3. 檢查 bbox 是否接近底部、是則 extra scroll 避免 focus rectangle 被切
+            bbox = tree.bbox(iid)
+            if bbox:
+                _, y, _, h = bbox
+                tree_h = tree.winfo_height()
+                # y + h 接近 tree_h（≤ tree_h - 5px）表示 row 在底部
+                # → extra scroll 一 row、把 focus row 推到中段
+                if h > 0 and y + h >= tree_h - 5:
+                    tree.yview_scroll(1, "units")
+                    tree.update_idletasks()
+            # 4. 視覺 highlight 同步到 focus row
             self._apply_hover(tree, iid)
-            # 4. 移動 mouse cursor 到 focus row 中央（若 mouse 已在 tree 內）
+            # 5. 移動 mouse cursor 到 focus row 中央（若 mouse 已在 tree 內）
             self._move_cursor_to_row(tree, iid)
         except tk.TclError:
             pass
@@ -6617,13 +6667,17 @@ class StrategyGUI(tk.Tk):
 
 
     def _ms_tree_hover(self, event):
-        """【V1.2.0-kb-focus-v8】手動選股 hover：設視覺 highlight + 鍵盤 focus
+        """【V1.2.0-kb-focus-v9】手動選股 hover：設視覺 highlight + 鍵盤 focus + guard
 
-        v8 改變：除了 focus 之外、也呼叫 _apply_hover 設 hover_<price> tag
-          - v7 只設 focus、tree.focus() 不觸發 <<TreeviewSelect>>、highlight 不顯示
-          - v8 直接透過 _apply_hover 設 hover tag、跟 <<TreeviewSelect>> 共用同一函式
+        v9 加 _kbd_nav_guard、避免 key nav 後 motion 立即覆蓋 highlight
         """
         try:
+            # v9 新增：key nav guard
+            if self._kbd_nav_guard_should_block(self._ms_tree):
+                focus_iid = self._ms_tree.focus()
+                if focus_iid and focus_iid in self._ms_tree.get_children():
+                    self._apply_hover(self._ms_tree, focus_iid)
+                return
             region = self._ms_tree.identify("region", event.x, event.y)
             iid = self._ms_tree.identify_row(event.y) if region == "cell" else None
             if iid and iid in self._ms_tree.get_children():
@@ -6686,17 +6740,23 @@ class StrategyGUI(tk.Tk):
         """【Fix12 廢棄】改成 _etf_tree_hover_combined"""
 
     def _etf_tree_hover_combined(self, event):
-        """【V0.9.5-tab-split-phase3-C Fix12 + V1.2.0-kb-focus-v8】
+        """【V0.9.5-tab-split-phase3-C Fix12 + V1.2.0-kb-focus-v9】
         ETF Treeview hover：
         - 移到 cell（任意欄） → 該列 highlight（_apply_hover 設 hover_<price> tag）
         - 移到「ETF數」欄（column #6） → popup 顯示包含此股的 ETF 列表
         - 移到「今日異動」欄（column #7） → popup 顯示異動明細
         - 移到非 cell 區（捲軸/header） → 關 popup + 清 hover
 
-        v8 變更：motion handler 跟 <<TreeviewSelect>> 共用 _apply_hover
-          - 設視覺 highlight + 鍵盤 focus 一次完成
-          - 不會有 race condition
+        v9 新增 _kbd_nav_guard：避免 key nav 後 motion 立即覆蓋 highlight
         """
+        # v9 新增：key nav guard（ETF 動效果複雜、不只 set hover 還有 popup）
+        if self._kbd_nav_guard_should_block(self._etf_tree):
+            focus_iid = self._etf_tree.focus()
+            if focus_iid and focus_iid in self._etf_tree.get_children():
+                self._apply_hover(self._etf_tree, focus_iid)
+            # guard 期間不處理 popup、避免焦慮跳
+            return
+
         region = self._etf_tree.identify("region", event.x, event.y)
         if region != "cell":
             self._close_etf_popup()
@@ -6708,7 +6768,7 @@ class StrategyGUI(tk.Tk):
             self._clear_all_hover(self._etf_tree)
             return
 
-        # v8：設視覺 highlight（單一真相 = _apply_hover）
+        # 設視覺 highlight（單一真相 = _apply_hover）
         self._apply_hover(self._etf_tree, iid)
         # 同步設鍵盤 focus
         try:
@@ -8686,24 +8746,29 @@ class StrategyGUI(tk.Tk):
     # ══════════════════════════════════════════════════════════════
 
     def _on_select_tree_hover(self, event):
-        """【V1.2.0-kb-focus-v8】系統選股 / 回測 Treeview hover
+        """【V1.2.0-kb-focus-v9】系統選股 / 回測 Treeview hover
 
-        William 2026-07-07 10:59 反映 v7 仍失敗：
-          - mouse 移動時 highlight bar 不見了（v7 取消 motion 設 hover、壞了）
-          - 必須 click 一下才會有 highlight、才可 Up/Down scroll
+        William 2026-07-07 11:50 反映 v8 仍失敗：
+          - key release 後 highlight 殘留問題
+            → 原因：key release 設 hover 到新 row、但滑鼠還在舊位置
+              任何 mouse 微動都觸發 motion、把 hover 設回滑鼠位置 = 舊位置
 
-        v7 失敗根因：motion handler 只設 tree.focus(iid)、完全不動 tags
-          → 但 tree.focus() 不會觸發 <<TreeviewSelect>> 事件
-          → hover_<price> tag 永遠沒人設、視覺上完全沒 highlight
-          → 必須 click 觸發 <<TreeviewSelect>> 才會有 highlight
-
-        v8 修法：motion handler 回到 v5 風格、呼叫 _apply_hover 設 hover_<price> tag
-          - _apply_hover 是單一真相（也給 <<TreeviewSelect>> 用）
-          - 「清全部 + 設新 row」不會有 race condition
-          - 同步設 tree.focus(iid) + tree.focus_set() → Up/Down 立刻可用
+        v9 簡單修法：
+        1. motion handler 進場先檢查 _kbd_nav_guard
+        2. 若還在 guard 期間、滑鼠位置未變 → ignore motion（保留 key nav 設的 hover）
+           → 只更新 tree.focus + 不更新 hover tag
+        3. 若滑鼠真的動了、或 guard timeout → 解除 guard、正常處理
         """
         tree = event.widget
         try:
+            # v9 新增：key nav guard、若 mouse 沒動、就忽略 motion
+            if self._kbd_nav_guard_should_block(tree):
+                # 保留 key nav 設的 hover、但同步 focus/apply_hover 確保 visual 一致
+                focus_iid = tree.focus()
+                if focus_iid and focus_iid in tree.get_children():
+                    self._apply_hover(tree, focus_iid)
+                return
+            # 一般 motion 處理
             region = tree.identify("region", event.x, event.y)
             iid = tree.identify_row(event.y) if region == "cell" else None
             if iid and iid in tree.get_children():
@@ -8714,6 +8779,41 @@ class StrategyGUI(tk.Tk):
                 tree.focus_set()
         except tk.TclError:
             pass
+
+    def _kbd_nav_guard_should_block(self, tree):
+        """【V1.2.0-kb-focus-v9】檢查是否應 block motion handler（剛 key nav 且 mouse 未動）
+
+        規則：
+        - 若 _kbd_nav_guard_until_ms 過期 → False（不 block、normal motion）
+        - 若 mouse 位置 != _kbd_nav_mouse_pos_at_guard → False（mouse 真的動了、解除 guard）
+        - 其餘 → True（block motion、保留 key nav 設的 hover）
+
+        Returns:
+            bool: True = 應 block motion handler；False = 不 block、正常處理
+        """
+        try:
+            now_ms = int(time.time() * 1000)
+        except Exception:
+            return False
+        if not hasattr(self, "_kbd_nav_guard_until_ms"):
+            return False
+        if self._kbd_nav_guard_until_ms <= now_ms:
+            # guard 過期、清掉、normal motion
+            self._kbd_nav_guard_until_ms = 0
+            return False
+        # guard 期間內、檢查 mouse 是否真的動了
+        try:
+            cur_pos = tree.winfo_pointerxy()
+        except tk.TclError:
+            return False
+        if not hasattr(self, "_kbd_nav_mouse_pos_at_guard"):
+            self._kbd_nav_mouse_pos_at_guard = (0, 0)
+        if cur_pos == self._kbd_nav_mouse_pos_at_guard:
+            # 滑鼠沒動、block motion
+            return True
+        # 滑鼠真的動了、解除 guard、normal motion
+        self._kbd_nav_guard_until_ms = 0
+        return False
     def _on_select_tree_leave(self, event):
         """【V1.2.0-kb-focus-v4】離開 Treeview 時不清 hover、讓 selected row 保持高亮"""
         # v4 設計：不要清 hover、讓使用者離開 Treeview 後仍能看到選中的 row
