@@ -204,7 +204,7 @@ def test_v16_x11_with_mock_unit():
     x11_libs.XCloseDisplay = lambda d: x11_calls.append(("XCloseDisplay", d))
 
     app = SimpleNamespace()
-    # Patch _x11_move_cursor_to to use our mock directly
+    app._v18_log = lambda msg: None  # v18 log helper
     import ctypes as _ct
     saved_cdll = _ct.CDLL
     _ct.CDLL = lambda name: x11_libs
@@ -309,25 +309,8 @@ def test_v17_x11_xdotool_fallback():
     )
 
 
-def test_v17_stderr_log_for_debug():
-    """v17：_move_cursor_to_row 必印 stderr log 方便 debug"""
-    content = _read()
-    idx = content.find("def _move_cursor_to_row(self, tree, iid):")
-    assert idx != -1
-    end = content.find("\n    def ", idx + 50)
-    if end == -1:
-        end = len(content)
-    body = content[idx:end]
-    if '"""' in body:
-        parts = body.split('"""')
-        body = '"""'.join(parts[2:])
-    # 必印 log 含 target
-    assert "_sys.stderr" in body or "sys.stderr" in body, (
-        "v17 _move_cursor_to_row 必印 stderr log"
-    )
-    assert "target=" in body or "target_x" in body, (
-        "v17 必 log target 座標"
-    )
+def test_v18_v18_log_helper():
+    """v18：_v18_log helper 必存在、同時 print + 寫檔"""
 
 
 def test_v17_x11_with_xsync_mock_unit():
@@ -344,13 +327,14 @@ def test_v17_x11_with_xsync_mock_unit():
     x11_libs.XCloseDisplay = lambda d: x11_calls.append(("XCloseDisplay", d))
 
     app = SimpleNamespace()
+    app._v18_log = lambda msg: None  # v18 log helper
     import ctypes as _ct
     saved_cdll = _ct.CDLL
     _ct.CDLL = lambda name: x11_libs
 
     try:
         result = st.StrategyGUI._x11_move_cursor_to(app, 100, 200)
-        assert result is True
+        assert result is True, f"expected True got {result}"
     finally:
         _ct.CDLL = saved_cdll
 
@@ -358,4 +342,76 @@ def test_v17_x11_with_xsync_mock_unit():
     calls_summary = [c[0] for c in x11_calls]
     assert "XSync" in calls_summary, (
         f"v17 必用 XSync、實際 {calls_summary}"
+    )
+
+def test_v18_v18_log_helper():
+    """v18：_v18_log helper 必存在、同時 print + 寫檔"""
+    content = _read()
+    assert "def _v18_log(self, msg):" in content, (
+        "v18 必新增 _v18_log helper 寫到 stdout + /tmp/stocktool_v18.log"
+    )
+    assert "/tmp/stocktool_v18.log" in content, (
+        "v18 _v18_log 必寫到 /tmp/stocktool_v18.log（fallback）"
+    )
+
+
+def test_v18_move_cursor_to_row_logs():
+    """v18：_move_cursor_to_row 開頭必 log 確保被呼叫"""
+    content = _read()
+    idx = content.find("def _move_cursor_to_row(self, tree, iid):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "_v18_log" in body, (
+        "v18 _move_cursor_to_row 必呼叫 self._v18_log"
+    )
+
+
+def test_v18_on_tree_key_see_focus_logs():
+    """v18：_on_tree_key_see_focus 開頭必 log、函式被 trigger"""
+    content = _read()
+    idx = content.find("def _on_tree_key_see_focus(self, event):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "_v18_log" in body, (
+        "v18 _on_tree_key_see_focus 必呼叫 self._v18_log"
+    )
+
+
+def test_v18_no_more_after_idle():
+    """v18：_on_tree_key_see_focus 不再 after_idle（改同步呼叫）"""
+    content = _read()
+    idx = content.find("def _on_tree_key_see_focus(self, event):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        # 把 docstring 移除、只看 code
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])  # skip first part是 def, last part是 after
+    # 但 docstring 之後的部分可能還有 after_idle 講解
+    # 嚴格說、看 call statement
+    # v18 code 不應再呼叫 tree.after_idle 或 self.after_idle
+    assert "tree.after_idle(" not in body, (
+        "v18 _on_tree_key_see_focus 不應再用 tree.after_idle("
+    )
+    assert "self.after_idle(" not in body, (
+        "v18 _on_tree_key_see_focus 不應再用 self.after_idle("
+    )
+    # 直接呼叫 _move_cursor_to_row
+    assert "self._move_cursor_to_row(" in body, (
+        "v18 _on_tree_key_see_focus 必直接呼叫 self._move_cursor_to_row("
     )

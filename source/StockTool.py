@@ -1,15 +1,46 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v17 (2026-07-07 18:18) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v18 (2026-07-07 18:30) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v17
-最後更新: 2026-07-07 18:21 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v18
+最後更新: 2026-07-07 18:34 (Asia/Taipei)
 Python 版本: 3.8+
 依賴套件: tkinter, pandas, requests, openpyxl, numpy, itertools, ctypes (Windows)
 
 
 
+
+
+【v1.2.0 paper-trading-kb-focus-v18】2026-07-07 18:30 (William 18:28 反映「v17 log 完全看不到」)
+【背景】William 2026-07-07 18:28 報告：
+  「program console 或是 python console 都沒看到任何[v17]message」
+
+【v17 為何 log 沒出來？】
+- print(..., file=sys.stderr) → PyCharm 可能把 stderr redirect 到 dev/null
+- tree.after_idle(...) 排程 → busy mainloop 可能不執行
+- 結果：log 看不見、看不出真正到底跑到哪
+
+【v18 簡單設計（log 多重 output + 同步呼叫）】
+1. 新增 _v18_log(msg) helper：
+   - 寫到 /tmp/stocktool_v18.log（保證有檔案可查）
+   - 也 print(..., flush=True) 到 stdout（PyCharm 看到）
+2. _on_tree_key_see_focus 取消 after_idle、改同步呼叫 _ensure_focus_visible + _move_cursor_to_row
+3. _v18_log 在每個關鍵點呼叫、確保 log 寫出來
+4. _move_cursor_to_row 也加 _v18_log
+
+【驗證步驟給 William】
+1. 重啟 App
+2. 按 Down 鍵幾下
+3. 看兩個地方：
+   a. PyCharm program console（如果 stdout 有 flush）
+   b. cat /tmp/stocktool_v18.log（一定有、即使 PyCharm 看不到 stdout 也看得到）
+4. 看 log 是卡在哪一行：
+   - 沒寫任何 [v18 _on_tree_key_see_focus] → bind 沒觸發
+   - 寫到 _move_cursor_to_row 但 _move_os_cursor returned True → cursor 是該有動
+   - 寫到 _move_os_cursor returned False → 都失敗、要看是哪個 OS
+
+【新測試】tests/test_keyboard_space_toggle.py 新增 4 個 v18 test
 
 【v1.2.0 paper-trading-kb-focus-v17】2026-07-07 18:20 (William 18:12 明確反映本機 Ubuntu + XWarpPointer 仍沒動)
 【背景】William 2026-07-07 18:17 確認：
@@ -4055,6 +4086,28 @@ class StrategyGUI(tk.Tk):
         # ETF Tab 背景自動抓（延後 2.5 秒、讙 manual_select 跟 price fetch 先跑）
         self.after(2500, self._etf_auto_startup_fetch)
 
+    def _v18_log(self, msg):
+        """【V1.2.0-kb-focus-v18】同時 print + 寫檔、避免 PyCharm stdout 看不到"""
+        try:
+            import os as _os
+            _log_path = "/tmp/stocktool_v18.log"
+            with open(_log_path, "a", encoding="utf-8") as _f:
+                _f.write(msg + "\n")
+            # 也 print stdout + flush（避免 buffered）
+            print(msg, flush=True)
+        except Exception:
+            try:
+                print(msg, flush=True)
+            except Exception:
+                pass
+
+    def _clear_v18_log(self):
+        try:
+            with open("/tmp/stocktool_v18.log", "w", encoding="utf-8") as _f:
+                _f.write("[v18 log cleared]\n")
+        except Exception:
+            pass
+
     def _build_ui(self):
         self.geometry("1280x720")
 
@@ -5296,49 +5349,46 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _move_cursor_to_row(self, tree, iid):
-        """【V1.2.0-kb-focus-v17】鍵盤 ↑/↓ 移動後、把 OS mouse cursor 移到該 row
+        """【V1.2.0-kb-focus-v18】鍵盤 ↑/↓ 移動後、把 OS mouse cursor 移到該 row
 
-        v17 變更（William 18:12 報告 v16 XWarpPointer 仍沒動）：
-        - XFlush 換 XSync（block 等 server 處理完）
-        - 加 subprocess xdotool mousemove fallback
-        - 加 stderr log 方便 debug
+        v18 變更：
+        - 換成 _v18_log 寫到 stdout + 檔、避免 PyCharm buffer 看不到
+        - 開頭必 log、確保 function 進來了
         """
-        import sys as _sys
+        self._v18_log(f"[v18 _move_cursor_to_row] 進入 iid={iid}")
         if not tree or not tree.winfo_exists():
+            self._v18_log(f"[v18 _move_cursor_to_row] early return: tree 不存在")
             return
         bbox = tree.bbox(iid)
+        self._v18_log(f"[v18 _move_cursor_to_row] bbox={bbox}")
         if not bbox:
-            print(f"[v17] _move_cursor_to_row bbox 為空 iid={iid}", file=_sys.stderr)
             return
         x, y, w, h = bbox
         if h <= 0:
+            self._v18_log(f"[v18 _move_cursor_to_row] h={h} <= 0")
             return
         cx = x + w // 2
         cy = y + h // 2
 
-        # 1. Tk 內部 Motion 同步（Tk 內建、視覺上 hover 同步到 focus row）
+        # 1. Tk 內部 Motion 同步
         try:
             tree.event_generate("<Motion>", x=cx, y=cy)
         except tk.TclError:
             pass
 
-        # 2. 實體 OS cursor 移動（跨平台 + log）
+        # 2. 實體 OS cursor 移動
         try:
             target_x = tree.winfo_rootx() + cx
             target_y = tree.winfo_rooty() + cy
-            print(
-                f"[v17] key nav iid={iid} root=({tree.winfo_rootx()},{tree.winfo_rooty()}) "
-                f"tree_local=({cx},{cy}) → target=({target_x},{target_y})",
-                file=_sys.stderr,
+            self._v18_log(
+                f"[v18 _move_cursor_to_row] target=({target_x},{target_y}) "
+                f"(root={tree.winfo_rootx()},{tree.winfo_rooty()} local={cx},{cy})"
             )
             moved = self._move_os_cursor(target_x, target_y)
-            print(
-                f"[v17] _move_os_cursor returned {moved}",
-                file=_sys.stderr,
-            )
+            self._v18_log(f"[v18 _move_cursor_to_row] _move_os_cursor returned {moved}")
             return moved
-        except Exception:
-            pass
+        except Exception as e:
+            self._v18_log(f"[v18 _move_cursor_to_row] except: {e}")
 
     def _move_os_cursor(self, target_x, target_y):
         """【V1.2.0-kb-focus-v16】跨平台 OS cursor 移動
@@ -5425,16 +5475,15 @@ class StrategyGUI(tk.Tk):
                     )
                     # XSync(reject=False) 等 server 處理完所有 event queue
                     lib.XSync(display, False)
-                    print(
-                        f"[v17 x11] layer A attempt {attempt+1}/3 success → ({target_x},{target_y})",
-                        file=_sys.stderr,
+                    self._v18_log(
+                        f"[v18 x11] layer A attempt {attempt+1}/3 success → ({target_x},{target_y})"
                     )
                     return True
                 finally:
                     lib.XCloseDisplay(display)
-            print("[v17 x11] layer A 全部 attempts 完沒成功", file=_sys.stderr)
+            self._v18_log("[v18 x11] layer A 全部 attempts 完沒成功")
         except Exception as e:
-            print(f"[v17 x11] layer A exception: {e}", file=_sys.stderr)
+            self._v18_log(f"[v18 x11] layer A exception: {e}")
 
         # Layer B: xdotool subprocess fallback (走 libxdo XTest extension)
         try:
@@ -5454,9 +5503,9 @@ class StrategyGUI(tk.Tk):
                 file=_sys.stderr,
             )
         except FileNotFoundError:
-            print("[v17 x11] layer B xdotool not found in PATH", file=_sys.stderr)
+            self._v18_log("[v18 x11] layer B xdotool not found in PATH")
         except Exception as e:
-            print(f"[v17 x11] layer B exception: {e}", file=_sys.stderr)
+            self._v18_log(f"[v18 x11] layer B exception: {e}")
 
         return False
 
@@ -9125,30 +9174,35 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _on_tree_key_see_focus(self, event):
-        """【V1.2.0-kb-focus-v16】Down/Up/Home/End/Prior/Next key release 時主動 see + sync highlight
+        """【V1.2.0-kb-focus-v18】Down/Up/Home/End/Prior/Next key release 時主動 see + sync highlight
 
-        v16 變更：
-        - 設定 _kbd_nav_guard（200ms 短、保護 motion handler 不會覆蓋 key nav 的 hover）
-        - _ensure_focus_visible 看 row 是否完整、不足則 scroll
-        - _move_cursor_to_row 跨平台 (Linux XWarpPointer) 真的動 OS cursor
-        - 防止 mouse 動時 motion 殘留 hover
+        v18 變更（William 18:28 反映 _v17_[log] 完全沒出現在 console）：
+        1. 加強 logging — print 到 stdout + 寫檔 /tmp/stocktool_v18.log
+        2. 取消 after_idle、改為同步呼叫（after_idle 在 busy mainloop 可能 queue 不會執行）
+        3. 開頭就 log、確保 function 是被觸發的
         """
+        self._v18_log(f"[v18 _on_tree_key_see_focus] 進入 keysym={getattr(event, 'keysym', '?')}")
         tree = event.widget
         try:
             cur = tree.focus()
+            self._v18_log(f"[v18 _on_tree_key_see_focus] cur={cur}")
             if cur and cur in tree.get_children():
-                # v16：必設 guard、滑鼠只要未動 200ms 內不覆蓋 hover
+                # 設 guard、滑鼠只要未動 200ms 內不覆蓋 hover
                 self._kbd_nav_guard_until_ms = int(time.time() * 1000) + 200
                 try:
                     self._kbd_nav_mouse_pos_at_guard = tree.winfo_pointerxy()
                 except tk.TclError:
                     self._kbd_nav_mouse_pos_at_guard = (0, 0)
-                # 用 after_idle 避免跟 Treeview 內部 scroll 競爭
-                tree.after_idle(lambda: self._ensure_focus_visible(tree, cur))
-                # v16 新增：跨平台 move OS cursor 到新 row
-                tree.after_idle(lambda: self._move_cursor_to_row(tree, cur))
-        except tk.TclError:
-            pass
+                # v18：改用同步呼叫、不再 after_idle
+                self._v18_log(f"[v18 _on_tree_key_see_focus] 同步呼叫 _ensure_focus_visible")
+                self._ensure_focus_visible(tree, cur)
+                self._v18_log(f"[v18 _on_tree_key_see_focus] 同步呼叫 _move_cursor_to_row")
+                self._move_cursor_to_row(tree, cur)
+                self._v18_log(f"[v18 _on_tree_key_see_focus] 完成")
+        except tk.TclError as e:
+            self._v18_log(f"[v18 _on_tree_key_see_focus] TclError: {e}")
+        except Exception as e:
+            self._v18_log(f"[v18 _on_tree_key_see_focus] except: {e}")
 
     def _kbd_nav_guard_should_block(self, tree):
         """v16：200ms 短 guard、避免 motion handler 速率覆蓋 key nav 剛設的 hover
