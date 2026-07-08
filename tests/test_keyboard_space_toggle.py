@@ -174,7 +174,10 @@ def test_v16_no_windows_specific_api_in_motion_handler():
 
 
 def test_v22_on_tree_key_see_focus_no_move_cursor():
-    """v22：_on_tree_key_see_focus 不再嘗試動 OS cursor（v17 XWarpPointer race）"""
+    """v22：_on_tree_key_see_focus 不再嘗試動 OS cursor（v17 XWarpPointer race）
+
+    v23 更新：不再守護「必呼叫 _apply_hover」（v23 改由 _ensure_focus_visible 統一處理）
+    """
     content = _read()
     idx = content.find("def _on_tree_key_see_focus(self, event):")
     assert idx != -1
@@ -182,16 +185,15 @@ def test_v22_on_tree_key_see_focus_no_move_cursor():
     if end == -1:
         end = len(content)
     body = content[idx:end]
+    # 去掉 docstring、避免 docstring 提及 _move_cursor_to_row 被誤判
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
     assert "_move_cursor_to_row" not in body, (
         "v22 _on_tree_key_see_focus 必不再呼叫 _move_cursor_to_row（XWarpPointer race 放棄）"
     )
-    # 但仍必呼叫 _apply_hover
-    assert "_apply_hover" in body, (
-        "v22 _on_tree_key_see_focus 必仍呼叫 _apply_hover"
-    )
+    # v23 不再必呼叫 _apply_hover（改由 _ensure_focus_visible 統一處理）
+    # → 這部分移到 test_v23_on_tree_key_see_focus_single_apply_hover 守護
 
 
 def test_v16_x11_with_mock_unit():
@@ -377,10 +379,28 @@ def test_v18_move_cursor_to_row_logs():
 
 
 def test_v21_on_tree_key_see_focus_applies_hover():
-    """v21：_on_tree_key_see_focus 必直接呼叫 _apply_hover（不依賴 mouse motion）"""
+    """v21：_on_tree_key_see_focus 必直接呼叫 _apply_hover（不依賴 mouse motion）
+
+    v23 變更：取消這條守護。理由：
+    - v23 設計：_on_tree_key_see_focus 不再直接呼叫 _apply_hover
+    - 改由 _ensure_focus_visible 統一處理 hover + scroll
+    - 避免 _on_tree_key_see_focus 自己 _apply_hover + _ensure_focus_visible 內又 _apply_hover 的重複
+    - 改由 test_v23_ensure_focus_visible_applies_hover 守護新設計
+    """
+    # v23 後這條守護不再適用、保留僅供閱讀
+    pass
+
+
+def test_v23_ensure_focus_visible_applies_hover():
+    """v23：_ensure_focus_visible 必呼叫 _apply_hover（替代 v21 在 _on_tree_key_see_focus 的位置）
+
+    v23 設計：_on_tree_key_see_focus 不再直接呼叫 _apply_hover
+    → 改由 _ensure_focus_visible 統一處理 hover + scroll
+    → _ensure_focus_visible 必仍呼叫 _apply_hover
+    """
     content = _read()
-    idx = content.find("def _on_tree_key_see_focus(self, event):")
-    assert idx != -1
+    idx = content.find("def _ensure_focus_visible(self, tree, iid):")
+    assert idx != -1, "找不到 _ensure_focus_visible 函式"
     end = content.find("\n    def ", idx + 50)
     if end == -1:
         end = len(content)
@@ -388,10 +408,9 @@ def test_v21_on_tree_key_see_focus_applies_hover():
     if '"""' in body:
         parts = body.split('"""')
         body = '"""'.join(parts[2:])
-    # v21 必直接 _apply_hover 才能讓 highlight bar 出現
     assert "self._apply_hover(" in body, (
-        "v21 _on_tree_key_see_focus 必直接呼叫 self._apply_hover(\
-        \n        tree, cur \n    ))"
+        "v23 _ensure_focus_visible 必呼叫 self._apply_hover(\n"
+        "（替代 v21 在 _on_tree_key_see_focus 的位置）"
     )
 
 
@@ -484,4 +503,121 @@ def test_v22_on_tree_select_sync_hover_does_nothing():
         body = '"""'.join(parts[2:])
     assert "_clear_all_hover" not in body, (
         "v22 _on_tree_select_sync_hover 不應清 hover（會 race）"
+    )
+
+
+# ==========================================================
+# 【V1.2.0-kb-focus-v23】移除 _ensure_focus_visible 內的 _move_cursor_to_row
+# ==========================================================
+#
+# 背景（William 2026-07-08 20:59 反映）：
+# - up/down 移動 highlight bar 約半秒延遲
+# - 舊的 highlight bar 才消掉
+# - cursor 沒跟著移動
+# - mouse 一動就出現新的 highlight bar
+# - hover 文字變黑色（hover_<price> 的 foreground 在 Linux ttk theme 下失效）
+#
+# 根因：
+# - v22 commit message 說「放棄動 OS cursor」、docstring 也說要拿掉
+# - 但 v22 程式碼只拿掉 _on_tree_key_see_focus 內的呼叫
+# - _ensure_focus_visible 內的 _move_cursor_to_row 沒拿掉
+# - _x11_move_cursor_to 在 Linux 上 XSync block + 3 retries → 0.5-1.5 秒
+# - 整個 KeyRelease handler 卡住 0.5 秒
+# - guard 200ms 過期、motion handler 又把 hover 蓋回 mouse 位置
+#
+# v23 修法：
+# - _ensure_focus_visible 內徹底拿掉 _move_cursor_to_row
+# - _on_tree_key_see_focus 簡化、不再重複呼叫 _apply_hover
+# - hover_<price> 的 foreground 在 Linux theme 失效問題暫不在本版處理（開 issue）
+# - 重複定義的 _on_select_tree_leave 拿掉（留 v4 pass 版本）
+
+def test_v23_ensure_focus_visible_no_move_cursor():
+    """v23：_ensure_focus_visible 必不再呼叫 _move_cursor_to_row
+
+    v22 漏網：_on_tree_key_see_focus 已拿掉、但 _ensure_focus_visible 還在呼叫
+    → XSync block 0.5 秒 → 整個 KeyRelease handler 卡住
+    """
+    content = _read()
+    idx = content.find("def _ensure_focus_visible(self, tree, iid):")
+    assert idx != -1, "找不到 _ensure_focus_visible 函式"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "_move_cursor_to_row" not in body, (
+        "v23 _ensure_focus_visible 必不再呼叫 _move_cursor_to_row\n"
+        "v22 漏網：X11 XSync block 0.5 秒、整個 handler 卡住\n"
+        "→ up/down 移動 highlight 感覺慢、舊 hover 殘留 0.5 秒才消"
+    )
+
+
+def test_v23_on_tree_key_see_focus_single_apply_hover():
+    """v23：_on_tree_key_see_focus 只透過 _ensure_focus_visible 呼叫 _apply_hover（不重複）
+
+    v22 bug：_on_tree_key_see_focus 內自己呼叫 _apply_hover 一次
+    + _ensure_focus_visible 內又呼叫 _apply_hover 一次 → 重複
+
+    v23 修法：_on_tree_key_see_focus 拿掉自己的 _apply_hover、只呼叫 _ensure_focus_visible
+    由 _ensure_focus_visible 統一處理 hover + scroll
+    """
+    content = _read()
+    idx = content.find("def _on_tree_key_see_focus(self, event):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # v23 不再直接呼叫 _apply_hover、由 _ensure_focus_visible 統一處理
+    assert "self._apply_hover(" not in body, (
+        "v23 _on_tree_key_see_focus 必不再直接呼叫 self._apply_hover(\n"
+        "統一交給 _ensure_focus_visible 處理 hover + scroll"
+    )
+    # 必仍呼叫 _ensure_focus_visible（scroll + 統一 hover）
+    assert "self._ensure_focus_visible(" in body, (
+        "v23 _on_tree_key_see_focus 必仍呼叫 _ensure_focus_visible"
+    )
+
+
+def test_v23_no_duplicate_on_select_tree_leave():
+    """v23：_on_select_tree_leave 只能定義一次（v22 有重複定義 bug）
+
+    v22 bug：_on_select_tree_leave 在原始位置（pass 版本）跟後面位置（呼叫 _clear_select_hover 版本）
+    重複定義、Python class 後者覆蓋前者 → bind 的 self._on_select_tree_leave 是後者版本
+    → 行為不直觀
+
+    v23 修法：只留一個版本、留 v4 pass 版本（leave 時不清 hover）
+    """
+    content = _read()
+    count = content.count("def _on_select_tree_leave(self, event):")
+    assert count == 1, (
+        f"v23 _on_select_tree_leave 只能定義一次、實際 {count} 次\n"
+        "v22 有重複定義 bug、Python 後者覆蓋前者、bind 行為不直觀"
+    )
+
+
+def test_v23_on_tree_key_see_focus_doc_says_no_move_cursor():
+    """v23：_on_tree_key_see_focus docstring 必提到「不放棄動 OS cursor」
+
+    v22 docstring 已說明、但程式碼沒對齊
+    v23 強化 docstring 明確寫「不再呼叫 _move_cursor_to_row」
+    """
+    content = _read()
+    idx = content.find("def _on_tree_key_see_focus(self, event):")
+    assert idx != -1
+    # 找 docstring 開始的 """（def 行後第一個 """）
+    start = content.find('"""', idx)
+    assert start != -1, "找不到 docstring 開始的 \"\"\""
+    # 找 docstring 結束的 """（從 start+3 開始找）
+    end = content.find('"""', start + 3)
+    assert end != -1, "找不到 docstring 結束的 \"\"\""
+    docstring = content[start + 3:end]
+    assert "_move_cursor_to_row" in docstring or "OS cursor" in docstring, (
+        "v23 _on_tree_key_see_focus docstring 必明確說「不再呼叫 _move_cursor_to_row」\n"
+        "或「放棄動 OS cursor」"
     )

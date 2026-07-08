@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v22 (2026-07-07 18:42) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v23 (2026-07-08 21:30) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v22
-最後更新: 2026-07-07 22:15 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v23
+最後更新: 2026-07-08 21:19 (Asia/Taipei)
 
 Python 版本: 3.8+
 
@@ -27,6 +27,45 @@ except Exception:
 
 
 
+
+
+【v1.2.0 paper-trading-kb-focus-v23】2026-07-08 21:30 (v22 漏網 bug hotfix：移除 _ensure_focus_visible 內 _move_cursor_to_row)
+【背景】William 2026-07-08 20:59 用截圖反映 v22 三個 bug：
+  1. 「股神篩選結果up/down key 移動high light bar 時動作有點慢！hilight 移到下一個後約過半秒舊的hilight bar才消掉！」
+  2. 「cursor沒有跟著移動, 所以mouse 一動就出現新的hilight bar!」
+  3. 「up/down key 移動hilight bar時hilight的文字變黑色！應該是不變才對」
+
+【v22 漏網 root cause】
+- v22 commit message + docstring 都說「放棄動 OS cursor」
+- _on_tree_key_see_focus 本身有拿掉 _move_cursor_to_row 呼叫（v22 改、測試 v22_on_tree_key_see_focus_no_move_cursor 守住）
+- 但 _ensure_focus_visible 內那個呼叫遺漏拿掉
+- _x11_move_cursor_to 在 Linux 上 XSync block + 3 retries → 0.5-1.5 秒
+- 整個 KeyRelease handler 卡住 0.5 秒 → 視覺上看起來「half-light 舊 bar 才消」
+- guard 200ms 過期、motion handler 在 0.5s 內仍被 guard block、不會蓋掉
+- 但 _move_cursor_to_row 完成後、user 動 mouse → motion handler 觸發 → 設 hover 到 mouse 位置
+  → 「cursor沒跟著移動、mouse 一動出現新 highlight bar」
+
+【v23 簡單設計（徹底不動 OS cursor、簡化 hover flow）】
+1. _ensure_focus_visible 內拿掉 self._move_cursor_to_row(tree, iid) 呼叫
+   → X11 XSync block 消失、KeyRelease handler 不再被 block
+2. _on_tree_key_see_focus 簡化、移除自己的 self._apply_hover(tree, cur) 重複呼叫
+   → 統一交給 _ensure_focus_visible 處理 hover + scroll（避免重複）
+3. _on_select_tree_leave 拿掉 v22 重複定義、只留 v4 pass 版本
+   → 跟 v22 docstring「放手了、不清 hover」一致
+
+【新測試】tests/test_keyboard_space_toggle.py 新增 5 個 v23 test：
+- test_v23_ensure_focus_visible_no_move_cursor
+- test_v23_ensure_focus_visible_applies_hover（替代 v21 在 _on_tree_key_see_focus 的守護）
+- test_v23_on_tree_key_see_focus_single_apply_hover
+- test_v23_no_duplicate_on_select_tree_leave
+- test_v23_on_tree_key_see_focus_doc_says_no_move_cursor
+
+【已知未解、另行處理】
+- hover_<price> 的 foreground 在 Linux ttk theme 下完全沒生效（hover 文字變黑）
+  → v1.1-price-color-fix2 設計是「單一 hover_<price> tag」同時設定 background + foreground
+  → 在 Windows 驗證 OK、Linux ttk theme (clam/default) 下 foreground 設定被 theme 覆蓋
+  → 需要另外拉 issue 用 ttk.Style.element_create 或 tk.Text 重寫
+  → 這次不動、避免修正 v23 後又買入新的 race
 
 
 【v1.2.0 paper-trading-kb-focus-v19】2026-07-07 18:42 (重大發現：v18 所有 log 都在 3667 行 docstring 內、從沒執行)
@@ -5321,8 +5360,10 @@ class StrategyGUI(tk.Tk):
                         pass
             # 4. 視覺 highlight 同步到 focus row
             self._apply_hover(tree, iid)
-            # 5. 同步 mouse cursor（v10: event_generate 為主、SetCursorPos/SendInput 為輔）
-            self._move_cursor_to_row(tree, iid)
+            # 【V1.2.0-kb-focus-v23】v22 漏網：原本這裡會 call 動 OS cursor 的 helper
+            # → X11 XSync block 0.5 秒、整個 KeyRelease handler 卡住
+            # → up/down 移動 highlight 感覺慢、舊 hover 殘留 0.5 秒才消
+            # v23 修法：徹底不動 OS cursor、只做 hover 視覺同步（見 _on_tree_key_see_focus docstring）
         except tk.TclError:
             pass
 
@@ -9242,13 +9283,22 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _on_tree_key_see_focus(self, event):
-        """【V1.2.0-kb-focus-v22】Down/Up/Home/End/Prior/Next key release 時主動 hover + scroll
+        """【V1.2.0-kb-focus-v23】Down/Up/Home/End/Prior/Next key release 時主動 hover + scroll
 
-        v22 簡單設計（最終）：
-        1. _apply_hover(tree, cur) 直接設 yellow bg + colored fg highlight
-        2. _ensure_focus_visible scroll
-        3. 不動 OS cursor (v17 XWarpPointer 複雜有 race、放棄)
-        4. _kbd_nav_guard 200ms 防 motion handler 覆蓋
+        v23 簡化設計（最終）：
+        1. 不再自己呼叫 _apply_hover(tree, cur)、改由 _ensure_focus_visible 統一處理
+           - v22 bug：_on_tree_key_see_focus 自己 _apply_hover 一次
+                     + _ensure_focus_visible 內又 _apply_hover 一次 + _move_cursor_to_row 一次
+                     → 重複呼叫 + X11 XSync block 0.5 秒 → handler 卡 0.5 秒
+           - v23 修法：_on_tree_key_see_focus 只呼叫 _ensure_focus_visible
+                       由 _ensure_focus_visible 統一管 hover + scroll
+        2. 不動 OS cursor（v23 拿掉 _move_cursor_to_row 呼叫）
+           - v17 XWarpPointer 在 Linux 上 race 複雜、放棄
+           - v22 docstring 說要拿掉、但程式碼漏網沒拿（_ensure_focus_visible 內）
+           - v23 徹底拿掉
+        3. _kbd_nav_guard 200ms 防 motion handler 覆蓋
+           - 200ms 內 motion handler 不 _apply_hover
+           - 但 _ensure_focus_visible 內的 _apply_hover 不受 guard 影響（sync 立即生效）
         """
         tree = event.widget
         try:
@@ -9260,9 +9310,7 @@ class StrategyGUI(tk.Tk):
                     self._kbd_nav_mouse_pos_at_guard = tree.winfo_pointerxy()
                 except tk.TclError:
                     self._kbd_nav_mouse_pos_at_guard = (0, 0)
-                # 馬上設 hover、馬上可見
-                self._apply_hover(tree, cur)
-                # scroll
+                # 統一交給 _ensure_focus_visible 處理 hover + scroll
                 self._ensure_focus_visible(tree, cur)
         except tk.TclError:
             pass
@@ -9293,12 +9341,14 @@ class StrategyGUI(tk.Tk):
         except Exception:
             return False
     def _on_select_tree_leave(self, event):
-        """【V1.2.0-kb-focus-v4】離開 Treeview 時不清 hover、讓 selected row 保持高亮"""
+        """【V1.2.0-kb-focus-v23】離開 Treeview 時不清 hover、讓 selected row 保持高亮
+
+        v22 重複定義 bug：原本 v4 pass 版本、加上 _clear_select_hover 版本
+        → Python 後者覆蓋前者 → bind 行為不直觀
+        v23 修法：只留 v4 pass 版本（與 v22 docstring「放手了、不清 hover」一致）
+        """
         # v4 設計：不要清 hover、讓使用者離開 Treeview 後仍能看到選中的 row
         pass
-
-    def _on_select_tree_leave(self, event):
-        self._clear_select_hover(event.widget)
 
     def _clear_select_hover(self, tree):
         """清除 hover highlight、restore 該列原本 tag（供外部呼叫）"""
