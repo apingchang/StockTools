@@ -4,7 +4,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.2.0-paper-trading-kb-focus-v23
-最後更新: 2026-07-08 21:19 (Asia/Taipei)
+最後更新: 2026-07-08 21:26 (Asia/Taipei)
 
 Python 版本: 3.8+
 
@@ -27,6 +27,46 @@ except Exception:
 
 
 
+
+
+【v1.2.0 paper-trading-kb-focus-v22】2026-07-07 22:15 (終極大轉向：放棄動 OS cursor、只做 hover 視覺同步)
+【背景】William 2026-07-07 22:10 反映 v21 仍未解（三個 bug）：
+  1. 按 up/down key highlight 移動但 cursor 不見
+  2. highlight bar 內字變黑色
+  3. click 結果 area 任何位置都讓 highlight 字變色
+
+【v21 仍失敗的真實 root cause】
+- <<TreeviewSelect>> 不只在 click 時 trigger、在 Tk 自動 focus 移動時也 trigger
+- v12 解耦「_on_tree_select_sync_hover」只 _clear_all_hover 不 _apply_hover
+- key-nav 順序可能是：
+  <KeyRelease> → v21 _apply_hover (設 hover)
+                  → <<TreeviewSelect>> queued fire → _clear_all_hover (清掉)
+- 所以剛設的 hover 馬上被清掉、剩 (checked, price_x) 沒前景 = 黑
+
+【v22 終極修法（放棄 OS cursor、聚焦 hover）】
+1. _on_tree_select_sync_hover：完全 do nothing（不再 _clear_all_hover 製造 race）
+2. _on_tree_key_see_focus：直接 _apply_hover (v21 加入)+ 不再 _move_cursor_to_row
+3. motion handler：仍用 guard 防 key-nav 立即被 motion 覆蓋
+4. 完全放棄 _move_cursor_to_row（XWarpPointer race 太多）
+
+【OS cursor 物理移動為什麼放棄】
+- v8-v14: Windows SetCursorPos → Linux windll.user32 不存在 → 沒跑
+- v15: 改 sticky bbox 邏輯、變複雜
+- v16: 改 XWarpPointer → 在 Tk 環境下 race、Tk 內部 cursor sync 覆蓋
+- v17: 加 XSync + xdotool fallback → 不有效
+- v18: 試 _v18_log 追 log → 重大 bug：log 寫在 3667 行 docstring 內、Python 從沒執行
+- v19: 發現 v18 bug、移到 module-level log
+- v20: 補 4 個 tree 的 <KeyRelease> binding
+- v21: _on_tree_key_see_focus 補 _apply_hover（v12 設計 race 仍存在）
+- v22: v21 仍失敗 → 放棄 OS cursor、改抓 v12 設計 race
+
+【v22 漏網 bug（v23 hotfix 補）】
+- v22 docstring 說要拿掉 _move_cursor_to_row、_on_tree_key_see_focus 拿掉了
+- 但 _ensure_focus_visible 內那個呼叫遺漏拿掉（v22 沒人發現）
+- _x11_move_cursor_to 在 Linux 上 XSync block 0.5-1.5 秒
+- 整個 KeyRelease handler 卡住 → 視覺上看起來「hover 慢、舊 bar 才消」
+- 測試 test_v22_on_tree_key_see_focus_no_move_cursor 只守護 _on_tree_key_see_focus 沒守護 _ensure_focus_visible
+- v23 補上 + 新增 test_v23_ensure_focus_visible_no_move_cursor 守護
 
 
 【v1.2.0 paper-trading-kb-focus-v23】2026-07-08 21:30 (v22 漏網 bug hotfix：移除 _ensure_focus_visible 內 _move_cursor_to_row)
