@@ -747,3 +747,133 @@ def test_v24_apply_hover_doc_mentions_delta_tracking():
         "v24 _apply_hover docstring 必提到「delta tracking」或「O(1)」\n"
         "說明為什麼用 _hover_iid dict"
     )
+
+
+def test_v25_guard_shortened_to_50ms():
+    """v25：_kbd_nav_guard 200ms → 50ms
+
+    v16 設 200ms、避免 motion handler 速率覆蓋 key-nav 剛設的 hover
+    v25 縮短到 50ms：user 感知不到殘留（< 50ms）+ race condition 大幅減少
+    """
+    content = _read()
+    # guard 設定點在 _on_tree_key_see_focus、guard check 在 _kbd_nav_guard_should_block
+    # 這 2 個地方都需要檢查
+    for fn_name in ["def _kbd_nav_guard_should_block(self, tree):", "def _on_tree_key_see_focus(self, event):"]:
+        idx = content.find(fn_name)
+        assert idx != -1, f"找不到 {fn_name} 函式"
+        end = content.find("\n    def ", idx + 50)
+        if end == -1:
+            end = len(content)
+        body = content[idx:end]
+        # 50ms 出現在設 guard 的那行（在 _on_tree_key_see_focus）
+        if "tree.focus" in body:  # _on_tree_key_see_focus 才會設定 guard
+            assert "int(time.time() * 1000) + 50" in body, (
+                f"v25 {fn_name} 設定 guard 必是 +50（不是 +200）"
+            )
+    # 5px → 2px 容差（在 _kbd_nav_guard_should_block）
+    idx = content.find("def _kbd_nav_guard_should_block(self, tree):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    assert "abs(mx - gx) > 2 or abs(my - gy) > 2" in body, (
+        "v25 mouse 移動容差必是 2px（不是 5px）"
+    )
+
+
+def test_v25_ensure_focus_visible_single_update_idletasks():
+    """v25：_ensure_focus_visible 內最多 1 次 tree.update_idletasks()
+
+    v12 有 3 次 update_idletasks()、每次都強制 Tk 重繪 2362 筆 → 100-200ms 延遲
+    v25 拿掉重複的、只留 1 次（在 tree.see(iid) 後）
+    """
+    content = _read()
+    idx = content.find("def _ensure_focus_visible(self, tree, iid):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    # 拆掉 docstring 後才算真正的呼叫次數
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 只算 tree.update_idletasks()（排除 self.update_idletasks 和 comment）
+    count = body.count("tree.update_idletasks()")
+    assert count <= 1, (
+        f"v25 _ensure_focus_visible 內 tree.update_idletasks() 必 ≤ 1 次、實際 {count} 次\n"
+        "v12 有 3 次、每次都強制 Tk 重繪整個 tree → 100-200ms 延遲"
+    )
+
+
+def test_v25_ensure_focus_visible_no_redundant_yview_scroll_loop():
+    """v25：_ensure_focus_visible 拿掉 v12 「多重保險」loop（重複 yview_scroll + bbox check）
+
+    v12 有兩層「保險」：先 yview_scroll(2) + 再 check bbox 再 yview_scroll(1)
+    v25 拿掉第二層（過度防護、無實質效果）
+    """
+    content = _read()
+    idx = content.find("def _ensure_focus_visible(self, tree, iid):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # v25 必仍保留 is_padded_last 分支的多 scroll (yview_scroll(2))
+    assert "tree.yview_scroll(2, \"units\")" in body, (
+        "v25 仍保留 padded_last 的 yview_scroll(2) - 防止最後 row 被 canvas edge 切"
+    )
+    # 但不再有「多重保險」loop (重複 yview_scroll + bbox check)
+    yview_scroll_count = body.count("tree.yview_scroll(")
+    assert yview_scroll_count <= 2, (
+        f"v25 _ensure_focus_visible 內 yview_scroll 必 ≤ 2 次（padded_last 一次 + 一般一次）\n"
+        "v12 有 3 次（padded_last 多重保險多一次）\n"
+        f"實際 {yview_scroll_count} 次"
+    )
+
+
+def test_v25_ensure_focus_visible_doc_mentions_single_pass():
+    """v25：_ensure_focus_visible docstring 必提到「單一 path」「v25」
+
+    避免未來看 code 的人重複加 update_idletasks（破壞 v25 性能）
+    """
+    content = _read()
+    idx = content.find("def _ensure_focus_visible(self, tree, iid):")
+    assert idx != -1
+    start = content.find('"""', idx)
+    end = content.find('"""', start + 3)
+    docstring = content[start + 3:end]
+    assert "v25" in docstring, (
+        "v25 _ensure_focus_visible docstring 必提到「v25」"
+    )
+    assert "單一 path" in docstring or "單一" in docstring or "單一一次" in docstring or "只保留 1 個" in docstring, (
+        "v25 _ensure_focus_visible docstring 必提到「單一 path」或「單一一次」或「只保留 1 個」\n"
+        "避免未來看 code 的人重複加 update_idletasks"
+    )
+
+
+def test_v25_kbd_nav_guard_setter_uses_50():
+    """v25：設定 guard 的地方必用 +50（不是 +200）
+
+    guard 設定點在 _on_tree_key_see_focus 內（line 9426）
+    """
+    content = _read()
+    idx = content.find("def _on_tree_key_see_focus(self, event):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "+ 50" in body, (
+        "v25 _on_tree_key_see_focus 設定 guard 必用 +50（不是 +200）"
+    )
+    assert "+ 200" not in body, (
+        "v25 移除 _on_tree_key_see_focus 內的 +200（舊的 200ms guard）"
+    )

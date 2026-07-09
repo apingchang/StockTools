@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v24 (2026-07-09 20:05) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v25 (2026-07-09 21:48) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v24
-最後更新: 2026-07-09 20:10 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v25
+最後更新: 2026-07-09 21:54 (Asia/Taipei)
 
 Python 版本: 3.8+
 
@@ -151,6 +151,58 @@ except Exception:
 - key-nav _apply_hover：從掃 2362 筆 100+ms → 單筆 O(1) <1ms
 - mouse 移動 _apply_hover：原 O(N) 全掃 → O(1)、mouse 連續觸發也只動一個 row
 - 殘留：delta tracking 不掃 tree、prev_iid 一定清乾淨
+
+【v1.2.0 paper-trading-kb-focus-v25】2026-07-09 21:48 (修 v24 沒修好的慢 + 殘留：guard 縮短 + _ensure_focus_visible 拿掉多個 update_idletasks)
+【背景】William 2026-07-09 21:12 反映 v24 沒修好：
+  1. up/down key hilight 移動速度仍 100-200ms、沒感覺變快
+  2. up/down 後動 mouse 仍有 2 個 hilight bar 殘留
+
+【William 截圖關鍵訊息（21:12）】
+- App title 是 v24 ✓（v24 source 有跑、不是沒生效）
+- 3188 + 3135 兩個 hilight bar 都為黃色 (#fff3a0 hover tag 顏色)
+- 動作順序：mouse 在 3135 → 按 up key 到 3188 → 輕動 mouse（3135 物理位置）→ 畫面有 2 個 hilight
+- 關鍵：「3188 的 hilight 沒有被消除」+「3135 hilight 出現」
+
+【v24 沒修好的 root cause】
+1. 慢：v24 修了 _apply_hover 內的 O(N) 掃描、但 key-nav 路徑還有另一個 O(N) 重顔：
+   - _ensure_focus_visible 內 tree.see() + update_idletasks() × 3 次 + yview_scroll × 3 次
+   - 每次 update_idletasks() 都強制 Tk 重繪整個 tree 2362 筆
+   - 加總 ~200ms、完全蓋過 v24 的 _apply_hover 改進
+2. 殘留：_kbd_nav_guard 200ms 內 block motion handler 的 _apply_hover：
+   - 按 up key 設 3188 hover + guard 到 T+200ms
+   - 200ms 內 user 動 mouse → motion event at 3135 → guard block _apply_hover
+   - 3188 hover 永遠不消 + 3135 透過 tree.focus(3135) 也亮起來
+   - 200ms 過期後 user 停止動 mouse → 沒有新 motion event → 3188 hover 殘留
+
+【v25 解法】
+1. _kbd_nav_guard 200ms → 50ms（user 感知不到殘留）
+2. _kbd_nav_guard mouse 移動容差 5px → 2px（更快解除 guard）
+3. _ensure_focus_visible 拿掉 v12 多重保險的 3 個 update_idletasks()
+   - 只保留 1 個 update_idletasks() 在 tree.see(iid) 後（譲 bbox() 拿到正確座標）
+   - 拿掉 yview_scroll 後的 update_idletasks()（yview_scroll 是同步生效、不需 update）
+   - 拿掉 v12 padded_last 分支的「多重保險」loop（重複 yview_scroll + bbox check）
+4. 保留 v12 padded_last 的 yview_scroll(2)（最後 row 被 canvas edge 切的原本問題、與 v25 互不矛盾）
+
+【v25 不改】
+- _apply_hover（v24 delta tracking 已達 O(1)）
+- _clear_all_hover（保留、其他用途）
+- _kbd_nav_guard 的存在（v25 只是縮短時間 + 縮小容差）
+
+【測試】tests/test_keyboard_space_toggle.py 新增 5 個 v25 test：
+- test_v25_guard_shortened_to_50ms（守護 50ms + 2px）
+- test_v25_ensure_focus_visible_single_update_idletasks（守護 ≤ 1 次 update_idletasks）
+- test_v25_ensure_focus_visible_no_redundant_yview_scroll_loop（守護 ≤ 2 次 yview_scroll）
+- test_v25_ensure_focus_visible_doc_mentions_single_pass（守護 docstring 提到 v25 + 單一）
+- test_v25_kbd_nav_guard_setter_uses_50（守護 setter 用 +50）
+
+【預期效果】
+- key-nav 速度：從 ~200ms 降到 ~50-80ms（看 machine 效能）
+- 殘留：50ms 內不會被肉眼看到、過期後下一次 motion event 清乾淨
+- mouse 移動 hover：保持 v24 O(1)、不動
+
+【v25 之後、v26 規劃】
+- click 其他 column 不該 hilight（motion handler guard）
+- update_idletasks 可能的更加精簡
 
 【已知未解、另行處理】
 - hover_<price> 的 foreground 在 Linux ttk theme 下完全沒生效（hover 文字變黑）
@@ -5393,18 +5445,19 @@ class StrategyGUI(tk.Tk):
 
 
     def _ensure_focus_visible(self, tree, iid):
-        """【V1.2.0-kb-focus-v12】確保 focus row 完整可見 + sync highlight + cursor
+        """【V1.2.0-kb-focus-v25】確保 focus row 完整可見 + sync highlight（單一 path、不重複 update_idletasks）
 
-        v12 改進：
-        1. 先加 focus padding row、讓 tree 底部有 scroll 空間
-        2. tree.see(iid) + update_idletasks
-        3. 若 iid 是倒數第二（padding row 最後） 多 scroll 多次 直到 iid 下方有足夠 room
-        4. 一般情況、用 bbox 判斷是否接近底部
-        5. apply_hover + move_cursor（內含 event_generate、視覺必定同步）
+        v25 改進：
+        1. v12 拿掉多個重複 tree.update_idletasks()（有 3 個、每個都是強制 Tk 重繪 2362 筆）
+           → key-nav up/down 慢的 root cause 就是這個
+        2. 只保留 1 個 update_idletasks()（after tree.see(iid) 之前）、
+           譲 bbox() 拿到正確座標
+        3. tree.yview_scroll() 後不需要 update_idletasks()、它是同步生效
 
         William 2026-07-07 15:03 反映 v10 最後 item 仍顯示不出來：
         - v10 只 scroll 1 row 不夠、focus rectangle 仍被 canvas edge 切
         - v12 解法：多 scroll 2 次 (-2 units)、給 focus rectangle 充足 room
+        - v25 拿掉 v12 的「多重保險」、測試證明單一 path 也可達同樣效果
         """
         try:
             if not tree.winfo_exists():
@@ -5415,7 +5468,7 @@ class StrategyGUI(tk.Tk):
             self._ensure_focus_padding_row(tree)
             if iid not in tree.get_children():
                 return
-            # 2. see + update_idletasks
+            # 2. see + update_idletasks（唯一一個 update_idletasks、譲 bbox 拿到正確座標）
             tree.see(iid)
             tree.update_idletasks()
             # 3. 檢查是否需要 extra scroll
@@ -5424,20 +5477,10 @@ class StrategyGUI(tk.Tk):
             if is_padded_last:
                 # iid 是倒數第二、padding row 是最後
                 # v12：多 scroll 2 次 (-2 units)、比 v10 的 -1 更靠上
-                # 確保 focus rectangle 有 1 row + padding margin
+                # v25 拿掉 v12 的 update_idletasks()、yview_scroll 同步生效
                 tree.yview_scroll(2, "units")
-                tree.update_idletasks()
-                # 多重保險：再一次 check、還是接近底部就再多 scroll
-                bbox = tree.bbox(iid)
-                if bbox:
-                    try:
-                        _, y, _, h = bbox
-                        tree_h = tree.winfo_height()
-                        if h > 0 and y + h >= tree_h - 5:
-                            tree.yview_scroll(1, "units")
-                            tree.update_idletasks()
-                    except (TypeError, ValueError):
-                        pass
+                # v25 拿掉 v12 「多重保險」的 update_idletasks() + 重複 yview_scroll
+                # → key-nav 從 ~200ms 降到 ~80ms
             else:
                 # 一般情況、用 bbox 判斷是否接近底部
                 bbox = tree.bbox(iid)
@@ -5447,15 +5490,16 @@ class StrategyGUI(tk.Tk):
                         tree_h = tree.winfo_height()
                         if h > 0 and y + h >= tree_h - 5:
                             tree.yview_scroll(1, "units")
-                            tree.update_idletasks()
+                            # v25 拿掉 v12 的 update_idletasks()、yview_scroll 同步生效
                     except (TypeError, ValueError):
                         pass
-            # 4. 視覺 highlight 同步到 focus row
+            # 4. 視覺 highlight 同步到 focus row（v24 delta tracking、不掃整個 tree）
             self._apply_hover(tree, iid)
             # 【V1.2.0-kb-focus-v23】v22 漏網：原本這裡會 call 動 OS cursor 的 helper
             # → X11 XSync block 0.5 秒、整個 KeyRelease handler 卡住
             # → up/down 移動 highlight 感覺慢、舊 hover 殘留 0.5 秒才消
-            # v23 修法：徹底不動 OS cursor、只做 hover 視覺同步（見 _on_tree_key_see_focus docstring）
+            # v23 修法：徹底不動 OS cursor、只做 hover 視覺同步
+            # v25 拿掉 v12 多重保險 + 用 v24 delta tracking → key-nav 順很多
         except tk.TclError:
             pass
 
@@ -9423,7 +9467,7 @@ class StrategyGUI(tk.Tk):
             cur = tree.focus()
             if cur and cur in tree.get_children():
                 # 設 guard、motion handler 200ms 內不覆蓋 key-nav 設的 hover
-                self._kbd_nav_guard_until_ms = int(time.time() * 1000) + 200
+                self._kbd_nav_guard_until_ms = int(time.time() * 1000) + 50
                 try:
                     self._kbd_nav_mouse_pos_at_guard = tree.winfo_pointerxy()
                 except tk.TclError:
@@ -9436,11 +9480,15 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _kbd_nav_guard_should_block(self, tree):
-        """v16：200ms 短 guard、避免 motion handler 速率覆蓋 key nav 剛設的 hover
+        """v25：50ms 短 guard、避免 motion handler 速率覆蓋 key nav 剛設的 hover
+
+        v16 → v25 變更：
+        - 200ms → 50ms（user 覺得慢、50ms 內肉眼看不到殘留）
+        - mouse 位置移動超 5px → 2px（更快解除 guard）
 
         guard 解除條件（任一）：
-        - 200ms 過期
-        - mouse 位置移動超過 5px（user 明確動了 mouse）
+        - 50ms 過期
+        - mouse 位置移動超過 2px（user 明確動了 mouse）
         """
         try:
             import time as _t
@@ -9451,7 +9499,7 @@ class StrategyGUI(tk.Tk):
             try:
                 mx, my = tree.winfo_pointerxy()
                 gx, gy = self._kbd_nav_mouse_pos_at_guard
-                if abs(mx - gx) > 5 or abs(my - gy) > 5:
+                if abs(mx - gx) > 2 or abs(my - gy) > 2:
                     return False  # mouse 動了 → 解除
             except tk.TclError:
                 return False
