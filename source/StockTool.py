@@ -4,7 +4,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.2.0-paper-trading-kb-focus-v25
-最後更新: 2026-07-09 21:54 (Asia/Taipei)
+最後更新: 2026-07-09 22:59 (Asia/Taipei)
 
 Python 版本: 3.8+
 
@@ -210,6 +210,43 @@ except Exception:
   → 在 Windows 驗證 OK、Linux ttk theme (clam/default) 下 foreground 設定被 theme 覆蓋
   → 需要另外拉 issue 用 ttk.Style.element_create 或 tk.Text 重寫
   → 這次不動、避免修正 v23 後又買入新的 race
+
+
+【v1.2.0 paper-trading-kb-focus-v26】2026-07-09 22:55 (修 v25 殘留：_set_row_tag_normal 內加 tag_remove 明確操作、繞過 ttk theme 緩存)
+【背景】William 2026-07-09 22:12 反映 v25 仍有 hover 殘留（5289 + 6219 兩個 row 同時 hover 亮黃色）
+v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
+
+【v25 log 證明邏輯沒錯（22:49 跑出來 1061 行）】 
+- 每個 row transition 都有 清舊 + 設新、無 exception、無失敗訊息
+- _set_row_tag_normal(tree, iid) 內 tree.item(iid, tags=(...)) 沒 raise
+- 但 user 截圖顯示 5289 + 6219 都亮 → 邏輯 vs 視覺脫鉤
+
+【v26 root cause 推測】
+- Linux ttk theme 緩存：tree.item(iid, tags=(...)) 設 tag 後、Tk 內部 cache 沒失效
+- 多 tag priority bug：ttk.Treeview 在 Linux 上多 tag 組合時、hover tag 視覺常駐
+- v12 設計時用過 tag_remove 雙重防護、v12 認為不必要拿掉、v26 加回來
+
+【v26 簡單修法】
+1. _set_row_tag_normal 內、設 tags 之前明確呼叫 tree.tag_remove("hover_*", iid)
+2. _apply_hover 內完全不動（v24 delta tracking 邏輯仍正確）
+3. 即使 row 已經沒有 hover_* tag、tag_remove 也不會 raise、idempotent
+4. 接著設 tags=(checked/unchecked, price_x) 維持原本語意
+
+【v26 不改】
+- _apply_hover（v24 delta tracking 已 O(1)、不動）
+- _kbd_nav_guard（v25 50ms + 2px 夠用、不動）
+- _ensure_focus_visible（v25 單一 update_idletasks 不動）
+- _clear_all_hover（保留、其他用途）
+
+【v26 測試】tests/test_keyboard_space_toggle.py 新增 3 個 v26 test：
+- test_v26_set_row_tag_normal_removes_hover_tags（守護 _set_row_tag_normal 內有 tag_remove 呼叫）
+- test_v26_set_row_tag_normal_handles_all_three_hover_kinds（守護 hover_up/down/zero 三種都移除）
+- test_v26_set_row_tag_normal_no_raise_when_no_hover_tag（守護 idempotent）
+
+【預期效果】
+- 即使 ttk theme 緩存、tag_remove 明確操作能強制清乾淨 hover tag
+- 5289 + 6219 殘留問題應徹底解決
+- v24 delta tracking 速度不受影響（tag_remove 是 O(1) per row）
 
 
 【v1.2.0 paper-trading-kb-focus-v19】2026-07-07 18:42 (重大發現：v18 所有 log 都在 3667 行 docstring 內、從沒執行)
@@ -5583,25 +5620,46 @@ class StrategyGUI(tk.Tk):
         - _ensure_focus_visible 呼叫：↑/↓ 鍵盤移動後（間接經 _on_tree_key_see_focus）
         """
         if not tree or not tree.winfo_exists():
+            self._v18_log(f"[v26 _apply_hover] early return: tree 失效 iid={iid}")
             return
         # 1. 確保 _hover_iid dict 存在（lazy init 避免 __init__ 改動破壞向後相容）
         if not hasattr(self, "_hover_iid") or not isinstance(getattr(self, "_hover_iid", None), dict):
             self._hover_iid = {}
         # 2. 取上一個 hover iid（可能 None 表示首次 hover）
         prev_iid = self._hover_iid.get(id(tree))
+        self._v18_log(f"[v26 _apply_hover] 進入 iid={iid} prev_iid={prev_iid}")
         # 3. early return: 同 row 重複呼叫 → no-op（避免多餘 IPC）
         if prev_iid == iid:
+            self._v18_log(f"[v26 _apply_hover] no-op: 同 row")
             return
         # 4. 驗證新 iid 有效（tree 已被重建 / 還沒 insert）
         if not iid or iid not in tree.get_children():
+            self._v18_log(f"[v26 _apply_hover] early return: 新 iid 不在 tree iid={iid} children={tree.get_children()[:5]}...")
             return
         # 5. 清舊 hover（單筆 O(1) 而非掃整個 tree）
         #    edge case: prev_iid 不在 tree 內（rebuild） → 跳過、不嘗試清
         if prev_iid and prev_iid in tree.get_children():
             try:
+                # 清舊 hover 之前先記下原 tags、驗證清完後是否真的移除了 hover_<kind>
+                old_tags_before = None
+                try:
+                    old_tags_before = tree.item(prev_iid, "tags")
+                except tk.TclError:
+                    pass
                 self._set_row_tag_normal(tree, prev_iid)
-            except (tk.TclError, AttributeError, TypeError):
-                pass
+                new_tags_after = None
+                try:
+                    new_tags_after = tree.item(prev_iid, "tags")
+                except tk.TclError:
+                    pass
+                self._v18_log(f"[v26 _apply_hover] 清舊 hover prev_iid={prev_iid} old_tags={old_tags_before} new_tags={new_tags_after}")
+            except (tk.TclError, AttributeError, TypeError) as e:
+                self._v18_log(f"[v26 _apply_hover] 清舊 hover 失敗 prev_iid={prev_iid} e={e}")
+        else:
+            if prev_iid:
+                self._v18_log(f"[v26 _apply_hover] 跳過清舊 hover: prev_iid={prev_iid} 不在 tree children={tree.get_children()[:5]}...")
+            else:
+                self._v18_log(f"[v26 _apply_hover] prev_iid 為 None、首次 hover")
         # 6. 設新 row 為 hover_<price>
         price_tag = self._get_price_tag_for_tree(tree, iid)
         hover_kind = price_tag.replace("price_", "") if price_tag.startswith("price_") else "zero"
@@ -5848,9 +5906,14 @@ class StrategyGUI(tk.Tk):
         except tk.TclError:
             pass
     def _set_row_tag_normal(self, tree, iid):
-        """【V1.2.0-kb-focus-v12】把 row 從 hover_* tag 恢復成 checked/unchecked + price tag
+        """【V1.2.0-kb-focus-v26】把 row 從 hover_* tag 恢復成 checked/unchecked + price tag
 
-        v12 簡化：v11 的 tag_remove 雙重防護不必要、只用單一 tags= 設回去
+        v26 設計：
+        - v25 仍用 tree.item(iid, tags=(...)) 替換 tags、但 Linux ttk theme 緩存導致
+          視覺上 hover 殘留（v25 log 證明邏輯跑了、但截圖仍亮）
+        - 解法：明確呼叫 tree.tag_remove("hover_*", iid)、繞過 theme 緩存
+        - 即使 row 已經沒有 hover_* tag、tag_remove 也不會 raise、idempotent
+        - 接著設 tags=(checked/unchecked, price_x) 維持原本語意
         """
         if iid not in tree.get_children():
             return
@@ -5869,6 +5932,12 @@ class StrategyGUI(tk.Tk):
         checked = checked_dict.get(iid, False)
         price_tag = self._get_price_tag_for_tree(tree, iid)
         try:
+            # v26：明確移除 hover_* 三個 tag、繞過 ttk theme 緩存
+            for ht in ("hover_up", "hover_down", "hover_zero", "hover"):
+                try:
+                    tree.tag_remove(ht, iid)
+                except tk.TclError:
+                    pass
             tree.item(iid, tags=("checked" if checked else "unchecked", price_tag))
         except tk.TclError:
             pass
@@ -9435,9 +9504,12 @@ class StrategyGUI(tk.Tk):
                 self.select_tree.identify_row(event.y)
                 if region == "cell" else None
             )
+            self._v18_log(f"[v26 motion] x={event.x} y={event.y} region={region} iid={iid}")
             if iid and iid in self.select_tree.get_children():
                 # v16 加 guard、避免 key nav 後 200ms 內 motion 覆蓋
-                if not self._kbd_nav_guard_should_block(self.select_tree):
+                should_block = self._kbd_nav_guard_should_block(self.select_tree)
+                self._v18_log(f"[v26 motion] guard_should_block={should_block} iid={iid}")
+                if not should_block:
                     self._apply_hover(self.select_tree, iid)
                 self.select_tree.focus(iid)
                 self.select_tree.focus_set()
@@ -9465,6 +9537,7 @@ class StrategyGUI(tk.Tk):
         tree = event.widget
         try:
             cur = tree.focus()
+            self._v18_log(f"[v26 keynav] 進入 cur={cur}")
             if cur and cur in tree.get_children():
                 # 設 guard、motion handler 200ms 內不覆蓋 key-nav 設的 hover
                 self._kbd_nav_guard_until_ms = int(time.time() * 1000) + 50
@@ -9472,6 +9545,7 @@ class StrategyGUI(tk.Tk):
                     self._kbd_nav_mouse_pos_at_guard = tree.winfo_pointerxy()
                 except tk.TclError:
                     self._kbd_nav_mouse_pos_at_guard = (0, 0)
+                self._v18_log(f"[v26 keynav] 設 guard until={self._kbd_nav_guard_until_ms}")
                 # 統一交給 _ensure_focus_visible 處理 hover + scroll
                 self._ensure_focus_visible(tree, cur)
         except tk.TclError:

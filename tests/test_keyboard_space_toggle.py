@@ -877,3 +877,67 @@ def test_v25_kbd_nav_guard_setter_uses_50():
     assert "+ 200" not in body, (
         "v25 移除 _on_tree_key_see_focus 內的 +200（舊的 200ms guard）"
     )
+
+
+def test_v26_set_row_tag_normal_removes_hover_tags():
+    """v26：_set_row_tag_normal 內必須有 tag_remove 呼叫、繞過 ttk theme 緩存
+
+    William 2026-07-09 22:12 反映 v25 仍有 5289 + 6219 hover 殘留
+    log 證明 v24 delta tracking 邏輯沒錯、但視覺沒變
+    v26 改用明確 tag_remove 強制清 hover_* tag
+    """
+    content = _read()
+    idx = content.find("def _set_row_tag_normal(self, tree, iid):")
+    assert idx != -1, "v26 找不到 _set_row_tag_normal"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "tag_remove" in body, (
+        "v26 _set_row_tag_normal 內必須有 tag_remove 呼叫、繞過 ttk theme 緩存"
+    )
+
+
+def test_v26_set_row_tag_normal_handles_all_three_hover_kinds():
+    """v26：tag_remove 必須涵蓋 hover_up / hover_down / hover_zero 三種
+
+    price tag 有三種 (up/down/zero)、對應 hover_* 也三種
+    """
+    content = _read()
+    idx = content.find("def _set_row_tag_normal(self, tree, iid):")
+    assert idx != -1, "v26 找不到 _set_row_tag_normal"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    for kind in ("hover_up", "hover_down", "hover_zero"):
+        assert kind in body, f"v26 _set_row_tag_normal 必須移除 {kind} tag"
+
+
+def test_v26_set_row_tag_normal_no_raise_when_no_hover_tag():
+    """v26：tag_remove 呼叫必包在 try/except tk.TclError 內、idempotent
+
+    即使 row 沒有 hover_* tag、tag_remove 也不應該 raise
+    """
+    content = _read()
+    idx = content.find("def _set_row_tag_normal(self, tree, iid):")
+    assert idx != -1, "v26 找不到 _set_row_tag_normal"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # 檢查 tag_remove 呼叫有 try/except 包住
+    import re
+    pattern = r"try:[\s\S]{0,200}?tag_remove[\s\S]{0,200}?except"
+    assert re.search(pattern, body), (
+        "v26 tag_remove 必須包在 try/except tk.TclError 內、避免無 hover tag 時 raise"
+    )
