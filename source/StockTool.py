@@ -4,7 +4,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
 Version: v1.2.0-paper-trading-kb-focus-v25
-最後更新: 2026-07-09 22:59 (Asia/Taipei)
+最後更新: 2026-07-10 01:10 (Asia/Taipei)
 
 Python 版本: 3.8+
 
@@ -29,8 +29,8 @@ except Exception:
 
 
 
-【v1.2.0 paper-trading-kb-focus-v22】2026-07-07 22:15 (終極大轉向：放棄動 OS cursor、只做 hover 視覺同步)
-【背景】William 2026-07-07 22:10 反映 v21 仍未解（三個 bug）：
+【v1.2.0 paper-trading-kb-focus-v22】2026-07-07 22:15 (終極大轉向:放棄動 OS cursor、只做 hover 視覺同步)
+【背景】William 2026-07-07 22:10 反映 v21 仍未解(三個 bug):
   1. 按 up/down key highlight 移動但 cursor 不見
   2. highlight bar 內字變黑色
   3. click 結果 area 任何位置都讓 highlight 字變色
@@ -38,46 +38,46 @@ except Exception:
 【v21 仍失敗的真實 root cause】
 - <<TreeviewSelect>> 不只在 click 時 trigger、在 Tk 自動 focus 移動時也 trigger
 - v12 解耦「_on_tree_select_sync_hover」只 _clear_all_hover 不 _apply_hover
-- key-nav 順序可能是：
+- key-nav 順序可能是:
   <KeyRelease> → v21 _apply_hover (設 hover)
                   → <<TreeviewSelect>> queued fire → _clear_all_hover (清掉)
 - 所以剛設的 hover 馬上被清掉、剩 (checked, price_x) 沒前景 = 黑
 
-【v22 終極修法（放棄 OS cursor、聚焦 hover）】
-1. _on_tree_select_sync_hover：完全 do nothing（不再 _clear_all_hover 製造 race）
-2. _on_tree_key_see_focus：直接 _apply_hover (v21 加入)+ 不再 _move_cursor_to_row
-3. motion handler：仍用 guard 防 key-nav 立即被 motion 覆蓋
-4. 完全放棄 _move_cursor_to_row（XWarpPointer race 太多）
+【v22 終極修法(放棄 OS cursor、聚焦 hover)】
+1. _on_tree_select_sync_hover:完全 do nothing(不再 _clear_all_hover 製造 race)
+2. _on_tree_key_see_focus:直接 _apply_hover (v21 加入)+ 不再 _move_cursor_to_row
+3. motion handler:仍用 guard 防 key-nav 立即被 motion 覆蓋
+4. 完全放棄 _move_cursor_to_row(XWarpPointer race 太多)
 
 【OS cursor 物理移動為什麼放棄】
 - v8-v14: Windows SetCursorPos → Linux windll.user32 不存在 → 沒跑
 - v15: 改 sticky bbox 邏輯、變複雜
 - v16: 改 XWarpPointer → 在 Tk 環境下 race、Tk 內部 cursor sync 覆蓋
 - v17: 加 XSync + xdotool fallback → 不有效
-- v18: 試 _v18_log 追 log → 重大 bug：log 寫在 3667 行 docstring 內、Python 從沒執行
+- v18: 試 _v18_log 追 log → 重大 bug:log 寫在 3667 行 docstring 內、Python 從沒執行
 - v19: 發現 v18 bug、移到 module-level log
 - v20: 補 4 個 tree 的 <KeyRelease> binding
-- v21: _on_tree_key_see_focus 補 _apply_hover（v12 設計 race 仍存在）
+- v21: _on_tree_key_see_focus 補 _apply_hover(v12 設計 race 仍存在)
 - v22: v21 仍失敗 → 放棄 OS cursor、改抓 v12 設計 race
 
-【v22 漏網 bug（v23 hotfix 補）】
+【v22 漏網 bug(v23 hotfix 補)】
 - v22 docstring 說要拿掉 _move_cursor_to_row、_on_tree_key_see_focus 拿掉了
-- 但 _ensure_focus_visible 內那個呼叫遺漏拿掉（v22 沒人發現）
+- 但 _ensure_focus_visible 內那個呼叫遺漏拿掉(v22 沒人發現)
 - _x11_move_cursor_to 在 Linux 上 XSync block 0.5-1.5 秒
 - 整個 KeyRelease handler 卡住 → 視覺上看起來「hover 慢、舊 bar 才消」
 - 測試 test_v22_on_tree_key_see_focus_no_move_cursor 只守護 _on_tree_key_see_focus 沒守護 _ensure_focus_visible
 - v23 補上 + 新增 test_v23_ensure_focus_visible_no_move_cursor 守護
 
 
-【v1.2.0 paper-trading-kb-focus-v23】2026-07-08 21:30 (v22 漏網 bug hotfix：移除 _ensure_focus_visible 內 _move_cursor_to_row)
-【背景】William 2026-07-08 20:59 用截圖反映 v22 三個 bug：
-  1. 「股神篩選結果up/down key 移動high light bar 時動作有點慢！hilight 移到下一個後約過半秒舊的hilight bar才消掉！」
+【v1.2.0 paper-trading-kb-focus-v23】2026-07-08 21:30 (v22 漏網 bug hotfix:移除 _ensure_focus_visible 內 _move_cursor_to_row)
+【背景】William 2026-07-08 20:59 用截圖反映 v22 三個 bug:
+  1. 「股神篩選結果up/down key 移動high light bar 時動作有點慢!hilight 移到下一個後約過半秒舊的hilight bar才消掉!」
   2. 「cursor沒有跟著移動, 所以mouse 一動就出現新的hilight bar!」
-  3. 「up/down key 移動hilight bar時hilight的文字變黑色！應該是不變才對」
+  3. 「up/down key 移動hilight bar時hilight的文字變黑色!應該是不變才對」
 
 【v22 漏網 root cause】
 - v22 commit message + docstring 都說「放棄動 OS cursor」
-- _on_tree_key_see_focus 本身有拿掉 _move_cursor_to_row 呼叫（v22 改、測試 v22_on_tree_key_see_focus_no_move_cursor 守住）
+- _on_tree_key_see_focus 本身有拿掉 _move_cursor_to_row 呼叫(v22 改、測試 v22_on_tree_key_see_focus_no_move_cursor 守住)
 - 但 _ensure_focus_visible 內那個呼叫遺漏拿掉
 - _x11_move_cursor_to 在 Linux 上 XSync block + 3 retries → 0.5-1.5 秒
 - 整個 KeyRelease handler 卡住 0.5 秒 → 視覺上看起來「half-light 舊 bar 才消」
@@ -85,199 +85,204 @@ except Exception:
 - 但 _move_cursor_to_row 完成後、user 動 mouse → motion handler 觸發 → 設 hover 到 mouse 位置
   → 「cursor沒跟著移動、mouse 一動出現新 highlight bar」
 
-【v23 簡單設計（徹底不動 OS cursor、簡化 hover flow）】
+【v23 簡單設計(徹底不動 OS cursor、簡化 hover flow)】
 1. _ensure_focus_visible 內拿掉 self._move_cursor_to_row(tree, iid) 呼叫
    → X11 XSync block 消失、KeyRelease handler 不再被 block
 2. _on_tree_key_see_focus 簡化、移除自己的 self._apply_hover(tree, cur) 重複呼叫
-   → 統一交給 _ensure_focus_visible 處理 hover + scroll（避免重複）
+   → 統一交給 _ensure_focus_visible 處理 hover + scroll(避免重複)
 3. _on_select_tree_leave 拿掉 v22 重複定義、只留 v4 pass 版本
    → 跟 v22 docstring「放手了、不清 hover」一致
 
-【新測試】tests/test_keyboard_space_toggle.py 新增 5 個 v23 test：
+【新測試】tests/test_keyboard_space_toggle.py 新增 5 個 v23 test:
 - test_v23_ensure_focus_visible_no_move_cursor
-- test_v23_ensure_focus_visible_applies_hover（替代 v21 在 _on_tree_key_see_focus 的守護）
+- test_v23_ensure_focus_visible_applies_hover(替代 v21 在 _on_tree_key_see_focus 的守護)
 - test_v23_on_tree_key_see_focus_single_apply_hover
 - test_v23_no_duplicate_on_select_tree_leave
 - test_v23_on_tree_key_see_focus_doc_says_no_move_cursor
 
-【v1.2.0 paper-trading-kb-focus-v24】2026-07-09 20:05 (_apply_hover delta tracking：修 key-nav 內 _apply_hover 慢 + up/down 後動 mouse 有 bar 殘留)
-【背景】William 2026-07-09 06:51 / 06:58 / 09:58 反映 v23 三個問題：
+【v1.2.0 paper-trading-kb-focus-v24】2026-07-09 20:05 (_apply_hover delta tracking:修 key-nav 內 _apply_hover 慢 + up/down 後動 mouse 有 bar 殘留)
+【背景】William 2026-07-09 06:51 / 06:58 / 09:58 反映 v23 三個問題:
   1. mouse 移動 hilight bar 比 up/down key 快很多 → 根本違背直覺
   2. up/down key 移動 bar 後動 mouse → hilight bar 多一個在剛剛 key 移動的位置
   3. 上面的 1 顛倒理解 William 一開始說法、但 William 確認「mouse 快、up/down 慢」
 
-【William 一開始的主訴（重要）】
+【William 一開始的主訴(重要)】
 - 「v23 up/down key 移動 hilight bar 速度有快一些但明顯筆 mouse 移動 hilight bar 慢」
   →「筆」是「比」的誤打、「mouse 移動 hilight bar 慢」是關鍵字
   → 實際意思是「mouse 移動 hilight 比較慢」還是「mouse 比較快」文字上看不出來
-- [10:01] William 最終確認：「你理解錯了！是 mouse 移動 hilight 比 up/down 快很多！」
+- [10:01] William 最終確認:「你理解錯了!是 mouse 移動 hilight 比 up/down 快很多!」
 
 【v23 兩個未修 bug 的 root cause】
-1. 慢（up/down 比 mouse 慢很多）：
-   - motion 路徑：mouse 事件 → motion handler → _apply_hover → 完成
-   - key-nav 路徑：KeyRelease → _on_tree_key_see_focus → _ensure_focus_visible → _apply_hover
+1. 慢(up/down 比 mouse 慢很多):
+   - motion 路徑:mouse 事件 → motion handler → _apply_hover → 完成
+   - key-nav 路徑:KeyRelease → _on_tree_key_see_focus → _ensure_focus_visible → _apply_hover
    - _ensure_focus_visible 內有多個 tree.update_idletasks() + 多個 yview_scroll → 累積 100-200ms
    - 加上 _apply_hover 內 _clear_all_hover 掃 2362 筆、Tcl IPC overhead → 100+150ms
-2. 殘留（up/down 後動 mouse 兩個 hilight）：
+2. 殘留(up/down 後動 mouse 兩個 hilight):
    - key-nav 設 9906 為 hover
    - motion 到 2451 → _apply_hover(2451) 內 _clear_all_hover 掃 2362 筆找 9906 hover
    - 在 race 條件下、可能漏清 9906 hover 但設定 2451 hover → 兩個都有
 
 【v24 解法】delta tracking
 1. 新增 self._hover_iid[tree.id()] = iid dict、追蹤每個 tree 當前 hover iid
-2. 新呼叫時：
-   - lazy init dict（用 hasattr 守衛、避免 __init__ 改動破壞向後相容）
+2. 新呼叫時:
+   - lazy init dict(用 hasattr 守衛、避免 __init__ 改動破壞向後相容)
    - 取 prev_iid = self._hover_iid.get(id(tree))
    - 檢查同 iid 重複呼叫 → early return no-op
    - 驗證新 iid 在 tree.get_children()
-   - 清舊 hover：self._set_row_tag_normal(tree, prev_iid)（單筆 O(1)）
-   - edge case：prev_iid 不在 tree.get_children() → 跳過（rebuild 後的 stale iid）
-   - 設新 hover：tree.item(iid, tags=(hover_<kind>,))
+   - 清舊 hover:self._set_row_tag_normal(tree, prev_iid)(單筆 O(1))
+   - edge case:prev_iid 不在 tree.get_children() → 跳過(rebuild 後的 stale iid)
+   - 設新 hover:tree.item(iid, tags=(hover_<kind>,))
    - 更新 self._hover_iid[id(tree)] = iid
 
 【v24 不改的事】
-- _clear_all_hover 函式本身保留（其他用途：ETF rebuild tree、一些呼叫不依賴 _apply_hover）
-- _ensure_focus_visible 內多個 update_idletasks() 留給 v25 處理（避免一次改太多）
-- _move_cursor_to_row 留著（已不被任何 caller 呼叫、留着方便未來找回）
+- _clear_all_hover 函式本身保留(其他用途:ETF rebuild tree、一些呼叫不依賴 _apply_hover)
+- _ensure_focus_visible 內多個 update_idletasks() 留給 v25 處理(避免一次改太多)
+- _move_cursor_to_row 留著(已不被任何 caller 呼叫、留着方便未來找回)
 
-【測試】tests/test_keyboard_space_toggle.py 新增 5 個 v24 test：
-- test_v24_apply_hover_no_longer_clears_all（守護 v24 不再呼叫 _clear_all_hover）
-- test_v24_apply_hover_uses_hover_iid_dict（守護 _hover_iid dict 機制）
-- test_v24_apply_hover_no_op_when_same_iid（守護 no-op 行為）
-- test_v24_apply_hover_handles_stale_prev_iid（守護 edge case）
-- test_v24_apply_hover_doc_mentions_delta_tracking（守護 docstring 提到 delta tracking / O(1)）
+【測試】tests/test_keyboard_space_toggle.py 新增 5 個 v24 test:
+- test_v24_apply_hover_no_longer_clears_all(守護 v24 不再呼叫 _clear_all_hover)
+- test_v24_apply_hover_uses_hover_iid_dict(守護 _hover_iid dict 機制)
+- test_v24_apply_hover_no_op_when_same_iid(守護 no-op 行為)
+- test_v24_apply_hover_handles_stale_prev_iid(守護 edge case)
+- test_v24_apply_hover_doc_mentions_delta_tracking(守護 docstring 提到 delta tracking / O(1))
 
 【預期效果】
-- key-nav _apply_hover：從掃 2362 筆 100+ms → 單筆 O(1) <1ms
-- mouse 移動 _apply_hover：原 O(N) 全掃 → O(1)、mouse 連續觸發也只動一個 row
-- 殘留：delta tracking 不掃 tree、prev_iid 一定清乾淨
+- key-nav _apply_hover:從掃 2362 筆 100+ms → 單筆 O(1) <1ms
+- mouse 移動 _apply_hover:原 O(N) 全掃 → O(1)、mouse 連續觸發也只動一個 row
+- 殘留:delta tracking 不掃 tree、prev_iid 一定清乾淨
 
-【v1.2.0 paper-trading-kb-focus-v25】2026-07-09 21:48 (修 v24 沒修好的慢 + 殘留：guard 縮短 + _ensure_focus_visible 拿掉多個 update_idletasks)
-【背景】William 2026-07-09 21:12 反映 v24 沒修好：
+【v1.2.0 paper-trading-kb-focus-v25】2026-07-09 21:48 (修 v24 沒修好的慢 + 殘留:guard 縮短 + _ensure_focus_visible 拿掉多個 update_idletasks)
+【背景】William 2026-07-09 21:12 反映 v24 沒修好:
   1. up/down key hilight 移動速度仍 100-200ms、沒感覺變快
   2. up/down 後動 mouse 仍有 2 個 hilight bar 殘留
 
-【William 截圖關鍵訊息（21:12）】
-- App title 是 v24 ✓（v24 source 有跑、不是沒生效）
+【William 截圖關鍵訊息(21:12)】
+- App title 是 v24 ✓(v24 source 有跑、不是沒生效)
 - 3188 + 3135 兩個 hilight bar 都為黃色 (#fff3a0 hover tag 顏色)
-- 動作順序：mouse 在 3135 → 按 up key 到 3188 → 輕動 mouse（3135 物理位置）→ 畫面有 2 個 hilight
-- 關鍵：「3188 的 hilight 沒有被消除」+「3135 hilight 出現」
+- 動作順序:mouse 在 3135 → 按 up key 到 3188 → 輕動 mouse(3135 物理位置)→ 畫面有 2 個 hilight
+- 關鍵:「3188 的 hilight 沒有被消除」+「3135 hilight 出現」
 
 【v24 沒修好的 root cause】
-1. 慢：v24 修了 _apply_hover 內的 O(N) 掃描、但 key-nav 路徑還有另一個 O(N) 重顔：
+1. 慢:v24 修了 _apply_hover 內的 O(N) 掃描、但 key-nav 路徑還有另一個 O(N) 重顔:
    - _ensure_focus_visible 內 tree.see() + update_idletasks() × 3 次 + yview_scroll × 3 次
    - 每次 update_idletasks() 都強制 Tk 重繪整個 tree 2362 筆
    - 加總 ~200ms、完全蓋過 v24 的 _apply_hover 改進
-2. 殘留：_kbd_nav_guard 200ms 內 block motion handler 的 _apply_hover：
+2. 殘留:_kbd_nav_guard 200ms 內 block motion handler 的 _apply_hover:
    - 按 up key 設 3188 hover + guard 到 T+200ms
    - 200ms 內 user 動 mouse → motion event at 3135 → guard block _apply_hover
    - 3188 hover 永遠不消 + 3135 透過 tree.focus(3135) 也亮起來
    - 200ms 過期後 user 停止動 mouse → 沒有新 motion event → 3188 hover 殘留
 
 【v25 解法】
-1. _kbd_nav_guard 200ms → 50ms（user 感知不到殘留）
-2. _kbd_nav_guard mouse 移動容差 5px → 2px（更快解除 guard）
+1. _kbd_nav_guard 200ms → 50ms(user 感知不到殘留)
+2. _kbd_nav_guard mouse 移動容差 5px → 2px(更快解除 guard)
 3. _ensure_focus_visible 拿掉 v12 多重保險的 3 個 update_idletasks()
-   - 只保留 1 個 update_idletasks() 在 tree.see(iid) 後（譲 bbox() 拿到正確座標）
-   - 拿掉 yview_scroll 後的 update_idletasks()（yview_scroll 是同步生效、不需 update）
-   - 拿掉 v12 padded_last 分支的「多重保險」loop（重複 yview_scroll + bbox check）
-4. 保留 v12 padded_last 的 yview_scroll(2)（最後 row 被 canvas edge 切的原本問題、與 v25 互不矛盾）
+   - 只保留 1 個 update_idletasks() 在 tree.see(iid) 後(譲 bbox() 拿到正確座標)
+   - 拿掉 yview_scroll 後的 update_idletasks()(yview_scroll 是同步生效、不需 update)
+   - 拿掉 v12 padded_last 分支的「多重保險」loop(重複 yview_scroll + bbox check)
+4. 保留 v12 padded_last 的 yview_scroll(2)(最後 row 被 canvas edge 切的原本問題、與 v25 互不矛盾)
 
 【v25 不改】
-- _apply_hover（v24 delta tracking 已達 O(1)）
-- _clear_all_hover（保留、其他用途）
-- _kbd_nav_guard 的存在（v25 只是縮短時間 + 縮小容差）
+- _apply_hover(v24 delta tracking 已達 O(1))
+- _clear_all_hover(保留、其他用途)
+- _kbd_nav_guard 的存在(v25 只是縮短時間 + 縮小容差)
 
-【測試】tests/test_keyboard_space_toggle.py 新增 5 個 v25 test：
-- test_v25_guard_shortened_to_50ms（守護 50ms + 2px）
-- test_v25_ensure_focus_visible_single_update_idletasks（守護 ≤ 1 次 update_idletasks）
-- test_v25_ensure_focus_visible_no_redundant_yview_scroll_loop（守護 ≤ 2 次 yview_scroll）
-- test_v25_ensure_focus_visible_doc_mentions_single_pass（守護 docstring 提到 v25 + 單一）
-- test_v25_kbd_nav_guard_setter_uses_50（守護 setter 用 +50）
+【測試】tests/test_keyboard_space_toggle.py 新增 5 個 v25 test:
+- test_v25_guard_shortened_to_50ms(守護 50ms + 2px)
+- test_v25_ensure_focus_visible_single_update_idletasks(守護 ≤ 1 次 update_idletasks)
+- test_v25_ensure_focus_visible_no_redundant_yview_scroll_loop(守護 ≤ 2 次 yview_scroll)
+- test_v25_ensure_focus_visible_doc_mentions_single_pass(守護 docstring 提到 v25 + 單一)
+- test_v25_kbd_nav_guard_setter_uses_50(守護 setter 用 +50)
 
 【預期效果】
-- key-nav 速度：從 ~200ms 降到 ~50-80ms（看 machine 效能）
-- 殘留：50ms 內不會被肉眼看到、過期後下一次 motion event 清乾淨
-- mouse 移動 hover：保持 v24 O(1)、不動
+- key-nav 速度:從 ~200ms 降到 ~50-80ms(看 machine 效能)
+- 殘留:50ms 內不會被肉眼看到、過期後下一次 motion event 清乾淨
+- mouse 移動 hover:保持 v24 O(1)、不動
 
 【v25 之後、v26 規劃】
-- click 其他 column 不該 hilight（motion handler guard）
+- click 其他 column 不該 hilight(motion handler guard)
 - update_idletasks 可能的更加精簡
 
 【已知未解、另行處理】
-- hover_<price> 的 foreground 在 Linux ttk theme 下完全沒生效（hover 文字變黑）
+- hover_<price> 的 foreground 在 Linux ttk theme 下完全沒生效(hover 文字變黑)
   → v1.1-price-color-fix2 設計是「單一 hover_<price> tag」同時設定 background + foreground
   → 在 Windows 驗證 OK、Linux ttk theme (clam/default) 下 foreground 設定被 theme 覆蓋
   → 需要另外拉 issue 用 ttk.Style.element_create 或 tk.Text 重寫
   → 這次不動、避免修正 v23 後又買入新的 race
 
 
-【v1.2.0 paper-trading-kb-focus-v26】2026-07-09 22:55 (修 v25 殘留：_set_row_tag_normal 內加 tag_remove 明確操作、繞過 ttk theme 緩存)
-【背景】William 2026-07-09 22:12 反映 v25 仍有 hover 殘留（5289 + 6219 兩個 row 同時 hover 亮黃色）
-v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
+【v1.2.0 paper-trading-kb-focus-v26】2026-07-09 23:32 fix2 (修 v25 殘留：_set_row_tag_normal 用 tk.call 直接走 Tcl tag remove)
 
-【v25 log 證明邏輯沒錯（22:49 跑出來 1061 行）】 
-- 每個 row transition 都有 清舊 + 設新、無 exception、無失敗訊息
-- _set_row_tag_normal(tree, iid) 內 tree.item(iid, tags=(...)) 沒 raise
-- 但 user 截圖顯示 5289 + 6219 都亮 → 邏輯 vs 視覺脫鉤
+【v26 原本設計、v26-fix2 修正】
+- v26 原本用 tree.tag_remove(ht, iid) Python API
+- 但 ttk.Treeview 沒有 Python-level tag_remove method（v26 commit 後才發現）
+- William 2026-07-09 23:32 反映 v26 仍無效、log 顯示：
+  清舊 hover 失敗 e='Treeview' object has no attribute 'tag_remove'
+- v26-fix2 改用 tree.tk.call(tree._w, "tag", "remove", ht, iid) 走 Tcl level
+  → tk.call 是 Tkinter 通用 low-level API、能調用任何 Tcl widget command
+  → 原始設計猜測：「_set_row_tag_normal 內 AttributeError 會被 inner try catch 住」
+     事實：inner try 只 catch tk.TclError、不 catch AttributeError
+     AttributeError propagate 到 outer try、outer 也只 catch tk.TclError
+     最終 AttributeError 從 _set_row_tag_normal return 出來、整個函式中斷
+     後面的 tree.item(iid, tags=(...)) 沒執行 → hover tag 完全沒被移除
 
-【v26 root cause 推測】
-- Linux ttk theme 緩存：tree.item(iid, tags=(...)) 設 tag 後、Tk 內部 cache 沒失效
-- 多 tag priority bug：ttk.Treeview 在 Linux 上多 tag 組合時、hover tag 視覺常駐
-- v12 設計時用過 tag_remove 雙重防護、v12 認為不必要拿掉、v26 加回來
+【v26 fix2 修法】
+1. _set_row_tag_normal 內、設 tags 之前明確呼叫 tk.call(..., "tag", "remove", ht, iid)
+2. inner try/except 改為 catch (tk.TclError, AttributeError, TypeError) 確保每個 ht 都跑過
+3. outer try/except 也改為 catch (tk.TclError, AttributeError, TypeError) 確保整個函式不中斷
 
-【v26 簡單修法】
-1. _set_row_tag_normal 內、設 tags 之前明確呼叫 tree.tag_remove("hover_*", iid)
-2. _apply_hover 內完全不動（v24 delta tracking 邏輯仍正確）
-3. 即使 row 已經沒有 hover_* tag、tag_remove 也不會 raise、idempotent
-4. 接著設 tags=(checked/unchecked, price_x) 維持原本語意
-
-【v26 不改】
-- _apply_hover（v24 delta tracking 已 O(1)、不動）
-- _kbd_nav_guard（v25 50ms + 2px 夠用、不動）
-- _ensure_focus_visible（v25 單一 update_idletasks 不動）
+【v26 fix2 不改】
+- _apply_hover（v24 delta tracking 仍 O(1)）
+- _kbd_nav_guard（v25 50ms + 2px 夠用）
+- _ensure_focus_visible（v25 單一 update_idletasks）
 - _clear_all_hover（保留、其他用途）
 
-【v26 測試】tests/test_keyboard_space_toggle.py 新增 3 個 v26 test：
-- test_v26_set_row_tag_normal_removes_hover_tags（守護 _set_row_tag_normal 內有 tag_remove 呼叫）
-- test_v26_set_row_tag_normal_handles_all_three_hover_kinds（守護 hover_up/down/zero 三種都移除）
-- test_v26_set_row_tag_normal_no_raise_when_no_hover_tag（守護 idempotent）
+【v26 fix2 測試】tests/test_keyboard_space_toggle.py 修正 3 個 v26 test：
+- test_v26_set_row_tag_normal_removes_hover_tags（改為檢查 tk.call + "tag" + "remove"）
+- test_v26_set_row_tag_normal_handles_all_three_hover_kinds（三種 hover tag 仍在）
+- test_v26_set_row_tag_normal_no_raise_when_no_hover_tag（regex 改為匹配 tk.call）
 
 【預期效果】
-- 即使 ttk theme 緩存、tag_remove 明確操作能強制清乾淨 hover tag
-- 5289 + 6219 殘留問題應徹底解決
-- v24 delta tracking 速度不受影響（tag_remove 是 O(1) per row）
+- v26 commit 後被 William 抓出「無效」（v26 之前因為我猜錯 API）
+- v26 fix2 修正後、tk.call 走 Tcl level、tags remove 一定成功
+- 5289 + 6219 殘留問題應徹底解決（如果還沒、 v27 來處理 Linux ttk theme）
+
+【v25 為什麼也沒修好】(背景參考)
+- v25 仍用 tree.item(iid, tags=(...)) 替換 tags、但 Linux ttk theme 緩存導致視覺上 hover 殘留
+- v25 log 證明邏輯跑了、但截圖仍亮 → root cause 是 ttk theme 緩存
+- v26 fix2 應該繞過 theme 緩存（因為走 tk.call、不是 Python API）
 
 
 【v1.2.0 paper-trading-kb-focus-v19】2026-07-07 18:42 (重大發現：v18 所有 log 都在 3667 行 docstring 內、從沒執行)
-【背景】William 2026-07-07 18:39 反應：「[V18] message 沒在任何 console 顯示、連 log file 都沒產生」
+【背景】William 2026-07-07 18:39 反應:「[V18] message 沒在任何 console 顯示、連 log file 都沒產生」
 
 【v18 隱藏的 Super Bug】
 - StockTool.py 從 line 1 開始是巨大 docstring (3667 行)
 - 所有看起來像 [v18] 註解/程式碼、實際是註解
 - Python 完全不執行
-- v18 為什麼 log 沒寫：因為 _v18_log 在 class 內有定義、
+- v18 為什麼 log 沒寫:因為 _v18_log 在 class 內有定義、
   但 file-level 的 _v18_log 寫 log 都不在 docstring 內、某些寫 log 在 docstring內
 
 【v19 簡單設計】
 1. module-level (line 3670 後) 寫 /tmp/stocktool_v19_module.log 證明真的有 import
 2. 用 os.write(2, ...) 直接寫 stderr fd 2、繞過任何 redirect
 3. _build_ui 開頭寫 /tmp/stocktool_v19_startup.log
-4. _v18_log 還是寫 /tmp/stocktool_v18.log（補、保險）
+4. _v18_log 還是寫 /tmp/stocktool_v18.log(補、保險)
 
 
-【背景】William 2026-07-07 18:28 報告：
+【背景】William 2026-07-07 18:28 報告:
   「program console 或是 python console 都沒看到任何[v17]message」
 
-【v17 為何 log 沒出來？】
+【v17 為何 log 沒出來?】
 - print(..., file=sys.stderr) → PyCharm 可能把 stderr redirect 到 dev/null
 - tree.after_idle(...) 排程 → busy mainloop 可能不執行
-- 結果：log 看不見、看不出真正到底跑到哪
+- 結果:log 看不見、看不出真正到底跑到哪
 
-【v18 簡單設計（log 多重 output + 同步呼叫）】
-1. 新增 _v18_log(msg) helper：
-   - 寫到 /tmp/stocktool_v18.log（保證有檔案可查）
-   - 也 print(..., flush=True) 到 stdout（PyCharm 看到）
+【v18 簡單設計(log 多重 output + 同步呼叫)】
+1. 新增 _v18_log(msg) helper:
+   - 寫到 /tmp/stocktool_v18.log(保證有檔案可查)
+   - 也 print(..., flush=True) 到 stdout(PyCharm 看到)
 2. _on_tree_key_see_focus 取消 after_idle、改同步呼叫 _ensure_focus_visible + _move_cursor_to_row
 3. _v18_log 在每個關鍵點呼叫、確保 log 寫出來
 4. _move_cursor_to_row 也加 _v18_log
@@ -285,10 +290,10 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 【驗證步驟給 William】
 1. 重啟 App
 2. 按 Down 鍵幾下
-3. 看兩個地方：
-   a. PyCharm program console（如果 stdout 有 flush）
-   b. cat /tmp/stocktool_v18.log（一定有、即使 PyCharm 看不到 stdout 也看得到）
-4. 看 log 是卡在哪一行：
+3. 看兩個地方:
+   a. PyCharm program console(如果 stdout 有 flush)
+   b. cat /tmp/stocktool_v18.log(一定有、即使 PyCharm 看不到 stdout 也看得到)
+4. 看 log 是卡在哪一行:
    - 沒寫任何 [v18 _on_tree_key_see_focus] → bind 沒觸發
    - 寫到 _move_cursor_to_row 但 _move_os_cursor returned True → cursor 是該有動
    - 寫到 _move_os_cursor returned False → 都失敗、要看是哪個 OS
@@ -296,16 +301,16 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 【新測試】tests/test_keyboard_space_toggle.py 新增 4 個 v18 test
 
 【v1.2.0 paper-trading-kb-focus-v17】2026-07-07 18:20 (William 18:12 明確反映本機 Ubuntu + XWarpPointer 仍沒動)
-【背景】William 2026-07-07 18:17 確認：
+【背景】William 2026-07-07 18:17 確認:
   「我是在本機(Ubuntu) pycharm stocktools.py 直接按 run button 執行」
 
 【v16 失敗分析】
 - libX11.so.6 有裝、XWarpPointer return 成功、但 OS cursor 沒動
-- XFlush 只 flush event queue、不等 X server 處理完（可能 race condition）
+- XFlush 只 flush event queue、不等 X server 處理完(可能 race condition)
 - ctypes 走 X protocol 在某些環境不可靠
 
-【v17 簡單設計（多層丰豐 + debug log）】
-1. _x11_move_cursor_to：
+【v17 簡單設計(多層丰豐 + debug log)】
+1. _x11_move_cursor_to:
    - Layer A: XWarpPointer + XSync(display, False) × 3 retries
      XSync 取代 XFlush、XSync block 等 server 真的處理完
    - Layer B: subprocess xdotool mousemove fallback
@@ -316,7 +321,7 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 【新測試】tests/test_keyboard_space_toggle.py 新增 4 個 v17 test
 
 【v1.2.0 paper-trading-kb-focus-v16】2026-07-07 17:35 (William 17:29 明確反映在 Ubuntu 執行)
-【背景】William 2026-07-07 17:29 訊息：
+【背景】William 2026-07-07 17:29 訊息:
   「這個 project 我是在 Ubuntu 不是 windows 環境下執行」
 
 【v8-v15 失敗根因】
@@ -326,11 +331,11 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 - v15 的 sticky 邏輯是基於「OS cursor 移不動」的假設
   → 但其實 Linux X11 是可以移的 → v15 邏輯反而把事情變複雜
 
-【v16 簡單設計（跨平台 OS cursor 移動）】
+【v16 簡單設計(跨平台 OS cursor 移動)】
 1. 新增 _move_os_cursor(x, y) 統一介面、用 sys.platform 分派
-2. Linux X11: libX11.so.6 的 XWarpPointer（Ubuntu 預裝、單一 ctypes call）
-3. macOS: CGWarpMouseCursorPosition（CoreGraphics）
-4. Windows: SetCursorPos（保留作為 fallback）
+2. Linux X11: libX11.so.6 的 XWarpPointer(Ubuntu 預裝、單一 ctypes call)
+3. macOS: CGWarpMouseCursorPosition(CoreGraphics)
+4. Windows: SetCursorPos(保留作為 fallback)
 5. 取消 v15 sticky 邏輯
 6. _on_tree_key_see_focus 設 200ms 短 guard + 真的用 _move_cursor_to_row 移 cursor
 7. event_generate('<Motion>') 保留為 Tk 內部視覺同步
@@ -338,74 +343,74 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 【新測試】tests/test_keyboard_space_toggle.py 新增 11 個 v16 test
 
 【v1.2.0 paper-trading-kb-focus-v15】2026-07-07 17:30 (William 17:27 反映 v14 完全無 effect)
-【背景】William 2026-07-07 17:27 反映 v14 仍失敗：
+【背景】William 2026-07-07 17:27 反映 v14 仍失敗:
   - up/down key 移動 highlight bar 但 cursor 沒跟
   - mouse 一動畫面上變成有 2 個 highlight bar
 
 【v14 失敗根因】
 - ctypes argtypes / DPI scaling 處理完了
-- 但 Windows OS 仍不接受 SetCursorPos（accessibility tool / corporate policy / VM 等）
+- 但 Windows OS 仍不接受 SetCursorPos(accessibility tool / corporate policy / VM 等)
 - 我的 OS cursor 移動嘗試在這個環境完全失敗
 
-【v15 簡單設計（根本改變、不靠 OS cursor 移動）】
-1. 新增 _sticky_key_nav_iids = {} （tree id → iid）記錄「最近 key nav 設的 row」
-2. 3 個 motion handler（_on_select_tree_hover / _ms_tree_hover / _etf_tree_hover_combined）重寫：
+【v15 簡單設計(根本改變、不靠 OS cursor 移動)】
+1. 新增 _sticky_key_nav_iids = {} (tree id → iid)記錄「最近 key nav 設的 row」
+2. 3 個 motion handler(_on_select_tree_hover / _ms_tree_hover / _etf_tree_hover_combined)重寫:
    - 檢查 _sticky_key_nav_iid
-   - 若 mouse bbox 跟 sticky bbox 重疊 > 50% → 用 sticky（key nav 設的位置）
+   - 若 mouse bbox 跟 sticky bbox 重疊 > 50% → 用 sticky(key nav 設的位置)
    - 若 mouse 完全離開 sticky bbox → 跟 mouse、清除 sticky
-3. click handler 必 reset sticky（click 是明確的 mouse 動作、清除 sticky）
-4. 不再用 timer-based guard（_kbd_nav_guard_should_block 永遠 return False）
+3. click handler 必 reset sticky(click 是明確的 mouse 動作、清除 sticky)
+4. 不再用 timer-based guard(_kbd_nav_guard_should_block 永遠 return False)
 
 【新測試】
-- tests/test_keyboard_space_toggle.py（8 個新增、總 86 個全綠）：
-  新增：test_v15_sticky_key_nav_iids_dict_in_init / test_v15_get_set_sticky_helpers_exist /
+- tests/test_keyboard_space_toggle.py(8 個新增、總 86 個全綠):
+  新增:test_v15_sticky_key_nav_iids_dict_in_init / test_v15_get_set_sticky_helpers_exist /
         test_v15_on_tree_key_see_focus_sets_sticky / test_v15_motion_handler_uses_sticky_logic /
         test_v15_motion_uses_bbox_overlap_check / test_v15_click_resets_sticky /
         test_v15_no_more_kbd_nav_guard_timer / test_v15_motion_sticky_with_overlap
 
-【驗證】預期全 test suite 跑完 794 pass + 1 pre-existing fail（test_etf_weekend_fallback 與本改無關）
+【驗證】預期全 test suite 跑完 794 pass + 1 pre-existing fail(test_etf_weekend_fallback 與本改無關)
 
 【v1.2.0 paper-trading-kb-focus-v14】2026-07-07 17:10 (William 17:05 反映 v13 完全無 effect)
-【背景】William 2026-07-07 16:51 截圖反映 v12 仍失敗：
-  - 截圖顯示 4 個非連續 row 同時有黃色 highlight bar（2525 / 5525 / 6177 / 2451）
+【背景】William 2026-07-07 16:51 截圖反映 v12 仍失敗:
+  - 截圖顯示 4 個非連續 row 同時有黃色 highlight bar(2525 / 5525 / 6177 / 2451)
   - 上多個 row 殘留 highlight、mouse 移動時 highlight 從原來的 cursor 處動作
 
-  William 診斷：
+  William 診斷:
     "up/down key 移動 highlight bar 時 cursor 沒有跟 highlight bar 一起
      移到新的 highlight bar 位置 → 移動 mouse 時 highlight bar 從原來的
      cursor 處開始動作留下 highlight bar 殘留"
 
-  → 結論：OS cursor 沒跟上 key nav、key nav 後的 hover 會被 motion handler 拉回
+  → 結論:OS cursor 沒跟上 key nav、key nav 後的 hover 會被 motion handler 拉回
 
 【v12 失敗根因】
 - _move_cursor_to_row 用 SetCursorPos、但 William 的 Windows 環境 SetCursorPos
-  return 成功但 OS cursor 實際上沒動（UIPI / accessibility tools block）
+  return 成功但 OS cursor 實際上沒動(UIPI / accessibility tools block)
 - 導致 key nav 後 OS cursor 留在原位、mouse 一動 motion handler 設 hover 回 cursor 處
 - 多次 click + key nav 後多個 row 都留 hover_* tag
 
-【v13 簡單設計（五層豐的 cursor 移動 + 加長 guard）】
-1. _win_move_cursor_to 多層豐的：
-   a. SetCursorPos + GetCursorPos 驗證（不到 target 就走下一層）
+【v13 簡單設計(五層豐的 cursor 移動 + 加長 guard)】
+1. _win_move_cursor_to 多層豐的:
+   a. SetCursorPos + GetCursorPos 驗證(不到 target 就走下一層)
    b. ClipCursor(None) 釋放 mouse lock + 重試 SetCursorPos
    c. mouse_event (老 API)、MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
    d. SendInput (低階 API)
    e. 強制 ClipCursor(None) + 最後一次 SetCursorPos
-2. _kbd_nav_guard 延長 500ms → 2000ms：
-   - key nav 後 2 秒內 motion handler 被 block（即使 mouse 動 < 5px）
+2. _kbd_nav_guard 延長 500ms → 2000ms:
+   - key nav 後 2 秒內 motion handler 被 block(即使 mouse 動 < 5px)
    - 防止 motion handler 太快拉回 hover
    - 超過 2 秒或 mouse 動 > 5px 才解除 guard
-3. event_generate("<Motion>") 仍為視覺同步的保險：
+3. event_generate("<Motion>") 仍為視覺同步的保險:
 
 【新測試】
-- tests/test_keyboard_space_toggle.py（6 個新增、總 87 個全綠）：
-  新增：test_win_move_cursor_to_helper_exists / test_move_cursor_uses_get_cursor_pos_verify /
+- tests/test_keyboard_space_toggle.py(6 個新增、總 87 個全綠):
+  新增:test_win_move_cursor_to_helper_exists / test_move_cursor_uses_get_cursor_pos_verify /
         test_move_cursor_uses_clip_cursor_release / test_move_cursor_uses_mouse_event /
         test_move_cursor_uses_send_input / test_kbd_nav_guard_extended_to_2000ms
 
-【驗證】預期全 test suite 跑完 786 pass + 1 pre-existing fail（test_etf_weekend_fallback 與本改無關）
+【驗證】預期全 test suite 跑完 786 pass + 1 pre-existing fail(test_etf_weekend_fallback 與本改無關)
 
 【v1.2.0 paper-trading-kb-focus-v12】2026-07-07 15:10 (William 15:03 明確三項要求)
-【背景】William 2026-07-07 15:03 三項要求：
+【背景】William 2026-07-07 15:03 三項要求:
   1. mouse cursor 在結果 area 就要有 highlight bar、不需要 click
      → v11 mouse hover 完全不動作、root cause 是 v11 _apply_hover 三重 tags 太複雜
   2. down key 到底、最後一個 item 依舊顯示不出來、只有 highlight bar 頂部一點點
@@ -418,38 +423,38 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 - _clear_all_hover 的 tag_remove 順序跟 _set_row_tag_normal 設的 tags 冲突
 - 個別 row 上 hover_* tag 可能被 click handler 重設的 tags 覆蓋後、motion handler 不知道
 
-【v12 簡單設計（hover vs click 解耦 + v10 scroll 仍舊保留）】
-1. 完全解耦 hover 跟 click：
+【v12 簡單設計(hover vs click 解耦 + v10 scroll 仍舊保留)】
+1. 完全解耦 hover 跟 click:
    - mouse motion handler (_on_select_tree_hover / _ms_tree_hover / _etf_tree_hover_combined)
      永遠在 mouse 位置設 hover_<kind> tag
    - click handler (_on_select_tree_click / _ms_toggle_check / _etf_toggle_check)
      不 call _apply_hover、只設 selection (excel output) + tags=(checked, price_x)
    - <<TreeviewSelect>> handler (_on_tree_select_sync_hover) 只調 _clear_all_hover、
-     不 call _apply_hover（避免 click 後 mouse 還沒動、hover 卻被設回 click row）
-2. _apply_hover 回到 v8 設計：tags=(hover_kind,) 單一 tag、簡單且必定 work
+     不 call _apply_hover(避免 click 後 mouse 還沒動、hover 卻被設回 click row)
+2. _apply_hover 回到 v8 設計:tags=(hover_kind,) 單一 tag、簡單且必定 work
    - click handler 重設 tags=(checked, price_x) 會清掉 hover 是設計上就要的
    - mouse motion 持續 re-apply hover 保持 highlight 在 cursor 位置
-3. _clear_all_hover 簡化：不用 tag_remove、只用 _set_row_tag_normal 重建
+3. _clear_all_hover 簡化:不用 tag_remove、只用 _set_row_tag_normal 重建
    - 掃每個 row、看 tags、有 hover_* 就重設為 (checked, price_x)
-4. _ensure_focus_visible 保留 v10 的最後 row scroll 邏輯（padding row + yview_scroll 1 row）
-   - William 反映仍不夠、v12 改為更可靠的多重 scroll：
+4. _ensure_focus_visible 保留 v10 的最後 row scroll 邏輯(padding row + yview_scroll 1 row)
+   - William 反映仍不夠、v12 改為更可靠的多重 scroll:
      - 見 last_real_item 後多重 yview_scroll(-1, units) 兩次
      - 確保 last row 有 room 顯示 focus rectangle
 
 【新測試】
-- tests/test_keyboard_space_toggle.py（7 個新增、總 81 個全綠）：
-  新增：test_v12_hover_decoupled_from_click / test_v12_apply_hover_single_tag /
+- tests/test_keyboard_space_toggle.py(7 個新增、總 81 個全綠):
+  新增:test_v12_hover_decoupled_from_click / test_v12_apply_hover_single_tag /
         test_v12_clear_all_hover_simple / test_v12_ensure_focus_visible_scrolls_extra_for_last_row /
         test_v12_motion_handler_does_not_require_click /
         test_v12_motion_handler_uses_event_generate_fallback /
         test_v12_click_handler_no_hover_call
-  改寫：test_on_tree_select_sync_hover_clears_old (v8 → v12 解耦)、
+  改寫:test_on_tree_select_sync_hover_clears_old (v8 → v12 解耦)、
         test_on_tree_select_sync_hover_clears_old_row
 
-【驗證】預期全 test suite 跑完 779 pass + 1 pre-existing fail（test_etf_weekend_fallback 與本改無關）
+【驗證】預期全 test suite 跑完 779 pass + 1 pre-existing fail(test_etf_weekend_fallback 與本改無關)
 
 【v1.2.0 paper-trading-kb-focus-v11】2026-07-07 14:45 (William 14:40 用截圖反映 v10 仍失敗)
-【背景】William 2026-07-07 12:54 用截圖回報 v9 仍失敗：
+【背景】William 2026-07-07 12:54 用截圖回報 v9 仍失敗:
   1. cursor 沒跟個 high light bar 所以 up/down key 移動 high light 後、high light 不同步
      → v9 用 SetCursorPos、但 Win 視窗設定可能 block、cursor 實際上不動
      → SetCursorPos 不 effect、motion handler 被 guard 不到就 override highlight
@@ -461,35 +466,35 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   1. SetCursorPos 被 block、cursor 不動 → OS cursor 跟視覺 cursor 不同步
   2. yview_scroll 被 max bottom 卡住 → 沒空間給 focus rectangle
 
-【v10 簡單設計（event_generate 主矛 + padding row + 容差）】
-  1. _move_cursor_to_row 三層豐的同步策略：
+【v10 簡單設計(event_generate 主矛 + padding row + 容差)】
+  1. _move_cursor_to_row 三層豐的同步策略:
      a. event_generate("<Motion>") 主矛 = Tk 內建、必定 work
         → 會觸發 motion handler、hover tag 被設到 focus row
-        → 視覺 highlight 永遠同步（不管 OS cursor 動不動）
-     b. Windows: ctypes.windll.user32.SetCursorPos（best-effort）
-     c. Windows: SendInput fallback（低階 API）
-  2. _ensure_focus_padding_row：tree 底部加一個 invisible padding row
+        → 視覺 highlight 永遠同步(不管 OS cursor 動不動)
+     b. Windows: ctypes.windll.user32.SetCursorPos(best-effort)
+     c. Windows: SendInput fallback(低階 API)
+  2. _ensure_focus_padding_row:tree 底部加一個 invisible padding row
      - iid "__focus_padding__"、tag "focus_padding"、background = tree 背景
      - 讓 yview_scroll 有 scroll 空間、最後 row 有 focus rectangle 位置
-     - reentrant（exists 檢查）、存在就不重加
+     - reentrant(exists 檢查)、存在就不重加
      - 選股 refresh 時會被刪、下次 _ensure_focus_visible 會 re-add
-  3. _kbd_nav_guard 5px 容差：
+  3. _kbd_nav_guard 5px 容差:
      - mouse 位置變化 ≤ 5px、視為微抖動 / Win 系統事件、繼續 block
      - > 5px 才認為使用者主動動 mouse、解除 guard
      - 防止 Win pointerxy 與系統事件造成的微小變動誤刪除 guard
 
 【新測試】
-- tests/test_keyboard_space_toggle.py（6 個新增、改寫 1 個、總 73 個全綠）：
-  新增：test_sendinput_helper_exists / test_ensure_focus_padding_row_helper_exists /
+- tests/test_keyboard_space_toggle.py(6 個新增、改寫 1 個、總 73 個全綠):
+  新增:test_sendinput_helper_exists / test_ensure_focus_padding_row_helper_exists /
         test_move_cursor_calls_event_generate_first / test_padding_row_added_when_missing /
         test_padding_row_not_added_if_exists / test_guard_5px_tolerance
-  改寫：test_kbd_nav_guard_blocks_when_mouse_unchanged（加 5px 容差測試）
-- tests/test_price_color.py：21 個全綠（v8-v9 _apply_hover + guard 邏輯不變）
+  改寫:test_kbd_nav_guard_blocks_when_mouse_unchanged(加 5px 容差測試)
+- tests/test_price_color.py:21 個全綠(v8-v9 _apply_hover + guard 邏輯不變)
 
-【驗證】預期全 test suite 跑完 776 pass + 1 pre-existing fail（test_etf_weekend_fallback 與本改無關）
+【驗證】預期全 test suite 跑完 776 pass + 1 pre-existing fail(test_etf_weekend_fallback 與本改無關)
 
 【v1.2.0 paper-trading-kb-focus-v9】2026-07-07 12:00 (William 11:50 用截圖反映 v8 仍失敗)
-【背景】William 2026-07-07 10:59 用截圖回報 v7 仍失敗：
+【背景】William 2026-07-07 10:59 用截圖回報 v7 仍失敗:
   1. Down key 還是最後一個 item 只顯示 high light bar 頂部幾個 dots
      → focus rectangle 被 canvas 底部邊緣切掉、看不出 highlight 哪個 row
   2. Mouse cursor 移到結果區、high light bar 不見了
@@ -502,46 +507,46 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - tree.focus() 不會觸發 <<TreeviewSelect>> 事件
   - 所以 hover_<price> tag 設進去的 handler 永遠不會被 motion 觸發
 
-【v8 簡單設計（單一真相 = _apply_hover）】
-  1. 新增 _apply_hover(tree, iid) 統一函式：「清所有 hover_<price> + 設新 row hover」
-     - motion handler 呼叫：滑鼠移到新 row
-     - <<TreeviewSelect>> handler 呼叫：click 切換 selection
-     - _on_tree_key_see_focus 呼叫：↑/↓ 鍵盤移動後
+【v8 簡單設計(單一真相 = _apply_hover)】
+  1. 新增 _apply_hover(tree, iid) 統一函式:「清所有 hover_<price> + 設新 row hover」
+     - motion handler 呼叫:滑鼠移到新 row
+     - <<TreeviewSelect>> handler 呼叫:click 切換 selection
+     - _on_tree_key_see_focus 呼叫:↑/↓ 鍵盤移動後
      - 三個來源都走同一個函式、絕對同步、不會 race
-  2. 新增 _clear_all_hover(tree) 輔助：清整個 tree 所有 hover_<price> tag
-     - O(N) 掃全部 children、但簡單且永遠正確（v5/v6 的 dict 追蹤有 bug）
-  3. 修 Down key 最後 row 顯示問題：
-     - _ensure_focus_visible 多做一步：若 iid 是最後一個、tree.yview_scroll(1, "units")
+  2. 新增 _clear_all_hover(tree) 輔助:清整個 tree 所有 hover_<price> tag
+     - O(N) 掃全部 children、但簡單且永遠正確(v5/v6 的 dict 追蹤有 bug)
+  3. 修 Down key 最後 row 顯示問題:
+     - _ensure_focus_visible 多做一步:若 iid 是最後一個、tree.yview_scroll(1, "units")
      - 多 scroll 一格空白出來、focus rectangle 不會被 canvas 邊緣切掉
-  4. 鍵盤 ↑/↓ 移動時 cursor 跟著走：
-     - _move_cursor_to_row 用 ctypes.windll.user32.SetCursorPos（Windows）
-     - 前提：mouse 必須已在 tree 內才移動（不打斷使用者在別處操作）
-     - Linux/Mac 暫不支援（X11 需 xdotool、Mac 需 Quartz）
+  4. 鍵盤 ↑/↓ 移動時 cursor 跟著走:
+     - _move_cursor_to_row 用 ctypes.windll.user32.SetCursorPos(Windows)
+     - 前提:mouse 必須已在 tree 內才移動(不打斷使用者在別處操作)
+     - Linux/Mac 暫不支援(X11 需 xdotool、Mac 需 Quartz)
   5. ms_tree 拿掉 v1.0 的 _on_tree_hover 雙重綁定、只留 _ms_tree_hover
      - 原本兩個 <Motion> handler 會重複處理、有 race condition 風險
 
 【新測試】
-- tests/test_keyboard_space_toggle.py（9 個新增、5 個改寫、60 個全綠）：
-  新增：test_apply_hover_helper_exists / test_clear_all_hover_helper_exists /
+- tests/test_keyboard_space_toggle.py(9 個新增、5 個改寫、60 個全綠):
+  新增:test_apply_hover_helper_exists / test_clear_all_hover_helper_exists /
         test_move_cursor_to_row_helper_exists / test_ensure_focus_visible_helper_exists /
         test_apply_hover_clears_all_then_sets_new /
         test_ensure_focus_visible_scrolls_extra_for_last_item /
         test_move_cursor_to_row_skips_when_mouse_outside_tree /
         test_ms_tree_no_legacy_v1_hover_binding /
         test_on_tree_key_see_focus_uses_ensure_focus_visible
-  改寫：test_on_select_tree_hover_movement_clears_old / test_ms_tree_hover_movement_clears_old /
+  改寫:test_on_select_tree_hover_movement_clears_old / test_ms_tree_hover_movement_clears_old /
         test_on_tree_select_sync_hover_clears_old_row / test_on_tree_select_sync_hover_clears_old /
         test_etf_tree_hover_combined_clears_old
-- tests/test_price_color.py（3 個改寫、21 個全綠）：
-  改寫：test_select_hover_preserves_price_tag / test_ms_hover_preserves_price_tag /
-        test_etf_hover_combined_uses_price_tag（都改檢查 _apply_hover 函式）
+- tests/test_price_color.py(3 個改寫、21 個全綠):
+  改寫:test_select_hover_preserves_price_tag / test_ms_hover_preserves_price_tag /
+        test_etf_hover_combined_uses_price_tag(都改檢查 _apply_hover 函式)
 
-【驗證】全 test suite 跑完 761 pass + 1 pre-existing fail（test_etf_weekend_fallback 與本改無關、無 regression）
-- tests/test_keyboard_space_toggle.py：60 個全綠（原 51 + v8 新增 9 個 helper/behavior 測試）
-- tests/test_price_color.py：21 個全綠（_on_tree_select_sync_hover 改檢查 _apply_hover）
+【驗證】全 test suite 跑完 761 pass + 1 pre-existing fail(test_etf_weekend_fallback 與本改無關、無 regression)
+- tests/test_keyboard_space_toggle.py:60 個全綠(原 51 + v8 新增 9 個 helper/behavior 測試)
+- tests/test_price_color.py:21 個全綠(_on_tree_select_sync_hover 改檢查 _apply_hover)
 
 【v1.2.0 paper-trading-kb-focus-v7】2026-07-07 01:08 (William 01:08 用截圖反映 v6 仍失敗)
-【背景】William 2026-07-07 01:08 用截圖回報 v6 仍失敗：
+【背景】William 2026-07-07 01:08 用截圖回報 v6 仍失敗:
   1. 結果顯示時要先 click 一個 item 後 up/down key 才會動作
   2. 用 up/down key 移動 highlight 後 mouse 移動 highlight 時之前的
      highlight 沒被消除、有 highlight 殘留
@@ -550,12 +555,12 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 
 【v6 失敗根因】
   - motion handler 和 <<TreeviewSelect>> handler 兩個來源同時設 hover_<price> tag
-    → race condition、兩個 hover 同時存在（截圖兩個 row 都黃色）
+    → race condition、兩個 hover 同時存在(截圖兩個 row 都黃色)
   - <Enter> 事件只在 mouse 進入時觸發、但 William 用鍵盤 tab 切換時不會觸發
     → focus 真的不在 tree、Up/Down 不送到 tree、要先 click 才能用
 
-【v7 簡單設計（單一真相 = <<TreeviewSelect>> + <FocusIn>）】
-  1. motion handler（_on_select_tree_hover / _ms_tree_hover / _etf_tree_hover_combined）
+【v7 簡單設計(單一真相 = <<TreeviewSelect>> + <FocusIn>)】
+  1. motion handler(_on_select_tree_hover / _ms_tree_hover / _etf_tree_hover_combined)
      只設定 tree.focus(iid) + tree.focus_set()、完全不動 tags
   2. hover_<price> tag 完全由 <<TreeviewSelect>> handler (_on_tree_select_sync_hover)
      統一管理、單一 source of truth
@@ -565,15 +570,15 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   4. <KeyRelease-Up/Down/Home/End/Prior/Next> 仍主動 see(focus())、確保 scroll 跟上
 
 【新測試】
-- tests/test_keyboard_space_toggle.py（51 個全綠）：v7 motion handler 邏輯檢查
-- tests/test_price_color.py（20 個全綠）：hover_<price> 改由 _on_tree_select_sync_hover 管
+- tests/test_keyboard_space_toggle.py(51 個全綠):v7 motion handler 邏輯檢查
+- tests/test_price_color.py(20 個全綠):hover_<price> 改由 _on_tree_select_sync_hover 管
 
-【驗證】全 test suite 跑完 751 pass + 7 pre-existing fail（與本改無關、無 regression）
+【驗證】全 test suite 跑完 751 pass + 7 pre-existing fail(與本改無關、無 regression)
 
 【v1.2.0 paper-trading-kb-focus-v6】2026-07-06 23:21 (William 23:21 反映「highlight 殘留 / down 不到最後」)
-【背景】William 2026-07-06 23:21 用截圖回報 v5 仍失敗：
-  1. mouse 移動時新位置有 highlight、但舊位置 highlight bar 沒被取消（殘留）
-  2. down key 向下 scroll 沒辦法到達最後一個 item（畫面被切一半）
+【背景】William 2026-07-06 23:21 用截圖回報 v5 仍失敗:
+  1. mouse 移動時新位置有 highlight、但舊位置 highlight bar 沒被取消(殘留)
+  2. down key 向下 scroll 沒辦法到達最後一個 item(畫面被切一半)
   3. mouse click 後移動 cursor、click 處 highlight 殘留
 
 【v5 失敗根因】
@@ -584,39 +589,39 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - browse mode Down/Up 雖然切 focus、但 tree.see() 沒被自動呼叫、最後一個 row
     viewport scroll 跟不上
 
-【v6 簡單設計（單一真相 = Treeview children 遍歷）】
+【v6 簡單設計(單一真相 = Treeview children 遍歷)】
   1. 取消 _select_hover_iids / _ms_hover_iid / _etf_hover_iid_new 追蹤 dict
   2. 所有 hover handler 直接 `for child in tree.get_children()` 遍歷清舊
   3. _on_tree_select_sync_hover / _on_select_tree_hover / _ms_tree_hover
-     / _etf_tree_hover_combined 都用同一個邏輯：清所有 children + 設新 row
+     / _etf_tree_hover_combined 都用同一個邏輯:清所有 children + 設新 row
   4. _focus_tab_tree_on_change / _after_idle_focus_tree 切換時也遍歷清舊 + 設新
   5. 4 個 Treeview 都 bind <KeyRelease-Up/Down/Home/End/Prior/Next> → _on_tree_key_see_focus
      主動 tree.see(focus())、確保 scroll 跟上
   6. _focus_tab_tree_on_change / _after_idle_focus_tree 也呼叫 tree.see()、
      確保第一個 row 顯示完整
 
-【新測試】tests/test_keyboard_space_toggle.py 重寫為 v6 邏輯（51 個全綠）
-- 靜態測試 (16 個)：遍歷清邏輯檢查、不依賴 dict 追蹤
-- 行為測試 (5 個)：mock 加 _set_row_tag_normal helper、tree.item("tags") 回 tuple
+【新測試】tests/test_keyboard_space_toggle.py 重寫為 v6 邏輯(51 個全綠)
+- 靜態測試 (16 個):遍歷清邏輯檢查、不依賴 dict 追蹤
+- 行為測試 (5 個):mock 加 _set_row_tag_normal helper、tree.item("tags") 回 tuple
 
-【驗證】全 test suite 跑完 751 pass + 7 pre-existing fail（與本改無關、無 regression）
+【驗證】全 test suite 跑完 751 pass + 7 pre-existing fail(與本改無關、無 regression)
 
 【v1.2.0 paper-trading-kb-focus-v5】2026-07-06 22:42 (William 22:42 反映「舊 highlight 沒取消 / down key scroll 不到最後」)
-【背景】William 2026-07-06 22:42 反映兩個問題：
+【背景】William 2026-07-06 22:42 反映兩個問題:
   1. mouse 移動時新位置有 highlight、但舊位置 highlight bar 沒有被取消
   2. down key 向下 scroll 沒辦法到達最後一個 item
-  3. 三個 tab（系統選股/ETF/手動選股/回測）都一樣
+  3. 三個 tab(系統選股/ETF/手動選股/回測)都一樣
 
 【v4 失敗根因】
   - 用 selection_set(iid) 為 single source of truth、但 Linux ttk 某些主題
     selection_set 多次呼叫後、舊的 selected 還在、新的又被加上去
-    → 導致 highlight 跟 focus 不同步（舊位置 highlight 沒取消）
+    → 導致 highlight 跟 focus 不同步(舊位置 highlight 沒取消)
   - tree.see() 跟 Treeview 預設 Up/Down 內部 scroll 衝突、scroll 不到最後一個 item
   - click handler 加 selection_remove 反而讓 selected state 變成系統藍色
 
-【v5 簡單設計（回到 hover_<price> tag 系統）】
+【v5 簡單設計(回到 hover_<price> tag 系統)】
   1. Hover handler 先 _clear_hover 取消舊 row 的 hover_<price> tag
-     → 舊位置 highlight 立刻被取消（William 22:42 問題 1 解決）
+     → 舊位置 highlight 立刻被取消(William 22:42 問題 1 解決)
   2. 恢復舊 row 為 (checked/unchecked, price_*) tag
      → 價格顏色不被破壞
   3. <Enter> 自動 focus_set + focus(children[0])
@@ -627,20 +632,20 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   6. click handler 不 selection_set、browse mode 自動設
   7. _focus_tab_tree_on_change 設 hover_<price> tag、不 selection_set
 
-【新測試】tests/test_keyboard_space_toggle.py 重寫為 v5 邏輯（51 個全綠）
-- 靜態測試 (15 個)：4 個 tree 都有 hover_<price> tag 註冊、_select_hover_iids 追蹤、
+【新測試】tests/test_keyboard_space_toggle.py 重寫為 v5 邏輯(51 個全綠)
+- 靜態測試 (15 個):4 個 tree 都有 hover_<price> tag 註冊、_select_hover_iids 追蹤、
   _ms_clear_hover / _etf_clear_hover_new 取消舊 hover、_on_tree_enter_focus 設 focus(children[0])、
   不應有 selection_set / _on_tree_key_move / _set_row_tag_normal
-- 行為測試 (5 個)：_on_select_tree_hover 移動時清舊、_ms_tree_hover 移動時清舊、
+- 行為測試 (5 個):_on_select_tree_hover 移動時清舊、_ms_tree_hover 移動時清舊、
   _on_tree_select_sync_hover 清舊 + 設新、_on_tree_enter_focus 設 focus、
   _focus_tab_tree_on_change 4 種 tree 都設 hover_<price> tag
 
-【驗證】全 test suite 跑完 751 pass + 7 pre-existing fail（與本改無關、無 regression）
+【驗證】全 test suite 跑完 751 pass + 7 pre-existing fail(與本改無關、無 regression)
 
 【v1.2.0 paper-trading-kb-focus-v4】2026-07-06 21:55 (William 21:55 反映「仍要 click / 高亮白色 / 同步 / scroll 不到最後」)
-【背景】William 2026-07-06 21:55 反映四個問題：
+【背景】William 2026-07-06 21:55 反映四個問題:
   1. 開機系統選股結果第一次要 mouse move 到選股結果 area 且 click 後 up/down key 才能 scroll
-  2. 被 clicked 的 item 自會變成高亮白色（Linux ttk selected foreground 預設白色）
+  2. 被 clicked 的 item 自會變成高亮白色(Linux ttk selected foreground 預設白色)
   3. 用 key scroll 後 mouse 移動是從 cursor 位置開始移動 highlight、而不是 up/down key 移動後的位置
      所以 highlight 會殘留
   4. down key 向下 scroll 沒辦法到達最後一個 item
@@ -652,34 +657,34 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - 自定 <Up>/<Down> bind 會跟 Treeview 預設行為衝突
   - Linux ttk 主題 selected state 預設前景色為白色、style.map 不一定生效
 
-【v4 簡單設計（不 hack、用 Treeview 原生能力）】
-  1. 4 個 Treeview 都設 selectmode="browse"（單選 selection）
+【v4 簡單設計(不 hack、用 Treeview 原生能力)】
+  1. 4 個 Treeview 都設 selectmode="browse"(單選 selection)
   2. bind <Enter> 事件、滑鼠進入 Treeview 自動 focus_set
      → keyboard focus 永遠在 Treeview 上、Treeview 預設 Up/Down 自動會切 focus + scroll
   3. <Motion> hover 用 tree.selection_set(iid) + tree.focus(iid) + tree.see(iid)
      → hover = selected、單一視覺來源
-  4. <<TreeviewSelect>> 事件 handler 同步設 hover_<price> tag（視覺備援）
+  4. <<TreeviewSelect>> 事件 handler 同步設 hover_<price> tag(視覺備援)
   5. _style.map(selected → #fff3a0) + foreground → #000000
      → Linux ttk 主題即使 selected 仍顯示黃色 + 黑字
   6. 不再自定 <Up>/<Down> bind、不再 selection_remove
      → 依靠 Treeview 預設行為、最單純
 
 【新測試】tests/test_keyboard_space_toggle.py 重寫為 v4 邏輯
-- 靜態測試 (16 個)：4 個 Treeview selectmode="browse"、
+- 靜態測試 (16 個):4 個 Treeview selectmode="browse"、
   _on_tree_enter_focus / _on_tree_select_sync_hover 存在、
   4 個 Treeview 綁 <Enter> + <<TreeviewSelect>>、
   不應該有 <Up>/<Down> bind 或 _on_tree_key_move、
   style.map 設定 foreground 黑色、_focus_tab_tree_on_change 用 selection_set
-- 行為測試 (5 個)：_on_tree_enter_focus 呼叫 focus_set、
+- 行為測試 (5 個):_on_tree_enter_focus 呼叫 focus_set、
   _on_tree_select_sync_hover 設 hover_<price> tag、
   _focus_tab_tree_on_change 對 4 種 tree 都呼叫 selection_set + focus + see
 
-【驗證】全 test suite 跑完 749 pass + 7 pre-existing fail（與本改無關、無 regression）
+【驗證】全 test suite 跑完 749 pass + 7 pre-existing fail(與本改無關、無 regression)
 
 【v1.2.0 paper-trading-kb-focus-v3】2026-07-06 18:54 (William 18:54 反映「仍要 click / up/down 變藍色 / scroll 不到最後 / etf-ms 不會動 / up-down 點 - hover 不同步」)
-【背景】William 2026-07-06 18:54 反映五個問題：
-  1. 系統選股：仍要先 click 後 up/down 才會動作、cursor 移到結果處就要可以動作
-  2. click 後 highlight 變藍色（Treeview selected state 預設）
+【背景】William 2026-07-06 18:54 反映五個問題:
+  1. 系統選股:仍要先 click 後 up/down 才會動作、cursor 移到結果處就要可以動作
+  2. click 後 highlight 變藍色(Treeview selected state 預設)
   3. up/down 移動 scroll 不到最後一個 row、scroll 後 mouse 移走 hover 變回黃色
   4. ETF & 手動選股 up/down key 不會動作
   5. up/down 停止時藍色 highlight 留在畫面、用 mouse 移走 hover 後改用 up/down 從藍色處移動 highlight
@@ -693,29 +698,29 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   5. _on_select_tree_click 後沒有取消 selected state
 
 【v3 設計重構】
-  - 取消 <<TreeviewSelect>> 事件綁定（v2 誤用）
+  - 取消 <<TreeviewSelect>> 事件綁定(v2 誤用)
   - 主動綁 <Up>/<Down> 到 4 個 Treeview、不依賴 Treeview 內建 focus 行為
   - 新增 _on_tree_key_move handler、主動呼叫 tree.focus() + tree.see() 處理 focus + scroll
   - 新增 _set_row_tag_normal helper、恢復舊 row 原本的 checked/unchecked + price_* tag
   - 新增 _get_price_tag_for_tree helper、統一取各 tree 的 price_* tag
-  - _focus_tab_tree_on_change 加 selection_remove + after_idle（双保險）
+  - _focus_tab_tree_on_change 加 selection_remove + after_idle(双保險)
   - 所有 click handler (_on_select_tree_click / _ms_toggle_check / _etf_toggle_check) 加 selection_remove
     避免 Treeview 預設 selected state 藍色 highlight
 
 【新測試】tests/test_keyboard_space_toggle.py 從 41 個擴到 50 個 (+9)
-- 靜態測試 (4 個)：不應綁 <<TreeviewSelect>>、_on_tree_key_move 存在 + return 'break' + tree.see()、
+- 靜態測試 (4 個):不應綁 <<TreeviewSelect>>、_on_tree_key_move 存在 + return 'break' + tree.see()、
   _set_row_tag_normal 存在、_get_price_tag_for_tree 存在、4 個 Treeview 都綁 <Up>/<Down>、
   3 個 click handler 都呼叫 selection_remove
-- 行為測試 (6 個)：<Down> 推進 / <Up> 上推 / 沒 focus 從第一個 / <Down> 在最後停止 /
+- 行為測試 (6 個):<Down> 推進 / <Up> 上推 / 沒 focus 從第一個 / <Down> 在最後停止 /
   <Up> 在第一個停止 / 空 tree 不爆
 
-【驗證】全 test suite 跑完 750 pass + 7 pre-existing fail（與本改無關）
+【驗證】全 test suite 跑完 750 pass + 7 pre-existing fail(與本改無關)
 
 【v1.2.0 paper-trading-kb-focus-v2】2026-07-06 16:26 (William 16:26 反映「文字變白 / hover-keyboard 不同步 / etf-ms 不會動」)
-【背景】William 2026-07-06 15:58 反映三個問題：
-  1. 系統選股：要先 click 在某個 item 後 ↑/↓ 才會動作
-     highlight 顏色是藍色（預設 selection 顏色）、跟 mouse hover 的黃色不同步
-  2. Space bar 不能 toggle item selection（在系統選股）
+【背景】William 2026-07-06 15:58 反映三個問題:
+  1. 系統選股:要先 click 在某個 item 後 ↑/↓ 才會動作
+     highlight 顏色是藍色(預設 selection 顏色)、跟 mouse hover 的黃色不同步
+  2. Space bar 不能 toggle item selection(在系統選股)
   3. ETF / 手動選股結果 up/down/space bar 都不會動
 
 【根因】
@@ -724,7 +729,7 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   2. Treeview 預設 click 不會設鍵盤焦點到 row
      → tree.focus() 永遠回空字串 → space handler 取不到 iid
   3. 切到 notebook tab 時 tree 沒拿到 widget focus
-     → key events 仍送給舊 focus 的 widget（不是 tree）
+     → key events 仍送給舊 focus 的 widget(不是 tree)
 
 【修法】
   1. ttk.Style.map("Treeview", background=[("selected", "#fff3a0")])
@@ -733,27 +738,27 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
      cell click 分支都加 tree.focus(iid) 設鍵盤焦點
   3. _on_tab_changed 加 _focus_tab_tree_on_change(current_tab_idx)
      → 切到結果 tab 時自動 focus_set 到該 tree 並設 focus rectangle 到第一個 row
-     → tab → tree mapping：0=select_tree、1=_etf_tree、2=_ms_tree、4=backtest_tree
+     → tab → tree mapping:0=select_tree、1=_etf_tree、2=_ms_tree、4=backtest_tree
      → tab 3 (買賣記錄) 沒有結果 tree、跳過
 
 【新測試】tests/test_keyboard_space_toggle.py 從 15 個擴到 29 個 (+14)
-- 靜態測試 (5 個)：3 個 click handler 都有 tree.focus()、style 有 selected 顏色、
+- 靜態測試 (5 個):3 個 click handler 都有 tree.focus()、style 有 selected 顏色、
   _focus_tab_tree_on_change 存在且被 _on_tab_changed call、map 含 4 種 tree
-- 行為測試 (6 個)：focus_tab_tree 4 個 tab 正確 focus 第一個 row、
+- 行為測試 (6 個):focus_tab_tree 4 個 tab 正確 focus 第一個 row、
   空 tree 不 focus、未知 tab 不爆
 
-【驗證】全 test suite 跑完 733 pass + 7 pre-existing fail（與本改無關、修改前就 fail）
+【驗證】全 test suite 跑完 733 pass + 7 pre-existing fail(與本改無關、修改前就 fail)
 
 【v1.2.0 paper-trading-keyboard-toggle】2026-07-06 15:32 (William 15:32 反映「鍵盤操作選股」)
-【背景】William 2026-07-06 15:32 反映：
+【背景】William 2026-07-06 15:32 反映:
   - 選股結果除了「mouse roller then click 選股」外、希望能用鍵盤操作
-  - 希望：↑/↓ 鍵移動 highlight、Space 鍵 select item (toggle 勾選)
-  - 希望 4 個 Treeview 都要支援（系統選股 / 手動選股 / ETF 選股 / 回測）
+  - 希望:↑/↓ 鍵移動 highlight、Space 鍵 select item (toggle 勾選)
+  - 希望 4 個 Treeview 都要支援(系統選股 / 手動選股 / ETF 選股 / 回測)
 
 【實作】
 - 新增 StrategyGUI._on_tree_space_toggle(event) 統一處理 4 個 Treeview
-  - 邏輯：用 tree.focus() 取得當前 highlight row、toggle 第一欄勾選
-  - 根據 tree 判斷用哪個 checked_dict（_ms_checked / _etf_checked / _select_checked / _bt_checked）
+  - 邏輯:用 tree.focus() 取得當前 highlight row、toggle 第一欄勾選
+  - 根據 tree 判斷用哪個 checked_dict(_ms_checked / _etf_checked / _select_checked / _bt_checked)
   - return "break" 避免 Space 鍵被當成 button activate
 - 綁定 .bind("<space>", self._on_tree_space_toggle) 在 4 個 Treeview
   - select_tree / backtest_tree 共用 _build_tab_layout 加在 results_tree.bind
@@ -761,89 +766,89 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 - ↑/↓ 鍵移動 focus 是 Tkinter Treeview 內建、不需額外 binding
 
 【新測試】tests/test_keyboard_space_toggle.py (15 個全線)
-- 靜態測試 (9 個)：4 個 Treeview 都有綁 <space>、handler 是 _on_tree_space_toggle、
+- 靜態測試 (9 個):4 個 Treeview 都有綁 <space>、handler 是 _on_tree_space_toggle、
   函式存在、return "break"、用 focus()、支援 4 種 tree
-- 行為測試 (6 個)：select_tree / ms_tree / etf_tree / backtest_tree 各自 toggle 正確、
+- 行為測試 (6 個):select_tree / ms_tree / etf_tree / backtest_tree 各自 toggle 正確、
   連按兩次 unselect、沒 focus 不爆
 
-【驗證】全 test suite 跑完 719 pass + 7 pre-existing fail（與本改無關、修改前就 fail）
+【驗證】全 test suite 跑完 719 pass + 7 pre-existing fail(與本改無關、修改前就 fail)
 
 【v1.2.0 paper-trading-system-topn】2026-07-06 15:02 (William 14:54 反映「TopN=20 結果出現 50 檔」)
-【背景】William 2026-07-06 14:54 反映：
+【背景】William 2026-07-06 14:54 反映:
   - 系統選股 UI 設定「選股檔數 (TopN)」= 20
-  - 但結果 Treeview 顯示約 50 檔（強勢股過濾後剩下的所有股票）
+  - 但結果 Treeview 顯示約 50 檔(強勢股過濾後剩下的所有股票)
   - 原本 _run_selection_only 只套 _apply_strong_filter、沒套用 TopN 限縮
-  - top_n_for_tech 只在 run_pipeline 抓取歷史日K 時有用（限制抓日K 的股票範圍）
+  - top_n_for_tech 只在 run_pipeline 抓取歷史日K 時有用(限制抓日K 的股票範圍)
   - 系統選股完全沒套 → TopN 參數形同虛設
 
-【修法】stocktool/pipeline.py:_run_selection_only（line 200-216）
+【修法】stocktool/pipeline.py:_run_selection_only(line 200-216)
   - _apply_strong_filter 之後加 head(cfg.top_n_for_tech) 限縮
-  - 多 log 一行「TopN 限縮：N → M 檔」
-  - 維持原本 Score 降序（前 N 高的保留）
+  - 多 log 一行「TopN 限縮:N → M 檔」
+  - 維持原本 Score 降序(前 N 高的保留)
 
 【William 額外要求 15:02】
-  - 回測模擬時 Excel 中讀到少檔就用多少檔去模擬（已驗證、現狀就是這樣）
+  - 回測模擬時 Excel 中讀到少檔就用多少檔去模擬(已驗證、現狀就是這樣)
   - pipeline.py:421 excel 模式 tech_codes = load_stock_list_from_excel(...) 不套 head()
   - 保持現狀、不需改動
 
 【新測試】tests/test_selection_only_top_n_limit.py (6 個全線)
-  - test_強勢股過濾後大於_topn_會被限縮：50 → head(20) → 20 檔 (核心 bug)
-  - test_強勢股過濾後小於_topn_不變：10 → head(20) → 10 檔
-  - test_強勢股過濾後等於_topn_不變：20 → head(20) → 20 檔、不 log 限縮
-  - test_強勢股過濾後無股票_fallback_仍套用_topn：fallback 50 → head(20) → 20 檔
-  - test_topn_1_只留_1_檔：極端值測試
-  - test_結果維持_score_降序：限縮後仍維持原 Score 降序
+  - test_強勢股過濾後大於_topn_會被限縮:50 → head(20) → 20 檔 (核心 bug)
+  - test_強勢股過濾後小於_topn_不變:10 → head(20) → 10 檔
+  - test_強勢股過濾後等於_topn_不變:20 → head(20) → 20 檔、不 log 限縮
+  - test_強勢股過濾後無股票_fallback_仍套用_topn:fallback 50 → head(20) → 20 檔
+  - test_topn_1_只留_1_檔:極端值測試
+  - test_結果維持_score_降序:限縮後仍維持原 Score 降序
 
-【驗證】全 test suite 跑完 704 pass + 7 pre-existing fail（與本改無關、修改前就 fail）
+【驗證】全 test suite 跑完 704 pass + 7 pre-existing fail(與本改無關、修改前就 fail)
 
 【v1.2.0 paper-trading-stage5】2026-07-03 23:30 (William 23:12 需求「買賣條件要可設定或用回測參數」)
-【背景】William 2026-07-03 23:12 反映：
+【背景】William 2026-07-03 23:12 反映:
   - 之前 Tab 只露出「總資金 / 持倉上限 / 策略」三個欄位
   - 進場訊號門檻 / 停損 / 停利 / 持有天數等藏 DB、沒地方設
   - 希望「手動設」或「採用回測參數一鍵帶入」
 【實作】
-  - 新增 stocktool/paper_config.py — 回測參數 → 模擬買賣參數對應表
+  - 新增 stocktool/paper_config.py - 回測參數 → 模擬買賣參數對應表
     * stop_loss 負數 (-0.03) → paper 正值 (3.0) %
     * 複用 cfg.capital/topk/hold_days/min_rev_yoy/min_eps_yoy/simple_max_pe
-  - 新增 stocktool/gui/dialog_paper.py — PortfolioEditorDialog
+  - 新增 stocktool/gui/dialog_paper.py - PortfolioEditorDialog
     * 完整買入/賣出參數欄位
     * 「📥 採用回測參數」一鍵帶入
     * 「🔄 重設預設值」一鍵還原
     * 同時支援「新增」與「編輯」
-  - tab_paper.py — 內嵌欄位改為對話框、加「✎ 編輯」按鈕
+  - tab_paper.py - 內嵌欄位改為對話框、加「✎ 編輯」按鈕
   - tests/test_paper_config.py 4 個新測試
 
 ════════════════════════════════════════════════════════════════════════════════
 【v1.2.0 paper-trading-stage3+4】2026-07-03 21:30 (William 20:32 需求「模擬買賣 Tab」)
 【階段 3】
-  - paper_catchup.py 補跑到今天（用真實歷史 cache 抓價）
-  - paper_scheduler.py 14:00 自動排程（App 開著時自動 catch_up_all_active）
+  - paper_catchup.py 補跑到今天(用真實歷史 cache 抓價)
+  - paper_scheduler.py 14:00 自動排程(App 開著時自動 catch_up_all_active)
 【階段 4】
-  - tab_paper.py 權益曲線（matplotlib 雙軸：總資產 + 累積報酬率）
-  - tab_paper.py 匯出 Excel（組合設定 / 持倉 / 買賣紀錄 / 每日快照）
+  - tab_paper.py 權益曲線(matplotlib 雙軸:總資產 + 累積報酬率)
+  - tab_paper.py 匯出 Excel(組合設定 / 持倉 / 買賣紀錄 / 每日快照)
   - 裝 matplotlib 3.11.0
 
 ════════════════════════════════════════════════════════════════════════════════
 【v1.2.0 paper-trading-stage1+2】2026-07-03 21:00 (William 20:32 需求「模擬買賣 Tab」)
-【背景】William 2026-07-03 20:32 提出新需求：
+【背景】William 2026-07-03 20:32 提出新需求:
   - 在現有 App 中新增「模擬買賣」Tab
-  - 多組投資組合並存，每組從 Excel 匯入股票池
-  - 每組可用不同買賣參數，總投資金額 / 持倉上限為每組獨立
-  - 不做當沖、可加碼、可換手（加碼限 ≥5日、換手隔日才可進場）
-  - 從「按下執行」當下開始，每天 14:00 自動跑（盤後）
-  - AI Meta-Strategy 組合：regime-aware 動態加權 + reasoning log
+  - 多組投資組合並存,每組從 Excel 匯入股票池
+  - 每組可用不同買賣參數,總投資金額 / 持倉上限為每組獨立
+  - 不做當沖、可加碼、可換手(加碼限 ≥5日、換手隔日才可進場)
+  - 從「按下執行」當下開始,每天 14:00 自動跑(盤後)
+  - AI Meta-Strategy 組合:regime-aware 動態加權 + reasoning log
 【實作內容】
   - 新增 stocktool/paper_trading.py (核心 DB + CRUD + 費用計算)
   - 新增 stocktool/paper_engine.py (規則版 + AI 版 買賣引擎)
-  - 新增 stocktool/paper_excel.py (Excel fuzzy 解析，只取股票代號)
-  - 新增 stocktool/gui/tab_paper.py (Tab 6 UI：左組合管理、右詳情)
+  - 新增 stocktool/paper_excel.py (Excel fuzzy 解析,只取股票代號)
+  - 新增 stocktool/gui/tab_paper.py (Tab 6 UI:左組合管理、右詳情)
   - portfolio.db 加 4 張表: sim_portfolios / sim_holdings / sim_trades / sim_daily_snapshot
   - StockTool.py 加 Tab 6 +  import
   - 共用既有 fetch_market._fetch_twse_realtime_batch 抓當日價
 
 【v1.1.5c force-refresh-shared】2026-07-02 22:18 (William 22:14 「系統選股 tab 加重新抓股價」)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-07-02 22:14 反映：
+【背景】William 2026-07-02 22:14 反映:
   - 「系統選股 tab 中的左欄增加「重新抓股價」 button」
 
 【原狀】
@@ -854,20 +859,20 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 【修法】抽共用方法、避免 code duplication
   - _force_refresh_price(source_label) 共用背景 thread 重抓邏輯
   - _ms_force_refresh_price() 變成 wrapper、 source_label = "手動重抓"
-  - 系統選股 tab 進 _build_ui 、在「▶ 執行系統選股」下加：
+  - 系統選股 tab 進 _build_ui 、在「▶ 執行系統選股」下加:
     ttk.Button(btn_frame, text="🔄 重新抓股價",
                command=lambda: self._force_refresh_price("系統重抓"))
   - source_label 傳到 _on_bg_price_done / _on_bg_price_err
-  - status bar 顯示「🔄 系統重抓股價中...」 （可追查來源）
+  - status bar 顯示「🔄 系統重抓股價中...」 (可追查來源)
 
 【新測試】tests/test_force_refresh_shared.py (7 個)
-  - test_force_refresh_price_method_exists：共用方法存在
-  - test_ms_force_refresh_delegates_to_shared：手動選股 wrapper 呼叫共用
-  - test_system_tab_has_refresh_price_button：系統選股 tab 有按鈕 + source_label
-  - test_ms_tab_refresh_price_button_still_exists：backward compat
-  - test_force_refresh_passes_source_to_done_callback：source_label 傳遞
-  - test_force_refresh_runs_in_background_thread：不 block UI
-  - test_force_refresh_checks_bg_fetching_flag：防止重複打 FinMind
+  - test_force_refresh_price_method_exists:共用方法存在
+  - test_ms_force_refresh_delegates_to_shared:手動選股 wrapper 呼叫共用
+  - test_system_tab_has_refresh_price_button:系統選股 tab 有按鈕 + source_label
+  - test_ms_tab_refresh_price_button_still_exists:backward compat
+  - test_force_refresh_passes_source_to_done_callback:source_label 傳遞
+  - test_force_refresh_runs_in_background_thread:不 block UI
+  - test_force_refresh_checks_bg_fetching_flag:防止重複打 FinMind
 
 【副帶修】tests/test_fetch_prices_fallback_diag.py
   - VERSION 修為 v1.1.x 系列 (原本寫死 v1.1.3/v1.1.4、隨版本演進需修為會員)
@@ -878,8 +883,8 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1.5b fetch-missing-logger】2026-07-02 21:25 (William 21:20 截圖反映「仍是 PyCharm Run」)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-07-02 21:20 截圖反映：
-  - App 視窗標題 v1.1.5-holiday-console-log（重啟生效）
+【背景】William 2026-07-02 21:20 截圖反映:
+  - App 視窗標題 v1.1.5-holiday-console-log(重啟生效)
   - App console 有「📡 TWSE MIS 即時股價、2380 檔」訊息
   - 但 60 條「⚠️ TWSE tse 整批失敗」只出現在 PyCharm Run 視窗、沒進 App program console
 
@@ -890,103 +895,103 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - v1.1.4c 修 caller chain 時漏看這個 in-function call
 
 【修法】stocktool/fetch_market.py: line 1189
-  - _fetch_twse_realtime_batch(all_codes, progress_callback=None) 
+  - _fetch_twse_realtime_batch(all_codes, progress_callback=None)
     → _fetch_twse_realtime_batch(all_codes, progress_callback=None, logger=logger)
 
-【AST 守護】tests/test_console_log_integration.py 補 2 個 test：
-  - test_fetch_prices_calls_twse_realtime_with_logger：AST 掃 fetch_prices 內
+【AST 守護】tests/test_console_log_integration.py 補 2 個 test:
+  - test_fetch_prices_calls_twse_realtime_with_logger:AST 掃 fetch_prices 內
     所有 _fetch_twse_realtime_batch() 呼叫、必須有 logger= 關鍵字參數
-  - test_no_print_calls_in_fetch_prices：fetch_prices 內不能有直接 print() 、
+  - test_no_print_calls_in_fetch_prices:fetch_prices 內不能有直接 print() 、
     統一走 _log_print(logger, ...)
 
-【驗證】10 個 console log integration test 全線（包含 2 個新 AST 守護）
+【驗證】10 個 console log integration test 全線(包含 2 個新 AST 守護)
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1.5 holiday-console-log】2026-07-02 10:30 (William 10:06 兩件事)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-07-02 10:06 反映：
-  - 问题 1：「取得股價資料、盤中時段要排除假日」→ 平時遇到國定假日 (228、勞動節、端午…)
+【背景】William 2026-07-02 10:06 反映:
+  - 问题 1:「取得股價資料、盤中時段要排除假日」→ 平時遇到國定假日 (228、勞動節、端午...)
     仍誤判為盤中、強制 refresh、浪費 TWSE API 額度、甚至觸發「整批被擋」(50/50)
-  - 问题 2：「下面這些 messages 還是沒有顯示在 program console 中」
-    整批失敗 ~60 則 (TWSE tse 整批失敗（50/50）→ 跳過 otc fallback) 不見在 console
+  - 问题 2:「下面這些 messages 還是沒有顯示在 program console 中」
+    整批失敗 ~60 則 (TWSE tse 整批失敗(50/50)→ 跳過 otc fallback) 不見在 console
 
 【修法 1】stocktool/config.py: 加 _HOLIDAY_DATES + 設定 _is_market_hours 進邏輯
-  - 2026 國定假日 + 補假日 14 天：元旦 / 春節6天 / 228補假 / 兒童清明補假 / 勞動節
+  - 2026 國定假日 + 補假日 14 天:元旦 / 春節6天 / 228補假 / 兒童清明補假 / 勞動節
     / 端午 / 中秋 / 國慶補假
-  - 邏輯：weekday() >= 5 略過週末之後、再查 _HOLIDAY_DATES 全日休市
-  - 半日盤（_HALF_DAY_DATES）仍維持 13:00 收盤、邏輯與全日休市互斥
-  - 新測試 test_market_hours.py：加 9 個 holiday 邊界 case
-  - 舊測試调整：6/19 是端午節（_HOLIDAY_DATES）、不能用來驗證半日盤邏輯
+  - 邏輯:weekday() >= 5 略過週末之後、再查 _HOLIDAY_DATES 全日休市
+  - 半日盤(_HALF_DAY_DATES)仍維持 13:00 收盤、邏輯與全日休市互斥
+  - 新測試 test_market_hours.py:加 9 個 holiday 邊界 case
+  - 舊測試调整:6/19 是端午節(_HOLIDAY_DATES)、不能用來驗證半日盤邏輯
     → 改用 7/3 週五非假日非封關日
 
 【修法 2】StockTool.py: console 加 log file 雙保險
   - 這些訊息 *實際有* 進 queue + 寫到 console Text widget
   - 但 GUI scrollbar 在背景 thread 快速 insert 時不一定自動 see end → user 看不到
-  - 修法：(a) 每則 log 同步寫到 ./cache/console/console_YYYY-MM-DD.log
+  - 修法:(a) 每則 log 同步寫到 ./cache/console/console_YYYY-MM-DD.log
          (b) _poll_log_queue 用 update_idletasks() + see("end") 強化 scroll
          (c) console widget height 10 → 16
          (d) 主畫面加「📄 開啟 console log 檔」按鈕、一鍵 open
          (e) atexit 註冊關檔
 
-【驗證】646 + 9 + 6 = 661 passed（原本 646 + 9 holiday test + 6 console-log test）
+【驗證】646 + 9 + 6 = 661 passed(原本 646 + 9 holiday test + 6 console-log test)
 【遗留 pre-existing fail】(跟本版無關)
-  - test_data_date_column.py 1 個：date 變數月表跳 date
-  - test_etf_weekend_fallback.py 1 個：DB stale data
+  - test_data_date_column.py 1 個:date 變數月表跳 date
+  - test_etf_weekend_fallback.py 1 個:DB stale data
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1.4 print-to-logger】2026-07-02 00:35 (William 00:09 反映 message 進 terminal)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-07-02 00:09 反映：
+【背景】William 2026-07-02 00:09 反映:
   - 「把股神 APP 的 output message 改成全部都從 program console 輸出」
-  - 「現在有些 message 是從 terminal 輸出的！」
+  - 「現在有些 message 是從 terminal 輸出的!」
 
 【問題根因】
-- 股神 App 架構：
-  - GuiLogger → 走 queue.Queue → 主執行緒讀出來 → 寫入 GUI console widget（Text）
-  - PrintLogger → 直接 print() 到 terminal（CLI 模式用）
-- 子模組（fetch_market.py、etf.py、backtest.py 等）混用 print() 和 logger.log()
+- 股神 App 架構:
+  - GuiLogger → 走 queue.Queue → 主執行緒讀出來 → 寫入 GUI console widget(Text)
+  - PrintLogger → 直接 print() 到 terminal(CLI 模式用)
+- 子模組(fetch_market.py、etf.py、backtest.py 等)混用 print() 和 logger.log()
   - logger.log() → 走 queue → 進 GUI console ✅
   - print() → 直接進 terminal / PyCharm Run 視窗 → 使用者看不到 ❌
 - fetch_market.py 有 50+ 個 print() 散落、都是警告/錯誤/進度訊息
 
-【本版修法】第一階段：fetch_market.py 三個主函式
-- 改 source/stocktool/fetch_market.py：
+【本版修法】第一階段:fetch_market.py 三個主函式
+- 改 source/stocktool/fetch_market.py:
   - 加 module-level helper _log_print(logger, msg)
     - 有 logger → 走 logger.log()
-    - 沒 logger (None) → fallback print()（CLI 模式不破）
-  - 改 fetch_prices / fetch_revenue_latest / fetch_eps_latest 簽章加 logger 參數（預設 None、向後相容）
+    - 沒 logger (None) → fallback print()(CLI 模式不破)
+  - 改 fetch_prices / fetch_revenue_latest / fetch_eps_latest 簽章加 logger 參數(預設 None、向後相容)
   - 函式內 29 個 print() 全部換成 _log_print(logger, msg)
-- 改 source/stocktool/pipeline.py：
+- 改 source/stocktool/pipeline.py:
   - 6 處 lambda 從「lambda: fetch_xxx(s, cfg)」改成「lambda: fetch_xxx(s, cfg, logger)」
   - logger 透傳進 fetch_*
 
-【新測試】tests/test_fetch_market_logger_routing.py（8 個）
-- _log_print 路由 3 個：有 logger 用 logger、沒 logger fallback print、訊息內容正確
-- 函式簽章 3 個：fetch_prices / fetch_revenue_latest / fetch_eps_latest 都接受 logger
-- pipeline lambda 1 個：6 處都傳 logger
-- 向後相容 1 個：_log_print(None, msg) 不 crash
+【新測試】tests/test_fetch_market_logger_routing.py(8 個)
+- _log_print 路由 3 個:有 logger 用 logger、沒 logger fallback print、訊息內容正確
+- 函式簽章 3 個:fetch_prices / fetch_revenue_latest / fetch_eps_latest 都接受 logger
+- pipeline lambda 1 個:6 處都傳 logger
+- 向後相容 1 個:_log_print(None, msg) 不 crash
 
-【驗證】608 passed（原本 600 + 8 新增 = 608）
+【驗證】608 passed(原本 600 + 8 新增 = 608)
 
 【version 同步】
 - VERSION = "v1.1.5b-fetch-missing-logger" → "v1.1.5c-force-refresh-shared" (stocktool/config.py)
 - User-Agent: "v1.1.5b-fetch-missing-logger" → "v1.1.5c-force-refresh-shared"
 - App title / 啟動 log 自動改
 
-【待辦（下一版）】第二階段：etf.py / backtest.py / StockTool.py 殘留的 print()
-- etf.py 還有 1 個 print()（line 220 V0.9.5-etf-history SSR parse 失敗）
-- backtest.py 還有 1 個（docstring example）
-- config.py PrintLogger 還有 5 個 print()（保留、CLI 模式用）
-- StockTool.py 還有 6 個 print()（line 5214-5266、GUI console fallback 路徑）
+【待辦(下一版)】第二階段:etf.py / backtest.py / StockTool.py 殘留的 print()
+- etf.py 還有 1 個 print()(line 220 V0.9.5-etf-history SSR parse 失敗)
+- backtest.py 還有 1 個(docstring example)
+- config.py PrintLogger 還有 5 個 print()(保留、CLI 模式用)
+- StockTool.py 還有 6 個 print()(line 5214-5266、GUI console fallback 路徑)
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1.4b print-to-logger 第二階段】2026-07-02 00:50 (William 00:35 截圖反映仍有 print)
 【v1.1.4c print-to-logger 第三階段】2026-07-02 01:05 (William 01:02 反映「仍進 PyCharm」)
   【第三輪根因】caller 仍寫成 `helper()` 沒傳 logger → 收到 logger=None → fallback print() 進 PyCharm
-  【具體位置（修了的）】
+  【具體位置(修了的)】
   - pipeline.py 3 處 `calculate_simple_score(df_sel, cfg)` → 加 logger
   - pipeline.py / fetch_market.py 內 `_fetch_market_stock_list()` → 加 logger
   - pipeline.py / fetch_market.py 內 `_load_goodinfo_12q_epsrate()` → 加 logger
@@ -994,20 +999,20 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - StockTool.py 直接呼叫 `_fetch_market_stock_list()` × N → 加 logger=self.logger
   - scoring.py 內的 call 也補上 logger
   【函式 signature 改】_fetch_market_stock_list 加 logger 參數
-  【新測試】tests/test_logger_chain_through.py（4 個）
+  【新測試】tests/test_logger_chain_through.py(4 個)
   - 守住兩大 helper 有 logger 參數
   - AST 掃所有 caller、保證 calculate_simple_score/_fetch_market_stock_list/_load_goodinfo_12q_epsrate 都傳 logger
   - 主要模組只保留 _log_print 內的 print() fallback
-  【驗證】620 passed（原本 616 + 4 = 620）、0 failed
-  【commit】：本第二 + 第三階段一併 commit（ba1604e 的延伸）
+  【驗證】620 passed(原本 616 + 4 = 620)、0 failed
+  【commit】:本第二 + 第三階段一併 commit(ba1604e 的延伸)
 
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-07-02 00:35 截圖反映：
+【背景】William 2026-07-02 00:35 截圖反映:
   - 「還是有以下這些 messages 從 pycharm 的 run console 輸出」
   - 列出 [📡 TWSE MIS 即時股價、2381 檔...]、[⚠️ TWSE tse 整批失敗]×20、[📂 GoodInfo 12QEPSRate: 1964]、[🔍 [DEBUG] calculate_simple_score 診斷]... 進 PyCharm
 
 【第一階段沒覆蓋的範圍】
-- fetch_market.py 內部 helper 函式：
+- fetch_market.py 內部 helper 函式:
   - _load_goodinfo_12q_epsrate (7 print)
   - _fetch_twse_realtime_batch (5 print)
   - _fetch_finmind_prices_batch (1 print)
@@ -1022,30 +1027,30 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 - backtest.py get_codes_for_period lambda (1 處) ← 沒傳 logger
 
 【本版修法】第二階段
-- fetch_market.py：
+- fetch_market.py:
   - 6 個 helper 函式 signature 加 logger: GuiLogger = None
   - 函式內 + nested _query_twse 內 print() 換成 _log_print(logger, msg)
-- etf.py：
+- etf.py:
   - fetch_etf_top10_holdings signature 加 logger
   - 1 個 print() 換成 _log_print
-- scoring.py：
+- scoring.py:
   - calculate_simple_score signature 加 logger
   - 26 個 print() 換成 _log_print
   - 加 _log_print helper
-- pipeline.py：
+- pipeline.py:
   - run_pipeline 已有 logger 參數
   - 12 個 print() 換成 _log_print
   - 加 _log_print helper
-- StockTool.py：
+- StockTool.py:
   - _do() / _ms_run_selection 內 7 個 print() 換成 self.logger.log / self.logger.error
   - 2 個 get_or_fetch lambda 加 self.logger 傳給 fetch_prices
-  - 1 個直接呼叫 fetch_prices 加 self.logger 參數（line 4870 / 6340）
-- backtest.py：
+  - 1 個直接呼叫 fetch_prices 加 self.logger 參數(line 4870 / 6340)
+- backtest.py:
   - get_codes_for_period 的 get_or_fetch lambda 加 logger 傳給 fetch_prices
 
 【closure 機制】nested function _query_twse
 - _query_twse 是 _fetch_twse_realtime_batch 內的 nested function
-- 沒顯式加 logger 參數（靠 Python closure）
+- 沒顯式加 logger 參數(靠 Python closure)
 - outer 函式有 logger 參數、nested 函式 reference 自動 closure 找到
 
 【既有測試修】tests/test_fetch_prices_fallback_diag.py
@@ -1053,100 +1058,100 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - 原本 hardcode v1.1.3、升到 v1.1.4 後破
   - 改成 v1.1.3 或 v1.1.4 都接受
 
-【新測試】tests/test_helper_logger_routing.py（8 個）
+【新測試】tests/test_helper_logger_routing.py(8 個)
 - 5 個 fetch_market helper 都有 logger 參數
 - fetch_prices 沒被破壞
 - _log_print helper 在 fetch_market / scoring / pipeline 都有
 - calculate_simple_score 接受 logger
-- StockTool.py 7 個 self.logger.log/error（不再有 print()）
+- StockTool.py 7 個 self.logger.log/error(不再有 print())
 - 所有 fetch_xxx 呼叫都傳 logger
 
-【驗證】616 passed（原本 600 + 第一階段 8 + 第二階段 8 = 616）
+【驗證】616 passed(原本 600 + 第一階段 8 + 第二階段 8 = 616)
 - 0 failed
 - 2 既有的時間敏感 test 跳過
 
 【version 同步】
-- VERSION 保持 v1.1.4-print-to-logger（第一階段已升、第二階段延續）
+- VERSION 保持 v1.1.4-print-to-logger(第一階段已升、第二階段延續)
 - App title / 啟動 log 自動改
 
 【不變項】
-- PrintLogger 保留（CLI 模式不破）
-- _log_print(None, ...) fallback print()（fetch_xxx 不傳 logger 時仍 work）
+- PrintLogger 保留(CLI 模式不破)
+- _log_print(None, ...) fallback print()(fetch_xxx 不傳 logger 時仍 work)
 - API 行為、cache 邏輯完全不動
-- 既有測試邏輯完全不動（只修版本檢查的 hardcode）
+- 既有測試邏輯完全不動(只修版本檢查的 hardcode)
 
 【完全 clean 進度】
-✅ fetch_prices / fetch_revenue_latest / fetch_eps_latest：3 主函式 print() 全清
-✅ fetch_market.py 6 個 helper：print() 全清
-✅ scoring.py calculate_simple_score：26 print 全清
-✅ pipeline.py run_pipeline：12 print 全清
-✅ etf.py fetch_etf_top10_holdings：1 print 清
-✅ StockTool.py _do / _ms_run_selection：7 print 全清
-✅ 所有 fetch_xxx 呼叫處：都傳 logger
-⏳ PrintLogger：保留（CLI 用、5 個 print() 是 by design）
-⏳ config.py：保留（PrintLogger 內）
+✅ fetch_prices / fetch_revenue_latest / fetch_eps_latest:3 主函式 print() 全清
+✅ fetch_market.py 6 個 helper:print() 全清
+✅ scoring.py calculate_simple_score:26 print 全清
+✅ pipeline.py run_pipeline:12 print 全清
+✅ etf.py fetch_etf_top10_holdings:1 print 清
+✅ StockTool.py _do / _ms_run_selection:7 print 全清
+✅ 所有 fetch_xxx 呼叫處:都傳 logger
+⏳ PrintLogger:保留(CLI 用、5 個 print() 是 by design)
+⏳ config.py:保留(PrintLogger 內)
 
 【不變項】
-- PrintLogger 保留（CLI 模式不破）
-- _log_print(None, ...) fallback print()（fetch_xxx 不傳 logger 時仍 work）
-- fetch_xxx() 沒 logger 參數時 → TypeError、這版要求傳 logger（已加預設 None）
+- PrintLogger 保留(CLI 模式不破)
+- _log_print(None, ...) fallback print()(fetch_xxx 不傳 logger 時仍 work)
+- fetch_xxx() 沒 logger 參數時 → TypeError、這版要求傳 logger(已加預設 None)
 - API 行為、cache 邏輯完全不動
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1.3 no-double-score】2026-07-01 10:40 (William 10:28 點 v1.0 改版清單 P0)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-07-01 10:28 問：
-  - 「v1.0 改版清單還有什麼沒做的嗎？」
+【背景】William 2026-07-01 10:28 問:
+  - 「v1.0 改版清單還有什麼沒做的嗎?」
   - 「先 p0 即可」
 
-【P0 修法】統一評分呼叫、刪掉 1620 那塊重算（v1.1 重構後的 lineage）
-- 原本（v1.0 改版 TODO 2026-06-09 紀錄）：
+【P0 修法】統一評分呼叫、刪掉 1620 那塊重算(v1.1 重構後的 lineage)
+- 原本(v1.0 改版 TODO 2026-06-09 紀錄):
   - StockTool.py line 1620 在「技術分析完之後」又算一次 calculate_*_score
   - v1.1 重構後變成 source/stocktool/pipeline.py
   - run_pipeline 函式 line 367 對 df_sel_temp 算一次、line 415 對 df_sel 又算一次
-  - 同一份原始 df_sel 被算兩次評分（重複 CPU + 結果完全相同）
-- 修法：
-  - 改 source/stocktool/pipeline.py run_pipeline()：
-    - 第一次評分改算到 df_sel（不是 df_sel_temp）
+  - 同一份原始 df_sel 被算兩次評分(重複 CPU + 結果完全相同)
+- 修法:
+  - 改 source/stocktool/pipeline.py run_pipeline():
+    - 第一次評分改算到 df_sel(不是 df_sel_temp)
     - df_sel 算完 sort 後、df_sel_temp = _apply_strong_filter(df_sel, ...) ← 純過濾不算評分
     - line 415 刪掉重複的 calculate_*_score(df_sel, cfg)
-    - line 421 sort 拿掉（已 sort 過）
-  - 結果：一次評分、兩處使用：
+    - line 421 sort 拿掉(已 sort 過)
+  - 結果:一次評分、兩處使用:
     - df_sel 拿來做 strong_sel / top10_sel 輸出
     - df_sel_temp (filtered) 拿來跑技術分析 top N
 
-【新測試】tests/test_no_double_score.py（2 個）
+【新測試】tests/test_no_double_score.py(2 個)
 - test_no_duplicate_score_after_tech: 守住「run_tech 之後不能再算一次評分」
 - test_df_sel_temp_after_strong_filter: 守住「df_sel_temp = _apply_strong_filter(df_sel, ...)」
 
 【既有測試修】tests/test_strong_filter_active.py
 - test_strong_filter_called_in_normal_path: regex 從 df_sel_temp.sort_values 改成 df_sel.sort_values
-  （配合 v1.1.3 改 df_sel_temp 來源是 strong_filter 不是 calculate_*_score）
+  (配合 v1.1.3 改 df_sel_temp 來源是 strong_filter 不是 calculate_*_score)
 
 【驗證】
-- 全部 582 個測試通過（原本 596 + 2 新增 - 1 修 regex - 2 既有的時間敏感 skip = 595 跑 / 582 pass）
-  - 跳過的 2 個既有的非本版問題：
-    - test_data_date_從MIS_d欄位_西元格式（7/1 跑失敗，時間敏感）
-    - test_real_db_2026_06_28_周日（週末 ETF fallback，時間敏感）
+- 全部 582 個測試通過(原本 596 + 2 新增 - 1 修 regex - 2 既有的時間敏感 skip = 595 跑 / 582 pass)
+  - 跳過的 2 個既有的非本版問題:
+    - test_data_date_從MIS_d欄位_西元格式(7/1 跑失敗,時間敏感)
+    - test_real_db_2026_06_28_周日(週末 ETF fallback,時間敏感)
 
 【version 同步】
 - VERSION = "v1.1.2-fallback-log" → "v1.1.3-no-double-score" (stocktool/config.py)
 - User-Agent: StockTool/AdvisorStyle-v1.1-etf-weekend → v1.1.3-no-double-score (stocktool/etf.py 兩處)
-- App title / 啟動 log 自動改（用 VERSION）
+- App title / 啟動 log 自動改(用 VERSION)
 
 【v1.0 改版清單進度】
-- [x] P0 修 EPS YoY 年初失效 ✅（commit 5299330）
-- [x] P2 拿掉 DEBUG print ✅（commit 5299330）
+- [x] P0 修 EPS YoY 年初失效 ✅(commit 5299330)
+- [x] P2 拿掉 DEBUG print ✅(commit 5299330)
 - [x] P0 統一評分呼叫 ✅ ← 本版完成
-- [ ] P1 WF docstring 改對（待做）
-- [ ] P1 快取 TTL 分層（待做、需先 spec）
-- [x] EPS YoY 上游缺資料 ✅（commit df98f33）
+- [ ] P1 WF docstring 改對(待做)
+- [ ] P1 快取 TTL 分層(待做、需先 spec)
+- [x] EPS YoY 上游缺資料 ✅(commit df98f33)
 
 【不變項】
-- run_pipeline 行為對外完全相同（輸出、log、Excel）
-- 評分結果完全不變（同樣的 calculate_*_score、同樣的 cfg）
-- strong_sel 條件不變（用 _apply_strong_filter + df_sel 篩選）
+- run_pipeline 行為對外完全相同(輸出、log、Excel)
+- 評分結果完全不變(同樣的 calculate_*_score、同樣的 cfg)
+- strong_sel 條件不變(用 _apply_strong_filter + df_sel 篩選)
 - top10_sel 用 df_sel.head(10) 不變
 
 ════════════════════════════════════════════════════════════════════════════════
@@ -1158,44 +1163,44 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1.2 fallback 診斷 log】2026-06-30 23:18 (William 23:15 反映 fallback 後仍失敗未告知)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-30 18:30 反映：
+【背景】William 2026-06-30 18:30 反映:
   - 「先修一下這個」
   - 跑了 App 後看到「TWSE tse 整批失敗 20 次」+「MIS 未覆蓋 981 檔、fallback 到 STOCK_DAY_ALL / TPEx」
-  - 但 fallback 跑完仍抓不到的股沒有額外說明，使用者看不出原因
+  - 但 fallback 跑完仍抓不到的股沒有額外說明,使用者看不出原因
 
 【舊版問題】
   - V1.1-yld-hard-filter 跑完 fetch_prices 仍會有 ~16 檔無股價
   - 過去是「靜默 NaN」、UI 顯示 -- 但 console 沒說明
   - 使用者懷疑是不是 bug
 
-【根因（2026-06-30 23:10 驗證）】
-  - 跑了完整 fetch_prices 流程：
-    - TWSE MIS：20 批全部 rate-limit → 0 檔成功
-    - STOCK_DAY_ALL：抓到 1369 檔上市股
-    - TPEx：抓到 1012 檔上櫃股
-    - fallback merge 後：2365/2381 成功（99.3%）
+【根因(2026-06-30 23:10 驗證)】
+  - 跑了完整 fetch_prices 流程:
+    - TWSE MIS:20 批全部 rate-limit → 0 檔成功
+    - STOCK_DAY_ALL:抓到 1369 檔上市股
+    - TPEx:抓到 1012 檔上櫃股
+    - fallback merge 後:2365/2381 成功(99.3%)
   - 剩 16 檔全是「TPEx 有代號但 Close/Change 標記為「----」/「---」/0」
-    - 代表這些股「當日無成交」（正常狀態、不是 API 失敗）
-  - 16 檔分類：
-    - 衍生檔（權證/牛熊 02000X）：3 檔 → ['020001', '020035', '020040']
-    - KY 類（STOCK_DAY_ALL 無資料）：0 檔（本次沒有）
-    - 當日無成交（TPEx 標 ----）：13 檔 → 2924/2937/2941/2948/3064/3085/3629/4905/6236/6240/6542/6904/8905
+    - 代表這些股「當日無成交」(正常狀態、不是 API 失敗)
+  - 16 檔分類:
+    - 衍生檔(權證/牛熊 02000X):3 檔 → ['020001', '020035', '020040']
+    - KY 類(STOCK_DAY_ALL 無資料):0 檔(本次沒有)
+    - 當日無成交(TPEx 標 ----):13 檔 → 2924/2937/2941/2948/3064/3085/3629/4905/6236/6240/6542/6904/8905
 
 【v1.1.2 修法】
-  - 改 stocktool/fetch_market.py：
-    - Step 4 fallback 結束後（Step 5 整理欄位前）加 ℹ️ 診斷 log
-    - 4 類分流（互不重疊）：衍生檔 > KY 類 > 當日無成交 > 其他
-    - 範例 log：
-      ℹ️  fallback 後仍有 16 檔無股價：
-         • 衍生檔（權證/牛熊 02000X、TPEx ----）：3 檔 → ['020001', '020035', '020040']
-         • 當日無成交（TPEx 標 ----）：13 檔 → ['2924', '2937', '2941', ...]
-  - 不動 fallback 邏輯本身（向後相容、不影響現有 99.3% 成功率）
-  - 不動股價/漲跌計算（NaN 仍正確、UI 仍顯示 --）
+  - 改 stocktool/fetch_market.py:
+    - Step 4 fallback 結束後(Step 5 整理欄位前)加 i️ 診斷 log
+    - 4 類分流(互不重疊):衍生檔 > KY 類 > 當日無成交 > 其他
+    - 範例 log:
+      i️  fallback 後仍有 16 檔無股價:
+         • 衍生檔(權證/牛熊 02000X、TPEx ----):3 檔 → ['020001', '020035', '020040']
+         • 當日無成交(TPEx 標 ----):13 檔 → ['2924', '2937', '2941', ...]
+  - 不動 fallback 邏輯本身(向後相容、不影響現有 99.3% 成功率)
+  - 不動股價/漲跌計算(NaN 仍正確、UI 仍顯示 --)
 
 【驗證】
   - import OK、syntax OK
-  - 跑 fetch_prices 1 次：99.3% 抓取成功率、log 正確分類 16 檔
-  - 0 個檔案結構改動（只 fetch_market.py 一處 log）
+  - 跑 fetch_prices 1 次:99.3% 抓取成功率、log 正確分類 16 檔
+  - 0 個檔案結構改動(只 fetch_market.py 一處 log)
 
 【不變項】
   - 既有 16 檔「當日無成交」仍回傳 NaN、UI 仍顯示 --
@@ -1206,32 +1211,32 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 ════════════════════════════════════════════════════════════════════════════════
 【V0.9.5-click-sort】2026-06-28 11:55 (William 11:30 反映 click heading 切換排序)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-28 11:30 反映：
+【背景】William 2026-06-28 11:30 反映:
   - 「幫我改成每個數字欄位在欄位名稱 click 一下則依此欄位數值大小排列」
   - 「同一欄每按一下改變排列數序也就是由大到小或由小到大」
-  - 「如一般 file explorer 一樣！」
-  - 「etf 選股結果也是同樣作法！」
+  - 「如一般 file explorer 一樣!」
+  - 「etf 選股結果也是同樣作法!」
 
 【設計】
 - source/StockTool.py 加 3 個 helper:
   - _parse_sort_value(v) → (sort_key, is_missing)
-    - 數字欄自動 parse (千分位、單位「股/張/%」、「—」/空)
-    - 文字欄當字串排（代號/名稱/日期）
+    - 數字欄自動 parse (千分位、單位「股/張/%」、「-」/空)
+    - 文字欄當字串排(代號/名稱/日期)
   - _sort_treeview_by_column(tree, col, sort_state)
-    - 第一次 click → desc（由大到小）
-    - 再 click 一次 → asc（由小到大）
-    - missing（—/空）一律排最後
+    - 第一次 click → desc(由大到小)
+    - 再 click 一次 → asc(由小到大)
+    - missing(-/空)一律排最後
     - heading 箭頭: 該欄加 ↑/↓、其他欄清掉
   - _make_treeview_click_sort(tree, cols, skip_col)
     - 套用到 tree、回傳 sort_state
-    - skip_col 是「勾選」（click 是 toggle 不是 sort）
+    - skip_col 是「勾選」(click 是 toggle 不是 sort)
 
 【套用位置】
-- _ms_tree（手動選股 15 欄）: self._ms_sort_state = _make_treeview_click_sort(...)
-- _etf_tree（ETF 選股 6 欄）: self._etf_sort_state = _make_treeview_click_sort(...)
+- _ms_tree(手動選股 15 欄): self._ms_sort_state = _make_treeview_click_sort(...)
+- _etf_tree(ETF 選股 6 欄): self._etf_sort_state = _make_treeview_click_sort(...)
 - 兩個都 skip「勾選」欄
 
-【測試】tests/test_click_sort.py（新、18 個）
+【測試】tests/test_click_sort.py(新、18 個)
 - _parse_sort_value 8 個: 純數字/千分位/單位/missing/中文/代號/日期/小數負號
 - _sort_treeview_by_column 8 個: desc/asc/切換欄位 arrow/代號當數字/名稱當字串/
   現價千分位/資料日期字串序/全部 missing 不爆
@@ -1245,7 +1250,7 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 
 【實作細節】
 - 用 ttk.Treeview.heading(command=...) 設 click handler
-- sort_state 存到 self（跨多次顯示保留 user 排序意圖）
+- sort_state 存到 self(跨多次顯示保留 user 排序意圖)
 - Treeview.move(iid, "", idx) 重排、保留 tags 跟設定
 - heading text 加 ↑/↓、其他欄自動清掉
 
@@ -1253,25 +1258,25 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 ════════════════════════════════════════════════════════════════════════════════
 【V0.9.5-click-sort-fix】2026-06-28 14:30 (William 14:30 反映 click crash + 系統選股沒動作)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-28 14:30 反映 4 個問題：
-  1. 系統選股點 heading 沒動作（沒套 click-sort）
-  2. ETF 選股「名稱」可以不用、「今日異動」沒有排序功能（混雜字串）
+【背景】William 2026-06-28 14:30 反映 4 個問題:
+  1. 系統選股點 heading 沒動作(沒套 click-sort)
+  2. ETF 選股「名稱」可以不用、「今日異動」沒有排序功能(混雜字串)
   3. 手動選股「名稱」、「資料日期」可以不用排序功能
   4. 點 heading 後 TypeError: '<' not supported between str and float
-     （混雜字串/數字欄會 crash）
+     (混雜字串/數字欄會 crash)
 
 【修法】
 - _sort_treeview_by_column: 加「型別判斷」邏輯
   - 全部 number → 數字排
   - 全部 str → 文字排
-  - 混雜 → 統一轉 str 排（避免 TypeError）
+  - 混雜 → 統一轉 str 排(避免 TypeError)
 - _make_treeview_click_sort: 加 skip_cols 複數 API、skip_col 單數舊版仍可用
 - select_tree (系統選股) 補套 click-sort、self._select_sort_state
   - 欄位動態設定、在 _display_select_results 設定欄位時才套
 - _ms_tree 改用 skip_cols={"勾選", "名稱", "資料日期"}
 - _etf_tree 改用 skip_cols={"勾選", "名稱", "今日異動"}
 
-【測試】tests/test_click_sort.py（22 個、原 18 + 新 4）
+【測試】tests/test_click_sort.py(22 個、原 18 + 新 4)
 - test_sort_混雜_str_跟_float_不爆 (PE 欄混 1 個 str)
 - test_make_click_sort_skip_cols_複數
 - test_make_click_sort_skip_col_舊_API_向後相容
@@ -1285,19 +1290,19 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 【實作細節】
 - 「型別判斷」用 type_counts 統計 num/str 各幾個、依此決定 sort_type
 - skip_cols 內部用 set 處理、避免重複
-- select_tree 欄位是動態設定（首次 display 時才 configure）、所以 click-sort 也只能在這時套
+- select_tree 欄位是動態設定(首次 display 時才 configure)、所以 click-sort 也只能在這時套
 - skip_col / skip_cols 兩個 API 並存、向後相容
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
 【V0.9.5-click-sort-etf】2026-06-28 19:01 (William 19:01 反映 ETF 今日異動排序沒動作)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-28 19:01 反映：etf 選股結果的「今日異動」排序功能沒動作
+【背景】William 2026-06-28 19:01 反映:etf 選股結果的「今日異動」排序功能沒動作
 
 【根因】
 - V0.9.5-click-sort-fix 14:30 誤把「今日異動」加進 _etf_tree 的 skip_cols
-  （以為是混雜字串、排起來沒意義）
-- 實際 _etf_display_results 顯示格式為：
+  (以為是混雜字串、排起來沒意義)
+- 實際 _etf_display_results 顯示格式為:
   - 無異動: "--"
   - 有異動: f"{change_lots:+.1f}" → "+12.5" / "-3.2" / "+1234.5"
 - "+12.5" / "-3.2" → float() 支援、可以 parse
@@ -1305,11 +1310,11 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 
 【修法】
 - _parse_sort_value: 加 "--" 到 missing 集合
-  (原本只認 ""、"—"、"-"、現在加 "--")
+  (原本只認 ""、"-"、"-"、現在加 "--")
 - _etf_tree 改用 skip_cols={"勾選", "名稱"} (拿掉 "今日異動")
 - 「+12.5」/「-3.2」/「--」/「-0.5」/「+1234.5」全部正確 parse
 
-【測試】tests/test_click_sort.py（24 個、原 22 + 新 2）
+【測試】tests/test_click_sort.py(24 個、原 22 + 新 2)
 - test_parse_sort_value_正負號: +12.5/-3.2/+1234.5 → float, -- → missing
 - test_etf_今日異動_可排序: 完整測 desc/asc 排序
   - desc: +1234.5 → +12.5 → -3.2 → -- (missing 排最後)
@@ -1329,80 +1334,80 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 ════════════════════════════════════════════════════════════════════════════════
 【V0.9.5-vol-row-pad】2026-06-28 20:51 + 21:04 (William 反映行距 + 成交量整數張提醒)
 ════════════════════════════════════════════════════════════════════════════════
-【背景 1】William 2026-06-28 20:51 反映：
+【背景 1】William 2026-06-28 20:51 反映:
   - 「所有的篩選結果顯示行距應該要再加至少 2 dots.
-     現在你看股票名稱的中文字最下面條線（line）不見了！」
-  - 根因：Win10/11 ttk.Treeview 預設 rowheight ≈ 18-20px、中文字底部橫劃被切
+     現在你看股票名稱的中文字最下面條線(line)不見了!」
+  - 根因:Win10/11 ttk.Treeview 預設 rowheight ≈ 18-20px、中文字底部橫劃被切
 
 【修法】ttk.Style().configure("Treeview", rowheight=28)
   - 在 StrategyGUI.__init__ 設一次、全 App 所有 Treeview 生效
   - +8-10px padding、讓中文有呼吸空間
-  - 套用範圍：系統選股 / 手動選股 / ETF / 買賣記錄 / 回測 全部
+  - 套用範圍:系統選股 / 手動選股 / ETF / 買賣記錄 / 回測 全部
 
-【背景 2】William 2026-06-28 20:51 反映：
-  - 2548 華固 6/26 我顯示 1830、元大 App 顯示 1831（差 1）
-  - 原始提案：vol_str = str(int(vol)) → str(round(vol))
+【背景 2】William 2026-06-28 20:51 反映:
+  - 2548 華固 6/26 我顯示 1830、元大 App 顯示 1831(差 1)
+  - 原始提案:vol_str = str(int(vol)) → str(round(vol))
     - 假設 2548 6/26 成交股數 1,830,999 股 / 1000 = 1830.999 張
-    - 認為 int() 是 truncate（1830）、元大用 round()（1831）
+    - 認為 int() 是 truncate(1830)、元大用 round()(1831)
 
 【William 21:04 提醒】
-  - 「台股成交都是 1000 股（一張）為單位不會有四捨五入的問題！」
-  - 原始成交股數整數（例：1,830,000 股）/1000 = 1830.0 張
+  - 「台股成交都是 1000 股(一張)為單位不會有四捨五入的問題!」
+  - 原始成交股數整數(例:1,830,000 股)/1000 = 1830.0 張
   - 不會出現 1830.999
   - round() 跟 int() 結果一樣
   - int() 在 .5 邊界用 truncate、避免 banker's rounding 風險
 
 【結論】保持 int()、rollback round()
   - vol_str 顯示邏輯不變
-  - 2548 差 1 是另一個問題（資料 source 不同）：
-    - MIS 即時 v=1830 張（盤中 13:30 snapshot）
-    - STOCK_DAY 成交股數 1,857,955 股（盤後 14:30）
+  - 2548 差 1 是另一個問題(資料 source 不同):
+    - MIS 即時 v=1830 張(盤中 13:30 snapshot)
+    - STOCK_DAY 成交股數 1,857,955 股(盤後 14:30)
     - 兩個 source 都正確、只是時間點不同
-    - 要從 source 追、改抓 STOCK_DAY 取代 MIS 即時（另開 issue）
+    - 要從 source 追、改抓 STOCK_DAY 取代 MIS 即時(另開 issue)
 
-【測試】tests/test_vol_round_fix.py（新、2 個）
+【測試】tests/test_vol_round_fix.py(新、2 個)
   - test_vol_str_用_int_不用_round: 台股整數張 → int() 跟 round() 結果一樣、
     int() 在 .5 邊界用 truncate、避免 banker's rounding
   - test_treeview_rowheight_設定: 確認 source code 有 _style.configure rowheight=28
   - 全部 511 passed (509 既有 + 2 新)、0 failed
 
 【version 同步】
-  - VERSION 保持 "v1.1-click-sort-etf"（本版 code 邏輯無變化、只多 fileheader 註解）
+  - VERSION 保持 "v1.1-click-sort-etf"(本版 code 邏輯無變化、只多 fileheader 註解)
   - 25/26 改動、vol_str round→int rollback、rowheight=28
 
 【實作細節】
   - ttk.Style 設定一次性、影響整個 App
-  - int() 比 round() 嚴謹（不會踩到 banker's rounding）
-  - 2548 差 1 留待下版（source 對齊）追
+  - int() 比 round() 嚴謹(不會踩到 banker's rounding)
+  - 2548 差 1 留待下版(source 對齊)追
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
 【V1.1-etf-popup-detail】2026-06-29 09:47 (William 09:47 反映 ETF 今日異動 popup 沒列出 per-ETF 異動)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-29 09:47 反映：
+【背景】William 2026-06-29 09:47 反映:
   - 「ETF選股結果今日異動欄當cursor移到異動數字上時、pop up window中請詳列各個ETF異動數」
 
-【根因】_show_etf_popup mode="changes" 在讀錯欄位：
-  - 之前 code：
+【根因】_show_etf_popup mode="changes" 在讀錯欄位:
+  - 之前 code:
     for _, cr in stock_changes.iterrows():   # stock-level row
         etf_code = str(cr.get("etf_code", ""))   # ← stock row 沒這欄、空字串
         etf_name = str(cr.get("etf_name", etf_code))  # ← 空字串
         cl = cr.get("today_change_lots", 0)      # ← 這是「總和」、不是 per-ETF
-  - 結果：popup 只能顯示「+12.5」（一行總和）、完全看不到各檔 ETF 的異動
-  - per-ETF 異動其實在 etf_changes_json 欄（JSON string）、一直沒被 parse
+  - 結果:popup 只能顯示「+12.5」(一行總和)、完全看不到各檔 ETF 的異動
+  - per-ETF 異動其實在 etf_changes_json 欄(JSON string)、一直沒被 parse
 
-【修法】_show_etf_popup mode="changes"：
+【修法】_show_etf_popup mode="changes":
   1. cr = stock_changes.iloc[0] 拿單 row
   2. json.loads(cr["etf_changes_json"]) → per-ETF list
-  3. 從 _etf_agg_df 的 etf_list 補 etf_name（json 內 etf_name=""）
-     格式："0050 元大台灣50(9.37%)\n006208 富邦台50(8.71%)"
+  3. 從 _etf_agg_df 的 etf_list 補 etf_name(json 內 etf_name="")
+     格式:"0050 元大台灣50(9.37%)\n006208 富邦台50(8.71%)"
      re.match r"^(\\S+)\\s+(.+?)\\([\\d.]+%\\)\\s*$" 拆出 code/name
   4. 過濾 abs(cl) < 0.001 的項目、絕對值由大到小排
-  5. 標題列：「{stock_code} {stock_name}（{etf_count} 檔 ETF、今日 {len(entries)} 檔異動）」
-  6. 各 ETF 一行：「{sign}{cl:,.1f}  {etf_code}  {etf_name}」
-  7. 結尾：「總和  {sign}{total:,.1f}  張」
+  5. 標題列:「{stock_code} {stock_name}({etf_count} 檔 ETF、今日 {len(entries)} 檔異動)」
+  6. 各 ETF 一行:「{sign}{cl:,.1f}  {etf_code}  {etf_name}」
+  7. 結尾:「總和  {sign}{total:,.1f}  張」
 
-【測試】（3 個新）
+【測試】(3 個新)
   - test_etf_popup_detail_parses_etf_changes_json: 確認有 parse json、各 ETF 各一行
   - test_etf_popup_detail_enriches_etf_name_from_agg: 確認 etf_name 有從 etf_list 補上
   - test_etf_popup_detail_shows_total_and_header: 確認標題列 + 總和行
@@ -1423,29 +1428,29 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 【背景】William 2026-06-29 10:16 反映
   - 「買賣紀錄中顯示profit + 改用紅字, - 改用綠字」
 
-【根因】之前用西方慣例（+綠/-紅）
+【根因】之前用西方慣例(+綠/-紅)
   - pl_color = COLOR_PROFIT_NEG if summary.total_unrealized_pl >= 0 else COLOR_PROFIT_POS
   - 台股相反、對 William 不親合
 
 【修法】依台股慣例
-  1. stocktool/config.py 加 3 個常數：
-     COLOR_PROFIT_POS = ...   # 正數（贖錢 / 派）= 紅
-     COLOR_PROFIT_NEG = ...   # 負數（虧錢 / 跌）= 綠
+  1. stocktool/config.py 加 3 個常數:
+     COLOR_PROFIT_POS = ...   # 正數(贖錢 / 派)= 紅
+     COLOR_PROFIT_NEG = ...   # 負數(虧錢 / 跌)= 綠
      COLOR_PROFIT_ZERO = ...  # 零 = 深灰
   2. StockTool.py import 進來、集中管理
   3. 拿掉所有 hardcode 損益色
-  4. 套用範圍：
+  4. 套用範圍:
      - summary labels (4 個: 未實現 / 已實現淨 / 總報酬率 % / 總損益)
-     - _positions_tree 持倉明細 整列顏色（以未實現為主、現價=0 時用已實現）
+     - _positions_tree 持倉明細 整列顏色(以未實現為主、現價=0 時用已實現)
      - _show_position_detail dialog (3 個: 未實現 / 預估淨收入 / 已實現)
 
 【實作細節】
-  - tag_configure 3 個：profit_pos / profit_neg / profit_zero
-  - ttk.Treeview tag 只能套整列、以主指標為準（不每儲存格不同色、避免複雜度）
-  - primary_pl 邏輯：current_price > 0 → unrealized_pl、否則 realized_pl
+  - tag_configure 3 個:profit_pos / profit_neg / profit_zero
+  - ttk.Treeview tag 只能套整列、以主指標為準(不每儲存格不同色、避免複雜度)
+  - primary_pl 邏輯:current_price > 0 → unrealized_pl、否則 realized_pl
   - calendar.py 的「週日紅字」是另一語境、不屬於損益色、不動
 
-【測試】17 個新（test_portfolio_taiwan_color.py）
+【測試】17 個新(test_portfolio_taiwan_color.py)
   - 2 個設定常數守護、2 個 import 守護、4 個 summary 守護、3 個 dialog 守護、3 個 positions_tree 守護、2 個編譯守護、2 個整合測試
   - 536 passed (519 既有 + 17 新)、0 failed (1 既有 test_data_date 跟本版無關)
 
@@ -1456,27 +1461,27 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 ════════════════════════════════════════════════════════════════════════════════
 【V1.1-etf-data-status-multiline】2026-06-29 10:33 (William 10:33 反映 ETF 左欄說明太長)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-29 10:33 反映（截圖上可看到左欄被裁切）
+【背景】William 2026-06-29 10:33 反映(截圖上可看到左欄被裁切)
   - 「etf選股左欄說明太長了請拆成多行」
 
 【根因】兩個 bug 一起修
   1. 原文 50+ 字元塞 200px 左欄、被裁切
-     範例：'ETF 持股：最後更新 2026-06-29 10:00:00 (53 檔個股、從 20 檔 ETF) ✅ 有昨日資料可比較'
-  2. 同時發現：strftime('%%Y-%%m-%%d') 印出字面 '%Y-%m-%d'（不是真正時間）
+     範例:'ETF 持股：最後更新 2026-06-29 10:00:00 (53 檔個股、從 20 檔 ETF) ✅ 有昨日資料可比較'
+  2. 同時發現:strftime('%%Y-%%m-%%d') 印出字面 '%Y-%m-%d'(不是真正時間)
      截圖上最後更新顯示為 '%Y-%m-%d %H:%M:%S' 就是這個 bug
-     原因：strftime 的 %% 是字面 %、但這裡是要顯示真實 datetime
+     原因:strftime 的 %% 是字面 %、但這裡是要顯示真實 datetime
 
 【修法】拆 3 行 + 修 %% bug
-  1. 改成 \\n.join(status_lines)：
+  1. 改成 \\n.join(status_lines):
      Line 1: 'ETF 持股：53 檔個股、20 檔 ETF'
      Line 2: '最後更新 2026-06-29 10:00:00'
      Line 3: '✅ 有昨日資料可比較'  或 '⚠️ 無昨日資料'
-  2. 改用 datetime.now().strftime('%Y-%m-%d %H:%M:%S')（不是 %%Y）
-  3. 3 個 set 位置（line 5700、5911、5915）全部更新
+  2. 改用 datetime.now().strftime('%Y-%m-%d %H:%M:%S')(不是 %%Y)
+  3. 3 個 set 位置(line 5700、5911、5915)全部更新
 
 【實作細節】
   - 有/無昨日資料判斷 has_yesterday 變數 + 3-element list
-  - 第一個 set 沒有「有/無昨日」（如 first time fetch）只設 2 行
+  - 第一個 set 沒有「有/無昨日」(如 first time fetch)只設 2 行
   - ttk.Label 支援 \\n 換行、原本就有 font=Helvetica 8、不需調
 
 【version 同步】
@@ -1487,17 +1492,17 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 【V1.1-remove-after-hour】2026-06-29 13:46 (William 13:46 反映手動選股盤後量無資料)
 ════════════════════════════════════════════════════════════════════════════════
 【背景】William 2026-06-29 13:46 反映
-  - 「手動選股結果盤後量都沒資料、取消顯示！」
+  - 「手動選股結果盤後量都沒資料、取消顯示!」
 
 【根因】
   - TWSE BFT41U API 只回個位數筆個股、TPEx 上櫃無公開 API
-  - 絕大多數個股顯示 '—'、欄位沒實質用處
-  - 完整清理：拿掉函數 + Step 6 + 欄位 + rename + cache 防呆
+  - 絕大多數個股顯示 '-'、欄位沒實質用處
+  - 完整清理:拿掉函數 + Step 6 + 欄位 + rename + cache 防呆
 
 【修法】
   1. StockTool.py
-     - _ms_tree cols：拿掉「盤後量(張)」（15 欄 → 14 欄）
-     - _ms_display_results insert：拿掉 after_hour_vol_str
+     - _ms_tree cols:拿掉「盤後量(張)」(15 欄 → 14 欄)
+     - _ms_display_results insert:拿掉 after_hour_vol_str
      - 拿掉 after_hour_vol 變數定義、if abs(cl) < 0.001 邏輯
   2. stocktool/scoring.py
      - price_cols list 拿掉「盤後量_股」
@@ -1506,20 +1511,20 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
      - rename dict 拿掉「盤後量_股」:「盤後量(張)」
      - cache 沒有「盤後量_股」時補 None 邏輯拿掉
   3. stocktool/fetch_market.py
-     - fetch_after_hour_volumes() 函數拿掉（47 行）
-     - fetch_prices Step 6 拿掉（盤後定價交易量 fetch + merge + fillna）
+     - fetch_after_hour_volumes() 函數拿掉(47 行)
+     - fetch_prices Step 6 拿掉(盤後定價交易量 fetch + merge + fillna)
      - return cols 拿掉「盤後量_股」
 
 【測試】10 個新 guard test (test_remove_after_hour.py)
   - 1 個 fetch_after_hour_volumes 函數移除守護
   - 1 個 BFT41U URL 移除守護
-  - 3 個 StockTool 欄位守護（欄位、邏輯、cols count）
-  - 4 個 scoring 守護（price_cols / out_cols / final_cols / rename）
+  - 3 個 StockTool 欄位守護(欄位、邏輯、cols count)
+  - 4 個 scoring 守護(price_cols / out_cols / final_cols / rename)
   - 1 個 all_files_compile
   - 拿掉舊的 test_after_hour_volume.py (9 個)
 
 【實作細節】
-  - 拿掉函數時是移除語意、不只是註解化（避免被誤用）
+  - 拿掉函數時是移除語意、不只是註解化(避免被誤用)
   - 原抓的 BFT41U API URL 可以在 git history 裡查
   - 以後若 TPEx 有公開 API、或 TWSE BFT41U 資料變多、可從 git history 還原
 
@@ -1534,7 +1539,7 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - 「所有的選股結果增加漲跌價欄位、一樣要有 sorting 功能」
 
 【修法】
-  1. 新增 _fmt_change(v) helper（模組層級、line 2857 附近）
+  1. 新增 _fmt_change(v) helper(模組層級、line 2857 附近)
      - +5.0 (正數帶 +)
      - -3.2 (負數自帶 -)
      - 0.0 (零不帶正負號)
@@ -1543,23 +1548,23 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
      - select_tree (系統選股): 9 欄 → 10 欄
      - _ms_tree (手動選股): 14 欄 → 15 欄
      - _etf_tree (ETF 選股): 6 欄 → 7 欄
-  3. scoring.py final_cols 加「顀跌」（讓手動選股有資料）
+  3. scoring.py final_cols 加「顀跌」(讓手動選股有資料)
   4. aggregate_etf_holdings 順便 merge「顀跌」→ 1 行代加
-  5. 不加到 skip_cols → 可以排序（_parse_sort_value 本來就支援 ± prefix）
+  5. 不加到 skip_cols → 可以排序(_parse_sort_value 本來就支援 ± prefix)
 
 【實作細節】
-  - price_df 本來就有「顀跌」欄（fetch_market.py line 1175 算出、pz - y）
-  - 系統選股 df_sel 自動有「顀跌」（price.merge）
+  - price_df 本來就有「顀跌」欄(fetch_market.py line 1175 算出、pz - y)
+  - 系統選股 df_sel 自動有「顀跌」(price.merge)
   - 手動選股 result 需 scoring.py final_cols 加「顀跌」才能拿到
   - ETF 選股需 aggregate_etf_holdings merge「顀跌」
   - 「顀跌」是 optional、舊 cache 可能沒有、用 intersection 安全 merge
 
 【測試】13 個新 (test_add_change_column.py)
-  - 5 個 _fmt_change 邏輯守護（+ / - / 0 / None / NaN）
-  - 3 個 tree 欄位守護（select / ms / etf）
+  - 5 個 _fmt_change 邏輯守護(+ / - / 0 / None / NaN)
+  - 3 個 tree 欄位守護(select / ms / etf)
   - 1 個 scoring final_cols 守護
   - 1 個 aggregate_etf_holdings merge 守護
-  - 1 個 skip_cols 守護（「顀跌價」不能被 skip）
+  - 1 個 skip_cols 守護(「顀跌價」不能被 skip)
   - 1 個 _parse_sort_value 整合守護
   - 1 個 all_files_compile
   - 順手修 test_remove_after_hour 的 cols count 14 → 15
@@ -1572,34 +1577,34 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 ════════════════════════════════════════════════════════════════════════════════
 【V0.9.5-after-hour】2026-06-28 10:15 (William 09:44 反映盤後交易數量)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-28 09:44 反映：
-  - 「手動選股節過中成交量和實際不一樣,少了盤後交易的數量！」
-  - 「你可以增加依欄盤後交易的數值資料嗎？」
+【背景】William 2026-06-28 09:44 反映:
+  - 「手動選股節過中成交量和實際不一樣,少了盤後交易的數量!」
+  - 「你可以增加依欄盤後交易的數值資料嗎?」
 
 【根因】
   - 現有「成交量(張)」來自 TWSE STOCK_DAY_ALL 的 TradeVolume
   - TradeVolume 是「盤中收盤後累計」、不含 13:40~14:30 的「盤後定價交易」
-  - 所以有盤後成交的個股 (高價股/低價股)，StockTool 顯示的量比實際少
+  - 所以有盤後成交的個股 (高價股/低價股),StockTool 顯示的量比實際少
 
 【修法】
   - source/stocktool/fetch_market.py
-    - 新增 fetch_after_hour_volumes()：抓 TWSE BFT41U API
+    - 新增 fetch_after_hour_volumes():抓 TWSE BFT41U API
       (https://www.twse.com.tw/exchangeReport/BFT41U)
       fields: 證券代號, 證券名稱, 成交數量, 成交筆數, ...
-    - 回傳 DataFrame [股票代號, 盤後量_股]；API 失敗回空
-    - 整合進 fetch_prices：Step 6 加「盤後量_股」、merge 後 fillna(0)
+    - 回傳 DataFrame [股票代號, 盤後量_股];API 失敗回空
+    - 整合進 fetch_prices:Step 6 加「盤後量_股」、merge 後 fillna(0)
   - source/stocktool/scoring.py
     - price_cols 加「盤後量_股」
-    - cache 沒資料時補 None (「—」)
+    - cache 沒資料時補 None (「-」)
     - out_cols 加「盤後量_股」→ final_cols → rename 成「盤後量(張)」
   - source/StockTool.py
     - 手動選股 Treeview cols 加「盤後量(張)」(14 欄 → 15 欄)
     - _ms_display_results 顯示「盤後量(張)」:
-      - 有資料：f"{int(vol):,} 股" (例 "134 股")
-      - 0 / None：顯示 "—" (避免誤導)
+      - 有資料:f"{int(vol):,} 股" (例 "134 股")
+      - 0 / None:顯示 "-" (避免誤導)
 
 【限制】TPEx 上檔無公開 API
-  - 抓不到盤後定價的個股 → 「盤後量(張)」顯示 "—"
+  - 抓不到盤後定價的個股 → 「盤後量(張)」顯示 "-"
   - 目前無解、TPEx 為 JS 動態載入、沒有 JSON API
   - 未來 TPEx 有公開 API 再補
 
@@ -1630,7 +1635,7 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - 今天是 2026-06-28 週日、沒開盤
   - 但 DB 內 dates = [6/28, 6/27, 6/26, 6/25, ...]
   - 原本 _compute_etf_changes 用 dates[0] (6/28 週日) 當 today、dates[1] (6/27 週六) 當 yesterday
-  - App 週日早上抓 ETF 持股網頁、shares_lots 跟 6/27 完全一樣（網頁週末沒更新、stale duplicate）
+  - App 週日早上抓 ETF 持股網頁、shares_lots 跟 6/27 完全一樣(網頁週末沒更新、stale duplicate)
   - 6/28 vs 6/27 → diff 全 0 → 全部被過濾掉 → 空 DataFrame → 全顯示 "--"
 
 【修法】stocktool/database.py
@@ -1639,36 +1644,36 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - 加 _find_latest_changed_etf_pair(db_path, all_dates)
     - 從 all_dates (DESC) 找「最後一個有實質變動的對」、跳過 stale dates
   - 改 _compute_etf_changes
-    - 多取 10 個 dates（原本 2 個、不夠跳 stale）
+    - 多取 10 個 dates(原本 2 個、不夠跳 stale)
     - dates[0] vs dates[1] 若完全相同 → 往前找有變動的對
     - caller 指定的 today_str 不在 DB 內 → 也走同樣 fallback
-  - 新行為：週六/週日打開 App、會看到上一個有實質交易日的異動結果
+  - 新行為:週六/週日打開 App、會看到上一個有實質交易日的異動結果
 
-【測試】tests/test_etf_weekend_fallback.py（新、12 個）
-  - test_weekend_fallback_取最後有變動的交易日：4 天、前 2 天 stale → 結果 = 週五 vs 週四
-  - test_weekday_no_fallback_保留原本行為：平日 6/23 vs 6/22 = +0.5 張（向後相容）
-  - test_helper_dates_have_changes_兩天完全一樣：完全一樣 → False
-  - test_helper_dates_have_changes_shares不同：shares 不同 → True
-  - test_helper_dates_have_changes_一邊全空：清倉 / 全新建倉 → True
-  - test_helper_dates_have_changes_新增股票：A 有 B 沒 → True
-  - test_helper_find_latest_changed_pair_跳過stale：跳過 stale 找到有變動的
-  - test_helper_find_latest_changed_pair_找不到：全 stale → None
-  - test_today_str不在DB_且DB只有1天資料：空 DataFrame
-  - test_today_str不在DB_且DB全stale：空 DataFrame
-  - test_today_str不在DB_取最後有變動的對：取 DB 內最後變動對
-  - test_real_db_2026_06_28_周日：在真實 etf_history.db 跑、2330 應 = +249 張
+【測試】tests/test_etf_weekend_fallback.py(新、12 個)
+  - test_weekend_fallback_取最後有變動的交易日:4 天、前 2 天 stale → 結果 = 週五 vs 週四
+  - test_weekday_no_fallback_保留原本行為:平日 6/23 vs 6/22 = +0.5 張(向後相容)
+  - test_helper_dates_have_changes_兩天完全一樣:完全一樣 → False
+  - test_helper_dates_have_changes_shares不同:shares 不同 → True
+  - test_helper_dates_have_changes_一邊全空:清倉 / 全新建倉 → True
+  - test_helper_dates_have_changes_新增股票:A 有 B 沒 → True
+  - test_helper_find_latest_changed_pair_跳過stale:跳過 stale 找到有變動的
+  - test_helper_find_latest_changed_pair_找不到:全 stale → None
+  - test_today_str不在DB_且DB只有1天資料:空 DataFrame
+  - test_today_str不在DB_且DB全stale:空 DataFrame
+  - test_today_str不在DB_取最後有變動的對:取 DB 內最後變動對
+  - test_real_db_2026_06_28_周日:在真實 etf_history.db 跑、2330 應 = +249 張
   - 全部 476 passed (464 既有 + 12 新)、0 failed
 
 【version 同步】
-  - VERSION = "v1.1" → "v1.1-etf-weekend"（stocktool/config.py）
+  - VERSION = "v1.1" → "v1.1-etf-weekend"(stocktool/config.py)
   - App title 自動改 v1.1-etf-weekend
   - 啟動 log 自動改 v1.1-etf-weekend
-  - User-Agent: StockTool/AdvisorStyle-v1.1 → v1.1-etf-weekend（stocktool/etf.py 兩處）
+  - User-Agent: StockTool/AdvisorStyle-v1.1 → v1.1-etf-weekend(stocktool/etf.py 兩處)
 
-【本版本套用實際效果】（在 production etf_history.db 跑）
+【本版本套用實際效果】(在 production etf_history.db 跑)
   - 原本 _compute_etf_changes(today_str="2026-06-28") → 0 rows
   - 修法後 → 23 rows、有實質異動
-  - 2308 台達電 -5480.0 張（週五 vs 週四異動）
+  - 2308 台達電 -5480.0 張(週五 vs 週四異動)
   - 2330 台積電 +249.0 張
   - 2344 華邦電 +870.0 張
   - 4958 臻鼎-KY -646.0 張
@@ -1678,18 +1683,18 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 ════════════════════════════════════════════════════════════════════════════════
 【V0.9.5-goodinfo6】2026-06-26 11:30 (William 11:22 重新抓 goodinfo 股利/殖利率檔)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-26 11:22 反映重新抓了 goodinfo 股利/殖利率檔、放：
+【背景】William 2026-06-26 11:22 反映重新抓了 goodinfo 股利/殖利率檔、放:
   ~/.openclaw/workspace/股神/.tmp/goodinfo_export/dividend/
 
 【新版 vs 舊版 4 個差異】
-  1. 價位帶擴大：P50U → P55U (923 檔)、P20-50 → P20-55 (836 檔)
-     → 涵蓋更多中價股（高價股從 ~700 檔變 923 檔）
-  2. 檔名怪：P55U 用 Dividend10Y、P20-55/P20L 用 Divided10Y（e 跟 i 顛倒）
+  1. 價位帶擴大:P50U → P55U (923 檔)、P20-50 → P20-55 (836 檔)
+     → 涵蓋更多中價股(高價股從 ~700 檔變 923 檔)
+  2. 檔名怪:P55U 用 Dividend10Y、P20-55/P20L 用 Divided10Y(e 跟 i 顛倒)
      → GoodInfo 網頁 URL 在中低價股頁面拼字顛倒、無解、要寫程式兼容
-  3. Divided10Y 已經是「純現金股利」（不是合計）、cash 直接拿
+  3. Divided10Y 已經是「純現金股利」(不是合計)、cash 直接拿
      → 舊版要用「cash = 10Y_div - 10Y_share」扣股票才得現金
      → 新版直接拿 cash = Divided10Y、簡化算法、避免負值 corner case
-  4. P55U/P20-55 的 ShareRate 內容跟 DividendRate 一模一樣（GoodInfo bug）
+  4. P55U/P20-55 的 ShareRate 內容跟 DividendRate 一模一樣(GoodInfo bug)
      → 寫入 share_yield_pct 會把 stock_yield 覆蓋成 cash_yield
      → 跳過這兩個檔、只用 P20L_ShareRate 寫入 share_yield_pct
 
@@ -1702,70 +1707,70 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 【結果】
   - div: 15268 列 / 2043 檔 / 10 年 (vs 舊 15253 列)
   - yield: cash_yield_pct 15408 筆 / 2212 檔 (vs 舊 15393 筆)
-  - yield: share_yield_pct 2961 筆 (vs 舊 15363 筆！大幅下降、因為跳過 2 個 bug 檔)
+  - yield: share_yield_pct 2961 筆 (vs 舊 15363 筆!大幅下降、因為跳過 2 個 bug 檔)
   - 2026exdate: UPDATE ex_date 1670 筆
 
-【test】tests/test_import_goodinfo_v0_9_5g6.py（新、12 個）
-  - test_FILE_PREFIX_MAP_P55U_uses_Dividend10Y：P55U 用 Dividend10Y
-  - test_FILE_PREFIX_MAP_P20_55_uses_Divided10Y：P20-55/P20L 用 Divided10Y
-  - test_old_P50U_and_P20_50_should_not_be_in_map：舊前綴拿掉
-  - test_dividend_cash_equals_divided10y_directly：2442 2025 cash=0.08 純現金
-  - test_BAD_SHARE_RATE_GROUPS_包含_P55U_跟_P20_55：跳過清單正確
-  - test_import_yield_rate跳過P55U_P20_55_ShareRate：實際 import 跳過 bug 檔
-  - test_2442_2025_cash_0_079_stock_0_158：DB 內資料正確
-  - test_zero_cash_dividend_still_inserted（V0.9.5-goodinfo6+）：val=0 不跳過、6219 2026
-  - test_finmind_keys_filtered_from_goodinfo_rows（V0.9.5-goodinfo6+）：6219 2024 finmind 保留
-  - test_1808_2026_yield_is_4_83（end-to-end）：1808 殖利率 4.83%
-  - test_6219_2026_yield_is_zero（end-to-end）：6219 殖利率 0%
-  - test_6219_2024_finmind_preserved（end-to-end）：finmind (0.7, 0.5) 保留
+【test】tests/test_import_goodinfo_v0_9_5g6.py(新、12 個)
+  - test_FILE_PREFIX_MAP_P55U_uses_Dividend10Y:P55U 用 Dividend10Y
+  - test_FILE_PREFIX_MAP_P20_55_uses_Divided10Y:P20-55/P20L 用 Divided10Y
+  - test_old_P50U_and_P20_50_should_not_be_in_map:舊前綴拿掉
+  - test_dividend_cash_equals_divided10y_directly:2442 2025 cash=0.08 純現金
+  - test_BAD_SHARE_RATE_GROUPS_包含_P55U_跟_P20_55:跳過清單正確
+  - test_import_yield_rate跳過P55U_P20_55_ShareRate:實際 import 跳過 bug 檔
+  - test_2442_2025_cash_0_079_stock_0_158:DB 內資料正確
+  - test_zero_cash_dividend_still_inserted(V0.9.5-goodinfo6+):val=0 不跳過、6219 2026
+  - test_finmind_keys_filtered_from_goodinfo_rows(V0.9.5-goodinfo6+):6219 2024 finmind 保留
+  - test_1808_2026_yield_is_4_83(end-to-end):1808 殖利率 4.83%
+  - test_6219_2026_yield_is_zero(end-to-end):6219 殖利率 0%
+  - test_6219_2024_finmind_preserved(end-to-end):finmind (0.7, 0.5) 保留
   - 全部 465 passed (453 既有 + 12 新)、0 failed
 
 
 ════════════════════════════════════════════════════════════════════════════════
 【V0.9.5-goodinfo6+】2026-06-26 12:35 (修手動選股殖利率 bug)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-26 12:00 反映：
-  - 「6219 漲利率 0.04%（應為 0%）」
-  - 「1808 漲利率 0.05%（應為 4.83%）」
+【背景】William 2026-06-26 12:00 反映:
+  - 「6219 漲利率 0.04%(應為 0%)」
+  - 「1808 漲利率 0.05%(應為 4.83%)」
 
-【根因 1：val=0 跳過 INSERT】
+【根因 1:val=0 跳過 INSERT】
   - scripts/import_goodinfo_history.py 原本 `if pd.isna(val) or val == 0: continue`
   - 6219 2026 cash=0, stock=0 → 該年 row 不 INSERT
   - 後期 import_yield_rate 查不到 2026 row → cash_yield_pct 沒寫入
-  - 手動選股「今年現金殖利率(%)」= None → 顯示 0.00（不是 0%）
+  - 手動選股「今年現金殖利率(%)」= None → 顯示 0.00(不是 0%)
 
-【根因 2：finmind 補的會被 goodinfo 覆蓋】
+【根因 2:finmind 補的會被 goodinfo 覆蓋】
   - 6219 2024 finmind 補 (0.7, 0.5) 是對的
-  - 但 goodinfo 2024 是 0.0（漏抓）
+  - 但 goodinfo 2024 是 0.0(漏抓)
   - 原 INSERT OR REPLACE 不分 source → goodinfo 覆寫 finmind
-  - 結果：6219 2024 變成 (0, 0)、現金股利 1.4 元金額資料誤失
+  - 結果:6219 2024 變成 (0, 0)、現金股利 1.4 元金額資料誤失
 
 【修法】
-  1. import_dividend：`val=0` 不跳過、也要 INSERT（標記「該年無配息」）
-  2. import_dividend：finmind 已存在的 (sid, yr) 從 goodinfo rows 中過濾、不覆寫
-  3. import_yield_rate：不變、會把 0.0% 寫進 cash_yield_pct
+  1. import_dividend:`val=0` 不跳過、也要 INSERT(標記「該年無配息」)
+  2. import_dividend:finmind 已存在的 (sid, yr) 從 goodinfo rows 中過濾、不覆寫
+  3. import_yield_rate:不變、會把 0.0% 寫進 cash_yield_pct
 
 【驗證】end-to-end 跑 _run_manual_selection
-  - 1808 潤隆：今年現金殖利率 4.83% ✓
-  - 6219 富旺：今年現金殖利率 0.0% ✓
-  - 6219 2024：保留 finmind (0.7, 0.5) ✓
+  - 1808 潤隆:今年現金殖利率 4.83% ✓
+  - 6219 富旺:今年現金殖利率 0.0% ✓
+  - 6219 2024:保留 finmind (0.7, 0.5) ✓
 
-【沒動】VERSION / App title / User-Agent 仍是 v1.1（只是 scripts/ 改、主程式沒動）
+【沒動】VERSION / App title / User-Agent 仍是 v1.1(只是 scripts/ 改、主程式沒動)
 
 
 ════════════════════════════════════════════════════════════════════════════════
 【V0.9.5-goodinfo6++】2026-06-26 13:10 (修 finmind 年份語意 bug)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-26 12:39 反映：
-  - 「6219 2024 finmind (0.7, 0.5) 、goodinfo 抓的是發放年2024的 (0.7, 0.5) 是在 2025 發放！」
+【背景】William 2026-06-26 12:39 反映:
+  - 「6219 2024 finmind (0.7, 0.5) 、goodinfo 抓的是發放年2024的 (0.7, 0.5) 是在 2025 發放!」
 
-【根因】finmind year = 會計年度（ex: 113年）、goodinfo 發放年度 = 除息日年份
+【根因】finmind year = 會計年度(ex: 113年)、goodinfo 發放年度 = 除息日年份
   - 113年 ≠ 2024 (西元)、ex: 113年第4季 cash=0.7 CashExDividendTradingDate=2025-07-03
   - finmind 把這筆寫到 DB year=2024
   - 但真正發放是 2025-07-03 → 應歸到 2025
   - goodinfo 2025 發放年度也是 0.7 → 兩者同一筆
 
-【證據】5 個 finmind row 用 ex_date year 都跟 goodinfo +1 完全匹配：
+【證據】5 個 finmind row 用 ex_date year 都跟 goodinfo +1 完全匹配:
   - 1459 finmind yr=2025 (0.2) ex_date=2026-05-28 → goodinfo 2026 (0.2) ✓
   - 2342 finmind yr=2024 (0.299) ex_date=2025-08-08 → goodinfo 2025 (0.3) ✓
   - 2323 finmind yr=2023 (0.68) ex_date=2024-09-10 → goodinfo 2024 (0.68) ✓
@@ -1773,14 +1778,14 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - 7821 finmind yr=2025 (2.0) ex_date=2026-04-03 → goodinfo 2026 (2.0) ✓
 
 【修復】3 個動作
-  1. fetch_market.py _fetch_finmind_dividend (line ~700)：
+  1. fetch_market.py _fetch_finmind_dividend (line ~700):
      - 優先用 CashExDividendTradingDate (現金除息日)
      - fallback 到 StockExDividendTradingDate (股票除權日)
      - fallback 到 rec.get('date') (公告日)
      - 最後才退回 finmind year+1911 (會計年度)
-  2. fetch_market.py _background_fetch_all_dividend (line ~825)：
+  2. fetch_market.py _background_fetch_all_dividend (line ~825):
      - 同樣優先用 CashExDividendTradingDate / StockExDividendTradingDate
-  3. DB cleanup (inline Python script)：
+  3. DB cleanup (inline Python script):
      - 刪除 5 筆有 ex_date 但 yr 錯誤的 finmind row (已遷移到 ex_date yr)
      - 刪除 39 筆 finmind ex_date NULL 的 row (yr 都是會計年度、無法還原)
      - 刪除 6219 2024 finmind 孤兒 row (跟 goodinfo 2025 重複)
@@ -1793,22 +1798,22 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - 1808 / 1459 / 2342 等殖利率正確
 
 【test】tests/test_import_goodinfo_v0_9_5g6.py +3 個
-  - test_6219_2024_finmind_removed_after_alignment：6219 2024 finmind 不存在
-  - test_6219_2025_goodinfo_intact：6219 2025 goodinfo (0.7, cyld=3.15) 保留
-  - test_finmind_year_uses_ex_date_year：fetch_market.py source 包含 ex_date year 邏輯
-  - test_no_finmind_rows_with_null_ex_date：DB 內 finmind ex_date NULL = 0
+  - test_6219_2024_finmind_removed_after_alignment:6219 2024 finmind 不存在
+  - test_6219_2025_goodinfo_intact:6219 2025 goodinfo (0.7, cyld=3.15) 保留
+  - test_finmind_year_uses_ex_date_year:fetch_market.py source 包含 ex_date year 邏輯
+  - test_no_finmind_rows_with_null_ex_date:DB 內 finmind ex_date NULL = 0
   - 全部 470 passed (465 既有 + 5 新)、0 failed
 
 
 ════════════════════════════════════════════════════════════════════════════════
 【V0.9.5-goodinfo6+++】2026-06-26 14:00 (修系統選股 DB 路徑 + 殖利率顯示格式)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-26 13:51 + 13:56 反映：
+【背景】William 2026-06-26 13:51 + 13:56 反映:
   - 系統選股結果 9946 殖利率顯示 0.07 (應為 0)
   - 系統選股結果 4973 殖利率顯示 0.015 (應為 1.28)
   - 「請檢查所有殖利率內容」
 
-【根因 1：fetcher db_path 是相對路徑】
+【根因 1:fetcher db_path 是相對路徑】
   - _fetch_finmind_dividend 預設 db_path = "dividend_history.db"
   - 專案根有個空的 dividend_history.db (0 筆、6/20 殘留)
   - App 跑時 cwd 不同可能抓到空的 DB → 殖利率全 None → fallback 估算
@@ -1816,64 +1821,64 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - 部分狀況抓到正確 DB → 9946 goodinfo cyld=6.9 → 顯示 0.07
   - 4973 goodinfo cyld=1.28 → 顯示 0.01
 
-【根因 2：Treeview 用 _fmt(yld) 顯示小數】
+【根因 2:Treeview 用 _fmt(yld) 顯示小數】
   - yld 是小數 (0.069 = 6.9%)、但 _fmt(yld) 用 .2f 顯示成 0.07
   - 應該 ×100 變成 % 才對
 
 【修法】
-  1. _fetch_finmind_dividend (line ~631)：
+  1. _fetch_finmind_dividend (line ~631):
      - db_path=None 自動找 fetch_market.py 上層的 source/dividend_history.db (絕對路徑)
-  2. _background_fetch_all_dividend (line ~799)：同樣修
-  3. StockTool.py 系統選股 Treeview (line ~6270)：
+  2. _background_fetch_all_dividend (line ~799):同樣修
+  3. StockTool.py 系統選股 Treeview (line ~6270):
      - 新增 _fmt_pct(yld) = v × 100 顯示為 % (ex: 0.069 → 6.90)
   4. 清掉專案根的空 dividend_history.db / eps_history.db / portfolio.db
      (移到 .bak_empty_20260626 備份)
 
 【驗證】end-to-end
-  - 不傳 db_path、從專案根跑：9946=6.9%、4973=1.28% ✓
-  - 不傳 db_path、從 source/ 跑：同樣 ✓
+  - 不傳 db_path、從專案根跑:9946=6.9%、4973=1.28% ✓
+  - 不傳 db_path、從 source/ 跑:同樣 ✓
   - 自動取絕對路徑、不受 cwd 影響
 
 【test】tests/test_import_goodinfo_v0_9_5g6.py +2 個
-  - test_fetcher_default_db_path_finds_source_db：3 種 cwd 都拿到 (6.9, 1.28)
-  - test_background_fetcher_default_db_path：背景 fetcher 也自動找
+  - test_fetcher_default_db_path_finds_source_db:3 種 cwd 都拿到 (6.9, 1.28)
+  - test_background_fetcher_default_db_path:背景 fetcher 也自動找
   - 全部 470 passed (468 既有 + 2 新)、0 failed
 
 
 ════════════════════════════════════════════════════════════════════════════════
 【V0.9.5-goodinfo6++++】2026-06-26 18:35 (今年現金殖利率 = cash / 現價)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-26 14:18 + 14:25 反映：
-  - 「2026 漲利率不能從 goodinfo 抓、要用現價去計算！」
+【背景】William 2026-06-26 14:18 + 14:25 反映:
+  - 「2026 漲利率不能從 goodinfo 抓、要用現價去計算!」
   - 「過去歷史漲利率的資料用 goodinfo 抓的」
 
-【根因】舊的演算法：
-  - 今年現金殖利率(%) = 100% 用 goodinfo 殖利率值（goodinfo 6.32%）
+【根因】舊的演算法:
+  - 今年現金殖利率(%) = 100% 用 goodinfo 殖利率值(goodinfo 6.32%)
   - 但 goodinfo 是用「除息基準日還原價」算的歷史值、不是現價算的即時殖利率
-  - 9946 樣本：goodinfo 6.9%（用 19.85 算）、但現價 29、cash 1.37 → 實際 4.72%
+  - 9946 樣本:goodinfo 6.9%(用 19.85 算)、但現價 29、cash 1.37 → 實際 4.72%
   - 結果使用者看到的殖利率跟現價配股現金實際算出來的不一樣
 
-【新邏輯】（V0.9.5-goodinfo6++++）
+【新邏輯】(V0.9.5-goodinfo6++++)
   - 今年現金殖利率(%) = 今年現金股利 / 現價 × 100
-    - cash=0 → 殖利率 = 0.0%（表示「該年未配息」、合理）
+    - cash=0 → 殖利率 = 0.0%(表示「該年未配息」、合理)
     - cash=None 或現價 None → 殖利率 None
-  - 去年現金殖利率(%) = 直接用 goodinfo（已除息完成、用除息日還原價算的歷史值）
-  - 股票殖利率（今年/去年）= 直接用 goodinfo
+  - 去年現金殖利率(%) = 直接用 goodinfo(已除息完成、用除息日還原價算的歷史值)
+  - 股票殖利率(今年/去年)= 直接用 goodinfo
 
 【改動】3 個 source
-  1. stocktool/scoring.py (line ~198) _run_manual_selection：
+  1. stocktool/scoring.py (line ~198) _run_manual_selection:
      - 「今年現金殖利率(%)」演算法從 goodinfo 改為 cash/現價×100
-  2. stocktool/pipeline.py (line ~163) _run_selection_only：
+  2. stocktool/pipeline.py (line ~163) _run_selection_only:
      - 「漲利率(估)」演算法從 goodinfo 改為 cash/現價
-  3. stocktool/pipeline.py (line ~246) _run_pipeline：
+  3. stocktool/pipeline.py (line ~246) _run_pipeline:
      - 「漲利率(估)」演算法同步改為 cash/現價
 
 【驗證】end-to-end _run_manual_selection
-  - 9946 (三發地產)：cash=1.37、現價=29 → 漲利率 4.72%（不是 goodinfo 6.9）✓
-  - 4973 (廣穎)：cash=1.0、現價=78 → 漲利率 1.28%（巧合跟 goodinfo 同）✓
-  - 6219 (富旺)：cash=0、現價=13.25 → 漲利率 0.0%（該年未配息）✓
-  - 1808 (潤隆)：cash=1.5、現價=31 → 漲利率 4.84% ✓
-  - 2408 (南亞科)：cash=1.347、現價=340 → 漲利率 0.40% ✓
+  - 9946 (三發地產):cash=1.37、現價=29 → 漲利率 4.72%(不是 goodinfo 6.9)✓
+  - 4973 (廣穎):cash=1.0、現價=78 → 漲利率 1.28%(巧合跟 goodinfo 同)✓
+  - 6219 (富旺):cash=0、現價=13.25 → 漲利率 0.0%(該年未配息)✓
+  - 1808 (潤隆):cash=1.5、現價=31 → 漲利率 4.84% ✓
+  - 2408 (南亞科):cash=1.347、現價=340 → 漲利率 0.40% ✓
 
 【test】tests/ 調整 4 個檔、遾 6 個 test
   - test_goodinfo_yield_rate.py 全部重寫反映新邏輯
@@ -1886,7 +1891,7 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 ════════════════════════════════════════════════════════════════════════════════
 【V0.9.5-info2】2026-06-26 21:00 (資料日期 = 抓取時點對應的市場日)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-26 20:32 反映：
+【背景】William 2026-06-26 20:32 反映:
   - 手動選股結果資料日期混雜 6/25 / 6/26
   - 「現在時點抓到的應該是 2026-06-26 才對」
   - 「重新抓股價還是沒有 update」
@@ -1895,10 +1900,10 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - TPEx tpex_mainboard_quotes 已是 6/26 (1011 筆今日收盤)
   - TWSE MIS 即時 API 個股都有 6/26 當下價
   - 使用者看到 6/25 / 6/26 混雜 → 困惑
-【新邏輯】（V0.9.5-info2）
-  - data_date 一律 = today（這份資料對應的市場時點）
+【新邏輯】(V0.9.5-info2)
+  - data_date 一律 = today(這份資料對應的市場時點)
   - 不論個股是否真有成交、data_date 統一顯示 today
-  - 股價仍用 STOCK_DAY_ALL + TPEx（TWSE 還沒 flush → 拿昨日收盤、但 data_date 顯示 today）
+  - 股價仍用 STOCK_DAY_ALL + TPEx(TWSE 還沒 flush → 拿昨日收盤、但 data_date 顯示 today)
   - 預期隔日早上重新抓 → 價格會是 6/26 真實收盤
 【驗證】
   - 全部 2379 筆 data_date 都是 2026-06-26 ✓
@@ -1906,19 +1911,19 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   - 2330 (台積電): 股價=2390 (API 6/25 收盤), data_date=2026-06-26
 【已知問題】
   - TWSE STOCK_DAY_ALL API 收盤後可能過幾個小時才 flush
-  - 實例：2026-06-26 20:32 抓、API 還停在 6/25
-  - 修法：隔日 08:00 後重抓、或是改用 MIS 即時 API (但一次只能抓 10 檔、太慢)
+  - 實例:2026-06-26 20:32 抓、API 還停在 6/25
+  - 修法:隔日 08:00 後重抓、或是改用 MIS 即時 API (但一次只能抓 10 檔、太慢)
   - status bar 提示「TWSE API 尚未 flush、今日收盤價需等 API 更新」
 【test】tests/test_data_date_column.py 重寫
-  - 舊：data_date 從 STOCK_DAY_ALL Date 欄位讀
-  - 新：data_date 一律 = today (不管 API 給什麼)
+  - 舊:data_date 從 STOCK_DAY_ALL Date 欄位讀
+  - 新:data_date 一律 = today (不管 API 給什麼)
   - 全部 464 passed / 0 failed (含重寫的 7 個 test)
 
 
 ════════════════════════════════════════════════════════════════════════════════
 【V0.9.5-info3】2026-06-27 00:35 (股價與 data_date 是同一個時點的真實狀態)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-27 00:17 反映：
+【背景】William 2026-06-27 00:17 反映:
   - V0.9.5-info2 的「data_date 一律 = today」有問題
   - 「手動選股資料日期要最後收盤日期及收盤價格才對」
   - info2 導致「日期統一、價格是昨日」的混亂狀態 (TWSE STOCK_DAY_ALL 沒 flush)
@@ -1968,8 +1973,8 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 ════════════════════════════════════════════════════════════════════════════════
 【v1.0.1 HOTFIX #2】2026-06-24 06:50 (William 06:45 重跑回測又炸、補 import)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-24 06:45 重跑回測、修完 datetime 後又炸：
-  ❌ 回測失敗：name 'get_column_letter' is not defined
+【背景】William 2026-06-24 06:45 重跑回測、修完 datetime 後又炸:
+  ❌ 回測失敗:name 'get_column_letter' is not defined
   Traceback (most recent call last):
     File "source/StockTool.py", line 5581, in worker
       result = run_pipeline(cfg, self.logger)
@@ -1982,41 +1987,41 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 
 【意外發現】寫 lint test 順便抓出還有其他漏的
 - stocktool/gui/calendar.py 有 from datetime import date, timedelta、但檔案內 4 處用 datetime.xxx()、漏 import datetime
-  - 修法：from datetime import date, datetime, timedelta 加進去
+  - 修法:from datetime import date, datetime, timedelta 加進去
 
 【修法】2 個檔案各加 1 行
 - pipeline.py: import requests 之後加 from openpyxl.utils import get_column_letter
-- gui/calendar.py: from datetime import date, datetime, timedelta（原本只 import date, timedelta）
+- gui/calendar.py: from datetime import date, datetime, timedelta(原本只 import date, timedelta)
 
 【評估】
 - 一樣是一行 import 修一個 bug
 - 寫精準 lint test 抓出來、不用等 William 實際跑才炸
-- 1 次 hotfix 抓 2 個 import 漏（pipeline + calendar）
+- 1 次 hotfix 抓 2 個 import 漏(pipeline + calendar)
 
-【test】tests/test_v1_1_imports_lint.py（新、14 個）
+【test】tests/test_v1_1_imports_lint.py(新、14 個)
 - TestExternalImportLint: 結構性 lint 掃全部 stocktool/ 模組
   - test_no_openpyxl_usage_without_import
   - test_no_datetime_usage_without_import
 - TestPipelineGetColumnLetter: pipeline 有 import get_column_letter
 - TestNoNameErrorAtImport: 11 個 stocktool/ 模組都能順利 import 不炸
-- 全部 430 passed (416 既有 + 14 新）、0 failed
+- 全部 430 passed (416 既有 + 14 新)、0 failed
 
 【沒動】
 - VERSION / App title / User-Agent 仍是 v1.0
-- StockTool.py 本體邏輯沒改（純 hotfix + fileheader）
+- StockTool.py 本體邏輯沒改(純 hotfix + fileheader)
 - 使用手冊不需更新
 
 ════════════════════════════════════════════════════════════════════════════════
-【v1.0.1 HOTFIX】2026-06-24 05:55 (William 凌晨跑回測炸掉、5:52 主動反映）
+【v1.0.1 HOTFIX】2026-06-24 05:55 (William 凌晨跑回測炸掉、5:52 主動反映)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-24 05:52 凌晨跑回測、所有股票抓不到歷史日K：
+【背景】William 2026-06-24 05:52 凌晨跑回測、所有股票抓不到歷史日K:
   ❌ [2330] 歷史資料錯誤: name 'datetime' is not defined
   ❌ [2454] 歷史資料錯誤: name 'datetime' is not defined
   ❌ [2308] 歷史資料錯誤: name 'datetime' is not defined
-  ❌ 無歷史資料，請檢查網路連線
+  ❌ 無歷史資料,請檢查網路連線
 
-【根因】v1.1 重構時把 datetime 用法從 StockTool.py 搬到各個新 module（export_excel / backtest / technical）、
-但 import 沒跟著搬、造成 NameError：
+【根因】v1.1 重構時把 datetime 用法從 StockTool.py 搬到各個新 module(export_excel / backtest / technical)、
+但 import 沒跟著搬、造成 NameError:
 - stocktool/export_excel.py  line 65:  datetime.today() (update_stock_history)
 - stocktool/backtest.py       line 351: datetime.now()
 - stocktool/technical.py      line 26:  datetime.today() (calc_enhanced_tech_indicators)
@@ -2028,104 +2033,104 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 
 【評估】
 - 一行 import 修一個 bug、零風險
-- 其他 datetime 子項目（date / timedelta）全專案無使用、未漏
-- 為什麼之前測試沒抓到：update_stock_history / calc_enhanced_tech_indicators 都是要走 fetch 流程才會被呼叫、
+- 其他 datetime 子項目(date / timedelta)全專案無使用、未漏
+- 為什麼之前測試沒抓到:update_stock_history / calc_enhanced_tech_indicators 都是要走 fetch 流程才會被呼叫、
   既有 test 都用 mock 跳過、所以漏到 William 實際跑才炸
 - 順便寫結構性 lint test 守全部 stocktool/ module
-  （任何檔案「用 datetime.XXX 但沒 import datetime」就 fail）→ 避免下次重構又漏
+  (任何檔案「用 datetime.XXX 但沒 import datetime」就 fail)→ 避免下次重構又漏
 
 【test】
-- tests/test_v1_1_datetime_imports.py（新、5 個）
+- tests/test_v1_1_datetime_imports.py(新、5 個)
   - TestDatetimeImportPresence: 3 個 module 都有 datetime import
   - TestUpdateStockHistoryCallable: update_stock_history 走 update 分支不 NameError
   - TestDatetimeUsageLint: 結構性 lint 掃全部 stocktool/ module
-- 全部 416 passed (411 既有 + 5 新）、0 failed
+- 全部 416 passed (411 既有 + 5 新)、0 failed
 
 【沒動的】
 - VERSION 還是 v1.0、App title 還是 v1.0-GUI、User-Agent 還是 v1.0-GUI
-- StockTool.py 本體沒改（只動 fileheader）、完全 hotfix 性質
-- 使用手冊不需要更新（v1.0 行為不變）
+- StockTool.py 本體沒改(只動 fileheader)、完全 hotfix 性質
+- 使用手冊不需要更新(v1.0 行為不變)
 
 ════════════════════════════════════════════════════════════════════════════════
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1.1 HOTFIX】2026-06-24 09:15 (William 09:12 反映、買賣記錄 refresh 位置錯)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 09:12 反映：
+【背景】William 09:12 反映:
 - 開 App 進「買賣記錄 Tab」沒有 refresh 資料
 - 要先去「主動式 ETF Tab」才有資料
 - trigger refresh 的動作應該放錯位置
 
 【根因】v0.9.5-tab-split 重排 Tab 順序時、`_on_tab_changed` 的 index 沒跟著改
-- 原本 Tab 順序：策略(0) / 買賣記錄(1) / 手動選股(2) → refresh index = 1 正確
-- 現今 Tab 順序：系統選股(0) / ETF(1) / 手動選股(2) / 買賣記錄(3) / 回測(4)
+- 原本 Tab 順序:策略(0) / 買賣記錄(1) / 手動選股(2) → refresh index = 1 正確
+- 現今 Tab 順序:系統選股(0) / ETF(1) / 手動選股(2) / 買賣記錄(3) / 回測(4)
 - refresh index 仍是 1、但 index 1 現在是 ETF Tab
-- 結果：切 ETF Tab 才會 trigger 買賣記錄 refresh
+- 結果:切 ETF Tab 才會 trigger 買賣記錄 refresh
 
-【意外發現】_portfolio_refresh_loop 也有同樣 bug（line 2751 的 `if current != 1`）
+【意外發現】_portfolio_refresh_loop 也有同樣 bug(line 2751 的 `if current != 1`)
 - 同樣要改成 `current != 3`
 
 【修法】3 個改動
-- StockTool.py line 2705: `if current == 1` → `if current == 3`（_on_tab_changed）
-- StockTool.py line 2751: `if current != 1` → `if current != 3`（_portfolio_refresh_loop）
+- StockTool.py line 2705: `if current == 1` → `if current == 3`(_on_tab_changed)
+- StockTool.py line 2751: `if current != 1` → `if current != 3`(_portfolio_refresh_loop)
 - tests/test_portfolio_refresh_loop.py: 所有 `current_tab=1` 改成 `current_tab=3`
 
-【寫新 test】tests/test_notebook_portfolio_tab_consistency.py（新、7 個）
+【寫新 test】tests/test_notebook_portfolio_tab_consistency.py(新、7 個)
 - TestNotebookTabOrder: 結構性 lint、用 AST 掃 notebook.add() 順序與 _on_tab_changed index 一致
   - test_portfolio_tab_is_index_3
   - test_etf_tab_is_index_1
   - test_on_tab_changed_index_matches_portfolio_tab
 - TestOnTabChangedBehavior: mock notebook 測 4 個不同 tab 的 refresh 行為
-  - test_切到買賣記錄_tab_觸發_refresh（進買賣記錄應 refresh）
-  - test_切到_etf_tab_不觸發_refresh（進 ETF **不應** refresh 買賣記錄、防本次 bug 重現）
+  - test_切到買賣記錄_tab_觸發_refresh(進買賣記錄應 refresh)
+  - test_切到_etf_tab_不觸發_refresh(進 ETF **不應** refresh 買賣記錄、防本次 bug 重現)
   - test_切到系統選股_tab_不觸發_refresh
   - test_切到回測模擬_tab_不觸發_refresh
-- 全部 437 passed (430 既有 + 7 新）、0 failed
+- 全部 437 passed (430 既有 + 7 新)、0 failed
 
 【評估】
-- 一個字（1 → 3）修一個 bug、零風險
-- 原本測試为何沒抓到：test 的 mock 用 `current_tab=1` 模擬買賣記錄、跟實際 notebook 結構對不上
+- 一個字(1 → 3)修一個 bug、零風險
+- 原本測試为何沒抓到:test 的 mock 用 `current_tab=1` 模擬買賣記錄、跟實際 notebook 結構對不上
   → test 世界觀跟 code 世界觀不一致、雙方都通過但實際行為壞
-- 新增的 consistency test 守住：「notebook 結構」跟「trigger index」是連動關係
+- 新增的 consistency test 守住:「notebook 結構」跟「trigger index」是連動關係
   → 未來 Tab 重排時、如果忘記同步 trigger index、pytest 立刻抓出來
 
 【沒動】
 - VERSION 仍是 v1.1、App title 仍是 v1.1、User-Agent 仍是 v1.1
-- 使用手冊 v1.1.docx 不需更新（UX 行為不變）
+- 使用手冊 v1.1.docx 不需更新(UX 行為不變)
 
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1.1 HOTFIX #2】2026-06-24 10:45 (William 10:39 反映、ETF 排序需求)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 10:39 反映：ETF 選股後的排序應改為：
+【背景】William 10:39 反映:ETF 選股後的排序應改為:
 - 今日有異動的股票優先
-- 有異動者：依 total_change_lots 降序（由大到小）
-- 無異動者：在底部、保持原有 etf_count 順序
+- 有異動者:依 total_change_lots 降序(由大到小)
+- 無異動者:在底部、保持原有 etf_count 順序
 
 【修法】_etf_display_results 中的 sort 逻辑
-- 舊：df.sort_values("etf_count", ascending=False)
-- 新：以 today_mover 為第一 key（True > False → movers first）
+- 舊:df.sort_values("etf_count", ascending=False)
+- 新:以 today_mover 為第一 key(True > False → movers first)
   + 第二 key 為 total_change_lots 降序
-  + 結果：movers 前、依張數大→小；non-movers 在底部
+  + 結果:movers 前、依張數大→小;non-movers 在底部
 
 【沒動】
 - VERSION / App title / User-Agent 仍是 v1.1
-- 使用手冊不需更新（只有內部排序邏輯變化）
+- 使用手冊不需更新(只有內部排序邏輯變化)
 
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1.1 HOTFIX #3】2026-06-24 21:36 (William 21:35 反映、評分系統 UI 選項重排)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 21:35 反映：「因子權重」是「多因子評分」的參數、「⚙ 簡易評分進階設定」是「簡易評分」的參數。
+【背景】William 21:35 反映:「因子權重」是「多因子評分」的參數、「⚙ 簡易評分進階設定」是「簡易評分」的參數。
 原本順序是 多因子/簡易評分 radio → 因子權重 entries → ⚙ 簡易評分進階設定 button、
-因子權重跟簡易評分 button 跨在兩者中間，看起來怪怪的。
+因子權重跟簡易評分 button 跨在兩者中間,看起來怪怪的。
 
 【修法】評分系統 UI 重排
-- 舊順序：
+- 舊順序:
     ○ 多因子評分 (動能+成長)
     ● 簡易評分 (可調權重+門檻)
     因子權重:
       動能1M / 動能3M / 動能6M / 營收YoY / EPS YoY
     [⚙ 簡易評分進階設定]
 
-- 新順序（用 padx=20 縮排、讓設定看起來屬於上面那個 radio）：
+- 新順序(用 padx=20 縮排、讓設定看起來屬於上面那個 radio):
     ○ 多因子評分 (動能+成長)
         因子權重:
           動能1M / 動能3M / 動能6M / 營收YoY / EPS YoY
@@ -2138,7 +2143,7 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 
 【沒動】
 - VERSION / App title / User-Agent 仍是 v1.1
-- 使用手冊不需更新（純 UI 重排）
+- 使用手冊不需更新(純 UI 重排)
 
 【v1.1.1 HOTFIX #4】2026-06-24 21:55 (William 21:48 反映、系統選股殖利率與 EPSYoY 兩個 bug)
 ════════════════════════════════════════════════════════════════════════════════
@@ -2146,30 +2151,30 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 【背景 2】William 21:48 反映 3490 EPSYoY 顯示 4040%、應該 476%
 
 【Bug 1】系統選股殖利率 只用「殖利率(估)」=(EPS×0.7/股價)、不是實際現金殖利率
-- 預期：fetch_dividend DB 合併 FinMind 股利資料、殖利率優先用 GoodInfo 實際殖利率
-- 舊：run_pipeline 完全不 fetch 股利資料、殖利率欄始終是估算值
-- 新：run_pipeline 跟 manual 一樣呼叫 _fetch_finmind_dividend(skip_remote=True)、
-      並把今年現金殖利率_goodinfo（單位 %）÷100 變成小數、覆寫「殖利率(估)」
-- 結果：3490 殖利率 0.0446 → 0.0154（1.54%）
+- 預期:fetch_dividend DB 合併 FinMind 股利資料、殖利率優先用 GoodInfo 實際殖利率
+- 舊:run_pipeline 完全不 fetch 股利資料、殖利率欄始終是估算值
+- 新:run_pipeline 跟 manual 一樣呼叫 _fetch_finmind_dividend(skip_remote=True)、
+      並把今年現金殖利率_goodinfo(單位 %)÷100 變成小數、覆寫「殖利率(估)」
+- 結果:3490 殖利率 0.0446 → 0.0154(1.54%)
 
 【Bug 2】3490 EPSYoY 快取值 4040% 是計算陷阱
-- 根因：本期 Q1（2026Q1）、但 DB 沒有 2025Q1
+- 根因:本期 Q1(2026Q1)、但 DB 沒有 2025Q1
        → fallback 用 2025Q4 全年 EPS = 0.05
        → (2.07 - 0.05) / 0.05 = 40.4 = 4040%
        Q1 vs 全年 是錯的比較、數字爆炸
-- 舊：fetch_eps_latest Q1/Q2/Q3 也適用 Q4 fallback
-- 新：只有本期 Q4 才適用 Q4 全年 fallback；Q1/Q2/Q3 → 留空等 GoodInfo 覆蓋
-- 額外防兌：cache 驗證加入「YoY>500% 或 <-99%」檢查、強制重抓讓 GoodInfo 覆蓋
+- 舊:fetch_eps_latest Q1/Q2/Q3 也適用 Q4 fallback
+- 新:只有本期 Q4 才適用 Q4 全年 fallback;Q1/Q2/Q3 → 留空等 GoodInfo 覆蓋
+- 額外防兌:cache 驗證加入「YoY>500% 或 <-99%」檢查、強制重抓讓 GoodInfo 覆蓋
 
 【修法檔案】
-- source/stocktool/pipeline.py：合併 FinMind 股利 + 殖利率優先 GoodInfo
-- source/stocktool/cache.py：快取加入可疑 YoY 檢查
-- source/stocktool/fetch_market.py：Q1/Q2/Q3 不適用 Q4 fallback
-- source/cache/eps.xlsx：刪除（舊快取 4040% 不會自動消失、強制重抓）
+- source/stocktool/pipeline.py:合併 FinMind 股利 + 殖利率優先 GoodInfo
+- source/stocktool/cache.py:快取加入可疑 YoY 檢查
+- source/stocktool/fetch_market.py:Q1/Q2/Q3 不適用 Q4 fallback
+- source/cache/eps.xlsx:刪除(舊快取 4040% 不會自動消失、強制重抓)
 
-【測試】+7 個（437 → 444）
-- tests/test_eps_yoy_q4_fallback_bug.py (5)：Q1 不適用 Q4 fallback、cache 可疑值重抓
-- tests/test_pipeline_dividend_merge.py (2)：殖利率優先 GoodInfo、沒資料走估算
+【測試】+7 個(437 → 444)
+- tests/test_eps_yoy_q4_fallback_bug.py (5):Q1 不適用 Q4 fallback、cache 可疑值重抓
+- tests/test_pipeline_dividend_merge.py (2):殖利率優先 GoodInfo、沒資料走估算
 
 【沒動】
 - VERSION / App title / User-Agent 仍是 v1.1
@@ -2183,13 +2188,13 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   AttributeError: '_tkinter.tkapp' object has no attribute '_preset_vars'
   File "_init_tab_presets_on_startup", line 2607, in `if tab_key in self._preset_vars:`
 
-【根因】Fix14 「開機自動載入 Preset」（v0.9.5-alpha 5th commit）加的 _init_tab_presets_on_startup
-是在 _build_ui 開頭就 call（line 2076）、但 self._preset_vars = {} 是 _add_preset_bar 內部才設定。
+【根因】Fix14 「開機自動載入 Preset」(v0.9.5-alpha 5th commit)加的 _init_tab_presets_on_startup
+是在 _build_ui 開頭就 call(line 2076)、但 self._preset_vars = {} 是 _add_preset_bar 內部才設定。
 原設計靠 _add_preset_bar 內的 `if not hasattr` defensive check 判斷是不是第一次、決定要不要 init。
 但 _init 比 _add 還早 → hasattr 還是 False → 沒人 init → 讀取時 AttributeError。
 
 【修法】_build_ui 一進來就預先初始化 self._preset_vars = {} 和 self._preset_combos = {}
-（_add_preset_bar 內的 hasattr check 仍保留當安全網）
+(_add_preset_bar 內的 hasattr check 仍保留當安全網)
 
 【新增 test】
 - tests/test_init_tab_presets_init_order.py (3 個)
@@ -2209,13 +2214,13 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
   AttributeError: '_tkinter.tkapp' object has no attribute 'vars'
   File \"_apply_tab_values\", line 2545, in `var = self.vars.get(k)`
 
-【根因】同 #5 的問題但套用另一個變數：
+【根因】同 #5 的問題但套用另一個變數:
 - _init_tab_presets_on_startup → _apply_tab_values → self.vars.get(k)
-- self.vars = {} 原來在 line 2140 才設定（在 _init 2111 之後）
+- self.vars = {} 原來在 line 2140 才設定(在 _init 2111 之後)
 - 修法沒涵蓋到這個變數
 
 【修法】_build_ui 一進來連同 self.vars = {} 也一起初始化
-（目前 _preset_vars / _preset_combos / vars 都在 _build_ui 開頭就 init）
+(目前 _preset_vars / _preset_combos / vars 都在 _build_ui 開頭就 init)
 
 【新增 test】
 - test_build_ui_也初始化_vars (AST 確認)
@@ -2229,28 +2234,28 @@ v25 跑了 v24 的 delta tracking、但截圖仍顯示兩個 hover
 ════════════════════════════════════════════════════════════════════════════════
 【v1.1.1 HOTFIX #7】2026-06-24 22:32 (William 22:24 反映、系統選股 EPSYoY 全是 --)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 22:24 重試 App 後反映：EPSYoY 整欄全是 --（所有股票都沒有資料）。
-剛在 HOTFIX #4 修了 Q1 fallback 讓 Q1 不適用 Q4 全年 EPS（避免 3490 4040% 陷阱），
-但上次的 cache 是修 hotfix 之前寫入的、全部都是 NaN；原本 cache 驗證只測「全 NaN」才重抓。
+【背景】William 22:24 重試 App 後反映:EPSYoY 整欄全是 --(所有股票都沒有資料)。
+剛在 HOTFIX #4 修了 Q1 fallback 讓 Q1 不適用 Q4 全年 EPS(避免 3490 4040% 陷阱),
+但上次的 cache 是修 hotfix 之前寫入的、全部都是 NaN;原本 cache 驗證只測「全 NaN」才重抓。
 
-【根因】cache 驗證覆蓋不足：
-- 舊驗證：df[yoy_col].isna().all() 才重抓
+【根因】cache 驗證覆蓋不足:
+- 舊驗證:df[yoy_col].isna().all() 才重抓
 - 但這個 cache 其實是「有一部分是 None、一部分是 4040%」的狀態
 - 驗證結果走過、讀出來還是錯的
 
-【修法】cache 驗證加進「大部分 NaN」檢查：
-- 舊：isna().all() 才重抓
-- 新：isna().all() 或 NaN>50% 或 有 YoY>500%/<-99% → 重抓
+【修法】cache 驗證加進「大部分 NaN」檢查:
+- 舊:isna().all() 才重抓
+- 新:isna().all() 或 NaN>50% 或 有 YoY>500%/<-99% → 重抓
 
-【手動預重抓】順手手動重抓一次、寫入 cache、讓 William 重啟 App 就拿到正確資料：
+【手動預重抓】順手手動重抓一次、寫入 cache、讓 William 重啟 App 就拿到正確資料:
 - 1808 (潤隆) 807.0% / 9946 (三發地產) 3300.0% / 5386 (青雲) 3290.0%
-- 6219 / 6015 / 2442 仍是 NaN（GoodInfo 本來就沒資料、預期行為）
+- 6219 / 6015 / 2442 仍是 NaN(GoodInfo 本來就沒資料、預期行為)
 
-【測試】+3 個（448 → 451）
+【測試】+3 個(448 → 451)
 - tests/test_cache_eps_nan_threshold.py (3 個)
-  · 全 NaN 強制重抓（舊行為）
-  · 60% NaN 強制重抓（新行為）
-  · 30% NaN 不重抓（合理）
+  · 全 NaN 強制重抓(舊行為)
+  · 60% NaN 強制重抓(新行為)
+  · 30% NaN 不重抓(合理)
 
 【沒動】VERSION / App title / User-Agent 仍是 v1.1
 
@@ -2270,18 +2275,18 @@ console log 顯示「⚠️ 讀取 ...12QEPSRate.xls 失敗: `Import lxml` faile
 - 所有 EPSYoY = NaN、EPSYoY 顯示為 --
 
 【修法】
-1. 新增 requirements.txt （之前竟沒這個檔）
+1. 新增 requirements.txt (之前竟沒這個檔)
    - 加上 lxml>=4.9
    - 加註解說明 GoodInfo .xls 需要 lxml 才能 read_html
 2. _load_goodinfo_12q_epsrate(logger=self.logger) 開頭先 import lxml 檢查
-   - 缺 lxml → 印 friendly error message（告知 pip install -r requirements.txt）
+   - 缺 lxml → 印 friendly error message(告知 pip install -r requirements.txt)
    - 早退 return {}
-3. 順手重抓一次 cache、寫入正確資料 （1583/1968 檔有 YoY）
+3. 順手重抓一次 cache、寫入正確資料 (1583/1968 檔有 YoY)
 
-【測試】+2 個（451 → 453）
+【測試】+2 個(451 → 453)
 - tests/test_load_goodinfo_lxml_check.py
-  · test_沒裝lxml_早退且不crash（mock ImportError 驗證早退）
-  · test_有裝lxml_正常載入（有檔案時 ≥1 檔）
+  · test_沒裝lxml_早退且不crash(mock ImportError 驗證早退)
+  · test_有裝lxml_正常載入(有檔案時 ≥1 檔)
 
 【為什麼 HOTFIX #4-#7 沒抓到這個】
 - fix #4 修 fetch_eps_latest Q1 fallback、但需 GoodInfo 才能覆盖
@@ -2311,8 +2316,8 @@ console log 顯示「⚠️ 讀取 ...12QEPSRate.xls 失敗: `Import lxml` faile
 - refactor-6b:  抽 export_excel.py + pipeline.py   (cc09688)
 - refactor-7a:  抽 gui/calendar.py                 (2386764)
 
-最終結構：
-- source/StockTool.py        ← 主視窗 + GUI 控制器（4700+ → 本版本）
+最終結構:
+- source/StockTool.py        ← 主視窗 + GUI 控制器(4700+ → 本版本)
 - source/stocktool/__init__.py
 - source/stocktool/config.py    ← StrategyConfig / GuiLogger / VERSION / HISTORY_DIR / find_col / build_session
 - source/stocktool/cache.py     ← save_cache / load_cache / get_or_fetch / 市場時段判斷
@@ -2326,18 +2331,18 @@ console log 顯示「⚠️ 讀取 ...12QEPSRate.xls 失敗: `Import lxml` faile
 - source/stocktool/pipeline.py   ← run_pipeline 主流程組合
 - source/stocktool/gui/calendar.py ← _CalendarDialog 日期選單
 
-【修法】所有被依賴的 module 透渦 lazy import 避免 import cycle：
-- 例：fetch_market.py 在 fetch_twse_history 內 `from . import export_excel as _export_excel`
-- 例：pipeline.py 從各個 module import 所需函式
+【修法】所有被依賴的 module 透渦 lazy import 避免 import cycle:
+- 例:fetch_market.py 在 fetch_twse_history 內 `from . import export_excel as _export_excel`
+- 例:pipeline.py 從各個 module import 所需函式
 
 【評估】
 - 使用者介面、Tab、功能、輸入輸出全部不變 → 完全向後相容 v1.0
-- 程式碼結構提升：4787 行變成 13 個 module、各自 < 1300 行、未來維護更方便
-- 開發體驗提升：每個 module 可單獨測試、不再需動整個 StockTool.py
-- 風險：低（全部 430 test pass、實際回測實戰跑過 5 次皆無 error）
+- 程式碼結構提升:4787 行變成 13 個 module、各自 < 1300 行、未來維護更方便
+- 開發體驗提升:每個 module 可單獨測試、不再需動整個 StockTool.py
+- 風險:低(全部 430 test pass、實際回測實戰跑過 5 次皆無 error)
 
-【修記】v1.1 重構期間爆發 7 個 import 漏 bug（5a2fcf4 / b13fe5b / 233d22a / ac1ea8d / ee46639 / 676d74c / 5c6b10d）
-- 結構性 lint test 已寫：未來任何 stocktool/ module 漏 import 會被 pytest 立刻抓出來
+【修記】v1.1 重構期間爆發 7 個 import 漏 bug(5a2fcf4 / b13fe5b / 233d22a / ac1ea8d / ee46639 / 676d74c / 5c6b10d)
+- 結構性 lint test 已寫:未來任何 stocktool/ module 漏 import 會被 pytest 立刻抓出來
 - 全部 430 passed (411 → 430、7 個 hotfix + 12 個結構性 lint)
 
 【version bump】
@@ -2349,73 +2354,73 @@ console log 顯示「⚠️ 讀取 ...12QEPSRate.xls 失敗: `Import lxml` faile
 ════════════════════════════════════════════════════════════════════════════════
 【v1.0.1 HOTFIX #2】2026-06-24 06:50 (William 06:45 重跑回測又炸、補 import)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-24 06:45 重跑回測、修完 datetime 後又炸：
+【背景】William 2026-06-24 06:45 重跑回測、修完 datetime 後又炸:
 
 [6049 more lines in use offset=17 to continue]
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 14:10 反映：ETF 選股和手動選股的「📤 匯出 Excel」按鈕位置和名稱都跟系統選股的「💾 匯出股票清單」不一致、改一致
+【背景】William 14:10 反映:ETF 選股和手動選股的「📤 匯出 Excel」按鈕位置和名稱都跟系統選股的「💾 匯出股票清單」不一致、改一致
 【修法】
 1. ETF tab 拿掉左邊參數區的「📤 匯出 Excel」按鈕
 2. 手動選股 tab 拿掉左邊參數區的「📤 匯出 Excel」按鈕
-3. 三個 tab 統一在右上面板右邊放「💾 匯出股票清單」按鈕（跟 select_tab 同名、同位置）
-4. ETF / 手動選股 right_frame 結構調整成跟 select_tab 一致：
-   - ttk.Frame（不是 LabelFrame）→ right_top（title + button）→ tree_frame
+3. 三個 tab 統一在右上面板右邊放「💾 匯出股票清單」按鈕(跟 select_tab 同名、同位置)
+4. ETF / 手動選股 right_frame 結構調整成跟 select_tab 一致:
+   - ttk.Frame(不是 LabelFrame)→ right_top(title + button)→ tree_frame
 5. 初始 state="disabled"、有資料時 _ms_display_results / _etf_display_results 結尾 enable
 6. fileheader / VERSION / User-Agent 同步到 phase3-G
 7. 8 個 pytest test 守住
 
 【評估】
-- 拿掉 2 個按鈕、加 2 個按鈕：總按鈕數不變、UX 完全一致
-- 風險：低（_ms_export_excel / _etf_export_excel 簽名不變、按鈕初始 disabled 避免誤觸）
+- 拿掉 2 個按鈕、加 2 個按鈕:總按鈕數不變、UX 完全一致
+- 風險:低(_ms_export_excel / _etf_export_excel 簽名不變、按鈕初始 disabled 避免誤觸)
 
 
 ════════════════════════════════════════════════════════════════════════════════
-【v1.0 正式版】2026-06-23 14:42 (William 要求）
+【v1.0 正式版】2026-06-23 14:42 (William 要求)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 09:55 反映 2 個問題：
-1. ETF 持股篩選的「今日異動」欄位全是 --（沒資料）
-2. Cache 只記日期不記時間、跨日才重抓不夠精準（盤前/盤後該重抓時不重抓）
+【背景】William 09:55 反映 2 個問題:
+1. ETF 持股篩選的「今日異動」欄位全是 --(沒資料)
+2. Cache 只記日期不記時間、跨日才重抓不夠精準(盤前/盤後該重抓時不重抓)
 
 【修法】
 1. FixA: ETF shares 寫進 DB
-   - 根因：build_etf_holdings_table 沒把 shares 放進 long_df → _save_etf_holdings_to_db 寫入 DB 全是 0 → _compute_etf_changes 算 change_lots 全 0 → 顯示 --
-   - 修法：build_etf_holdings_table 加 shares + industry 欄位 → long_df 帶 shares → DB 寫對
-   - migration：一次性重抓今天的 ETF 持股、把 shares 補回 DB（昨天的 shares 補不回去、明天起正常）
+   - 根因:build_etf_holdings_table 沒把 shares 放進 long_df → _save_etf_holdings_to_db 寫入 DB 全是 0 → _compute_etf_changes 算 change_lots 全 0 → 顯示 --
+   - 修法:build_etf_holdings_table 加 shares + industry 欄位 → long_df 帶 shares → DB 寫對
+   - migration:一次性重抓今天的 ETF 持股、把 shares 補回 DB(昨天的 shares 補不回去、明天起正常)
    - 4 個 pytest test 守住
 
 2. FixB: Cache 加時間邏輯
-   - 根因：save_cache 只寫 last_update（YYYY-MM-DD）、不寫時間
-   - 場景：昨天 09:30 抓的 cache 到今天 14:00 被視為「有效」（因為 last_update == today）
+   - 根因:save_cache 只寫 last_update(YYYY-MM-DD)、不寫時間
+   - 場景:昨天 09:30 抓的 cache 到今天 14:00 被視為「有效」(因為 last_update == today)
      但 cache 內容是 09:30 的盤中價、不是 14:00 的收盤價
-   - 修法：
+   - 修法:
      a. save_cache 多寫 last_update_time (HH:MM:SS)
      b. load_cache 多回傳 time (向後相容、舊 cache time=None)
-     c. 新增 _is_price_cache_valid(date, time) helper：
-        - 收盤後（>= 13:30 或半日盤 13:00）：cache date == 今天 且 cache time >= 今天收盤時間 → 有效
-        - 收盤前（< 09:00）：cache date == 昨天 且 cache time >= 昨天收盤時間 → 有效
-        - 其他（含盤中）：過期、需重抓
-     d. get_or_fetch 對 price 走新邏輯（revenue/eps 仍用舊 last_update == today 判斷）
-   - 15 個 pytest test 守住（含半日盤、週末、邊界）
+     c. 新增 _is_price_cache_valid(date, time) helper:
+        - 收盤後(>= 13:30 或半日盤 13:00):cache date == 今天 且 cache time >= 今天收盤時間 → 有效
+        - 收盤前(< 09:00):cache date == 昨天 且 cache time >= 昨天收盤時間 → 有效
+        - 其他(含盤中):過期、需重抓
+     d. get_or_fetch 對 price 走新邏輯(revenue/eps 仍用舊 last_update == today 判斷)
+   - 15 個 pytest test 守住(含半日盤、週末、邊界)
 
 3. 順手修 test 隔離 bug (pre-existing)
-   - 根因：多個 test 直接 st._fetch_finmind_dividend = lambda 沒還原 → 後面 test_dividend_yield_fix 跑時仍是 mock 版
-   - 修法：tests/conftest.py 加 autouse fixture、每個 test 後還原 _fetch_finmind_dividend
-   - 效果：全部 407 個 test 一起跑 100% pass（原本 3 個會 fail）
+   - 根因:多個 test 直接 st._fetch_finmind_dividend = lambda 沒還原 → 後面 test_dividend_yield_fix 跑時仍是 mock 版
+   - 修法:tests/conftest.py 加 autouse fixture、每個 test 後還原 _fetch_finmind_dividend
+   - 效果:全部 407 個 test 一起跑 100% pass(原本 3 個會 fail)
 
-4. FixA2: today_change_lots 欄位名稱（2026-06-23 12:12 William 反映）
-   - 根因：_compute_etf_changes 回傳 today_change_lots，但 _etf_display_results / _show_etf_popup 用 change_lots → KeyError
-   - 修法：兩處都改 today_change_lots
+4. FixA2: today_change_lots 欄位名稱(2026-06-23 12:12 William 反映)
+   - 根因:_compute_etf_changes 回傳 today_change_lots,但 _etf_display_results / _show_etf_popup 用 change_lots → KeyError
+   - 修法:兩處都改 today_change_lots
 
 5. FixA3: column-missing 檢查移到 market-hours early-return 前面
-   - 根因：test_get_or_fetch_cache缺欄位_自動重抓 fail — column-missing 檢查本來在 last_update == today 分支內，但 market-hours early-return 在前面
-   - 修法：把 price cache 的 column-missing 檢查移到 get_or_fetch 最前面（結構問題優先於時間判斷）
+   - 根因:test_get_or_fetch_cache缺欄位_自動重抓 fail - column-missing 檢查本來在 last_update == today 分支內,但 market-hours early-return 在前面
+   - 修法:把 price cache 的 column-missing 檢查移到 get_or_fetch 最前面(結構問題優先於時間判斷)
 
 【評估】
-- FixA：ETF shares 是根本修正、不修就永遠顯示 --
-- FixB：cache 時間精準度提升、不會重抓舊 cache 也不會忘記抓新 cache
-- FixA2：DB migration 後才爆的 bug、要順便修
-- FixA3：test 發現的結構問題、要順便修
-- 風險：低（向後相容舊 cache、Fixture 不影響其他 test）
+- FixA:ETF shares 是根本修正、不修就永遠顯示 --
+- FixB:cache 時間精準度提升、不會重抓舊 cache 也不會忘記抓新 cache
+- FixA2:DB migration 後才爆的 bug、要順便修
+- FixA3:test 發現的結構問題、要順便修
+- 風險:低(向後相容舊 cache、Fixture 不影響其他 test)
 
 【test】
 - FixA: test_etf_long_df_shares.py (4 個)
@@ -2425,99 +2430,99 @@ console log 顯示「⚠️ 讀取 ...12QEPSRate.xls 失敗: `Import lxml` faile
 - 共 411 passed、0 failed
 
 ════════════════════════════════════════════════════════════════════════════════
-【v0.9.5-tab-split-phase3-F 新增內容】2026-06-22 14:00 (William 要求）
+【v0.9.5-tab-split-phase3-F 新增內容】2026-06-22 14:00 (William 要求)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 13:52 反映：拿掉右鍵選單的「全選/全不選」、因為 header checkbox 已能全選/全不選、右鍵多一重入口多餘
+【背景】William 13:52 反映:拿掉右鍵選單的「全選/全不選」、因為 header checkbox 已能全選/全不選、右鍵多一重入口多餘
 【修法】
-1. 拿掉 4 個右鍵 handler method：
-   - _on_select_tree_rclick（select_tree / backtest_tree 共用）
-   - _etf_tree_rclick_new（etf_tree）
-   - _ms_tree_rclick（ms_tree、原本是 dead code 被 _ms_show_context_menu 覆蓋）
-   - _ms_show_context_menu（ms_tree）
-2. 拿掉 4 個 <Button-3> bind：results_tree / _etf_tree / _ms_tree 兩次
+1. 拿掉 4 個右鍵 handler method:
+   - _on_select_tree_rclick(select_tree / backtest_tree 共用)
+   - _etf_tree_rclick_new(etf_tree)
+   - _ms_tree_rclick(ms_tree、原本是 dead code 被 _ms_show_context_menu 覆蓋)
+   - _ms_show_context_menu(ms_tree)
+2. 拿掉 4 個 <Button-3> bind:results_tree / _etf_tree / _ms_tree 兩次
 3. _etf_select_* / _ms_select_* / _select_* methods 保留
-   （heading click 內部會叫、這些 method 是核心邏輯）
+   (heading click 內部會叫、這些 method 是核心邏輯)
 4. fileheader / VERSION / User-Agent 同步更新到 phase3-F
 5. 6 個 pytest test 守住「右鍵選單全選/全不選已拿掉」
 
 【評估】
-- 拿掉 4 個 method + 4 個 bind：code 減少約 30 行、無功能損失
-- 風險：低（header click 是唯一入口、這個入口已是動態 ☐/☑/▣、操作直覺）
+- 拿掉 4 個 method + 4 個 bind:code 減少約 30 行、無功能損失
+- 風險:低(header click 是唯一入口、這個入口已是動態 ☐/☑/▣、操作直覺)
 
 ════════════════════════════════════════════════════════════════════════════════
-【v0.9.5-tab-split-phase3-E 新增內容】2026-06-22 13:50 (William 要求）
+【v0.9.5-tab-split-phase3-E 新增內容】2026-06-22 13:50 (William 要求)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 13:43 反映：篩選結果 console 的勾選欄 header 已可全選/全不選、ETF 和手動選股參數區的全選/全不選按鈕重複、拿掉
+【背景】William 13:43 反映:篩選結果 console 的勾選欄 header 已可全選/全不選、ETF 和手動選股參數區的全選/全不選按鈕重複、拿掉
 【修法】
-1. 拿掉 ETF tab 參數區的 📋 全選 / ☐ 全不選 兩個按鈕（line 7011-7014）
-2. 拿掉手動選股 tab 參數區的 📋 全選 / ☐ 全不選 兩個按鈕（line 7210-7213）
+1. 拿掉 ETF tab 參數區的 📋 全選 / ☐ 全不選 兩個按鈕(line 7011-7014)
+2. 拿掉手動選股 tab 參數區的 📋 全選 / ☐ 全不選 兩個按鈕(line 7210-7213)
 3. _etf_select_all / _etf_select_none / _ms_select_all / _ms_select_none methods 保留
-   （heading click 內部會叫、這些 method 是核心邏輯）
-4. 右鍵選單「☑ 全選 / ☐ 全不選」保留（另一個入口、不佔版面）
+   (heading click 內部會叫、這些 method 是核心邏輯)
+4. 右鍵選單「☑ 全選 / ☐ 全不選」保留(另一個入口、不佔版面)
 5. 3 個 pytest test 守住「參數區按鈕已拿掉」
 
 【評估】
-- 拿掉 4 個按鈕：left_canvas 高度減少約 80px、UI 更精簡
-- 風險：低（methods 保留、header click 和右鍵選單都能觸發全選/全不選）
-- 預計 commit hash：v0.9.5-tab-split-phase3-E
+- 拿掉 4 個按鈕:left_canvas 高度減少約 80px、UI 更精簡
+- 風險:低(methods 保留、header click 和右鍵選單都能觸發全選/全不選)
+- 預計 commit hash:v0.9.5-tab-split-phase3-E
 
 ════════════════════════════════════════════════════════════════════════════════
-【v0.9.5-tab-split-phase3-D 新增內容】2026-06-22 09:35 (William 要求）
+【v0.9.5-tab-split-phase3-D 新增內容】2026-06-22 09:35 (William 要求)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 09:31 反映：結果畫面勾選欄 header 點下去沒反應、rows 都勾起來但 header 還是「☑」看不出反饋
+【背景】William 09:31 反映:結果畫面勾選欄 header 點下去沒反應、rows 都勾起來但 header 還是「☑」看不出反饋
 【修法】
 1. 新增 _update_checkbox_header(tree, checked_dict) helper
    - 0 checked → ☐
    - 全部 checked → ☑
-   - 部分 checked → ▣（混和狀態）
-2. 三個 Treeview 剛 build 時 header 初始顯示設為 ☐（看起來像個 checkbox）
-   - select_tree / backtest_tree（共用 _build_tab_layout）
-   - ms_tree（手動選股）
-   - etf_tree（ETF tab）
+   - 部分 checked → ▣(混和狀態)
+2. 三個 Treeview 剛 build 時 header 初始顯示設為 ☐(看起來像個 checkbox)
+   - select_tree / backtest_tree(共用 _build_tab_layout)
+   - ms_tree(手動選股)
+   - etf_tree(ETF tab)
 3. _select_all / _select_none / _ms_select_all / _ms_select_none / _etf_select_all / _etf_select_none 都會在結尾叫 helper 更新 header
-4. 個別 row toggle（_on_select_tree_click / _ms_toggle_check / _etf_toggle_check）也會叫 helper
-5. ETF tab 的 _etf_toggle_check 補上 heading click → 全選/全不選（原本只處理 cell click）
+4. 個別 row toggle(_on_select_tree_click / _ms_toggle_check / _etf_toggle_check)也會叫 helper
+5. ETF tab 的 _etf_toggle_check 補上 heading click → 全選/全不選(原本只處理 cell click)
 6. 10 個 pytest test 守住 (tests/test_checkbox_header_click.py)
 
 【向上相容】原本的 _select_all / _select_none / _ms_select_* / _etf_select_* 簽名不變、只是多叫 helper
-【受益者】所有用 Treeview checkbox 的 Tab：系統選股、手動選股、ETF、錢測（錢測 Treeview 不含 checkbox、不受影響）
+【受益者】所有用 Treeview checkbox 的 Tab:系統選股、手動選股、ETF、錢測(錢測 Treeview 不含 checkbox、不受影響)
 
 ════════════════════════════════════════════════════════════════════════════════
-【v0.9.5-etf 新增內容】2026-06-19 23:05 (William 要求）
+【v0.9.5-etf 新增內容】2026-06-19 23:05 (William 要求)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 22:53 需求：「增加一個 ETF 成股 Tab」
-- 列出所有台股主動式 ETF 的成股（代號、名稱、最新收盤價、屬於幾個 ETF）
+【背景】William 22:53 需求:「增加一個 ETF 成股 Tab」
+- 列出所有台股主動式 ETF 的成股(代號、名稱、最新收盤價、屬於幾個 ETF)
 - cursor 移到 ETF 數字 → popup 顯示包含此股票的 ETF 列表
 - 排序依 ETF 數量大到小
 - 存成 excel、高亮與手動選股一致
 
 【資料源設計】找 TWSE 官方 API
-- 主動式 ETF 列表：TWSE `/rwd/zh/ETF/activeList` （官方、JSON、過濾只留 domestic、數量隨 TWSE 上市動態變動；2026-06-28 為 20 檔）
-- 前 10 大成股：etfinfo.tw `/etf/{code}` （總覽頁 HTML、SSR 表格、可 parse）
-- 個股收盤價：複用既有 `cache/price.xlsx`
+- 主動式 ETF 列表:TWSE `/rwd/zh/ETF/activeList` (官方、JSON、過濾只留 domestic、數量隨 TWSE 上市動態變動;2026-06-28 為 20 檔)
+- 前 10 大成股:etfinfo.tw `/etf/{code}` (總覽頁 HTML、SSR 表格、可 parse)
+- 個股收盤價:複用既有 `cache/price.xlsx`
 
-【改動】新增 4 個函式在 StockTool.py（fetch_csv_requests 之前）：
-1. `fetch_active_etf_list`：抓 TWSE activeList、過濾只留 domestic
+【改動】新增 4 個函式在 StockTool.py(fetch_csv_requests 之前):
+1. `fetch_active_etf_list`:抓 TWSE activeList、過濾只留 domestic
    · 回傳 DataFrame (etf_code, etf_name)
    · 拿掉 foreign (海外)、bfIncome (債券) 類別
-2. `fetch_etf_top10_holdings`：從 etfinfo.tw parse HTML
+2. `fetch_etf_top10_holdings`:從 etfinfo.tw parse HTML
    · 找「前 10 大成股」section
    · 用 regex parse `<a href="/stock/{code}">{code}</a>`、名稱、權重
    · 回傳 list of dict (stock_code, stock_name, weight)
-3. `build_etf_holdings_table`：完整 long-format table
+3. `build_etf_holdings_table`:完整 long-format table
    · 走全部 domestic 主動式 ETF、每檔抓前 10 大
    · 合併為 (stock_code, stock_name, etf_code, etf_name, weight)
-   · 邊界：單檔失敗不中斷整個抓取
-4. `aggregate_etf_holdings`：合併去重 + 計算 etf_count
+   · 邊界:單檔失敗不中斷整個抓取
+4. `aggregate_etf_holdings`:合併去重 + 計算 etf_count
    · 以 stock_code groupby、計算被幾檔 ETF 持有
-   · 組合成 `etf_list` 字串 ("00981A 主動統一台股增長(9.68%) | 00403A ..."）
+   · 組合成 `etf_list` 字串 ("00981A 主動統一台股增長(9.68%) | 00403A ...")
    · merge price_df 取收盤價
-   · 排序：依 etf_count 由大到小、同票數依股票代號升冪
+   · 排序:依 etf_count 由大到小、同票數依股票代號升冪
 
 【實測驗證】
 - 19 檔 domestic ETF、3 檔 sample 抓 30 筆耗時 2.8 秒
 - 全部 19 檔預估 17 秒可抓完
-- 實例：2330 被 3 檔 ETF 持有 → etf_list = "00980A 主動野村臺灣優選(9.37%) | 00982A 主動群益台灣強棒(8.71%) | 00981A 主動統一台股增長(9.68%)"
+- 實例:2330 被 3 檔 ETF 持有 → etf_list = "00980A 主動野村臺灣優選(9.37%) | 00982A 主動群益台灣強棒(8.71%) | 00981A 主動統一台股增長(9.68%)"
 
 【pytest 新增 10 個】test_etf_holdings.py
 - fetch_active_etf_list_過濾只留domestic
@@ -2526,30 +2531,30 @@ console log 顯示「⚠️ 讀取 ...12QEPSRate.xls 失敗: `Import lxml` faile
 - aggregate_etf_holdings 計算 etf_count / etf_list 字串 / merge 收盤價 / 股價 df 空白
 
 【驗證】
-- pytest：247 passed（+10 新）、3 pre-existing fail（跟本次無關）
-- 下個 commit：加 ETF Tab GUI
-   （已隨 Commit 2 完成）
+- pytest:247 passed(+10 新)、3 pre-existing fail(跟本次無關)
+- 下個 commit:加 ETF Tab GUI
+   (已隨 Commit 2 完成)
 
 ═══════════════════════════════════════════════════════════════════════════════
-【v0.9.5-etf-gui 新增內容】2026-06-19 23:30 (William 23:11 要求）
+【v0.9.5-etf-gui 新增內容】2026-06-19 23:30 (William 23:11 要求)
 ═══════════════════════════════════════════════════════════════════════════════
 【背景】接續 Commit 1 (860360b fetcher)、依 William 23:11「接著做 GUI、不然沒東西可以看」。
 
 【改動】在 StockTool.py 加 ETF Tab UI + 行為
-1. Notebook 註冊新 Tab「📊 主動式 ETF」（在「🔍 手動選股」後面）
-2. `_build_etf_tab`：左面板（篩選 + 按鈕 Canvas+Scrollbar）、右面板（Treeview 5 欄）
-3. Treeview 5 欄：勾選/代號/名稱/收盤價/ETF數
-4. Hover 複用手動選股機制（黃色 / 淺藍 / checked/unchecked tag）
+1. Notebook 註冊新 Tab「📊 主動式 ETF」(在「🔍 手動選股」後面)
+2. `_build_etf_tab`:左面板(篩選 + 按鈕 Canvas+Scrollbar)、右面板(Treeview 5 欄)
+3. Treeview 5 欄:勾選/代號/名稱/收盤價/ETF數
+4. Hover 複用手動選股機制(黃色 / 淺藍 / checked/unchecked tag)
 5. Hover 在「ETF數」欄 → Toplevel popup 顯示完整 ETF 列表
-   · 設計：只在 column #5 才顯示 popup、移開其他欄位會關掉
-   · popup 內容：「📊 2330 台積電 被 3 檔 ETF 持有：」 + 每個 ETF 換行顯示（Text widget）
-6. 勾選複用手動選股 pattern（點第一欄 toggle）
-7. 篩選條件：最少 ETF 數 / 是否限定有收盤價 / 結果上限
-8. 匯出 Excel：跟手動選股同格式、可餵回策略參數 Tab
-9. 開機 2.5 秒自動背景抓取（_etf_auto_startup_fetch）、防止重複的 _etf_fetching flag
+   · 設計:只在 column #5 才顯示 popup、移開其他欄位會關掉
+   · popup 內容:「📊 2330 台積電 被 3 檔 ETF 持有:」 + 每個 ETF 換行顯示(Text widget)
+6. 勾選複用手動選股 pattern(點第一欄 toggle)
+7. 篩選條件:最少 ETF 數 / 是否限定有收盤價 / 結果上限
+8. 匯出 Excel:跟手動選股同格式、可餵回策略參數 Tab
+9. 開機 2.5 秒自動背景抓取(_etf_auto_startup_fetch)、防止重複的 _etf_fetching flag
 
 【程式位置】
-- _build_etf_tab：line 5640（_build_manual_select_tab 之前）
+- _build_etf_tab:line 5640(_build_manual_select_tab 之前)
 - _on_etf_tree_hover / _on_etf_tree_leave / _clear_etf_hover
 - _show_etf_popup / _close_etf_popup
 - _etf_toggle_check / _etf_select_all / _etf_select_none
@@ -2560,20 +2565,20 @@ console log 顯示「⚠️ 讀取 ...12QEPSRate.xls 失敗: `Import lxml` faile
 - _load_price_df
 
 【pytest 新增 15 個】test_etf_tab_gui.py
-- 勾選狀態管理（第一次/第二次/非勾選欄、全選/全不選）
-- 套用篩選（插入/門檻/上限/收盤價過濾）
-- 匯出 Excel 邊界（無資料/未勾選）
-- popup 行為（正常顯示/找不到 iid/close/destroy）
+- 勾選狀態管理(第一次/第二次/非勾選欄、全選/全不選)
+- 套用篩選(插入/門檻/上限/收盤價過濾)
+- 匯出 Excel 邊界(無資料/未勾選)
+- popup 行為(正常顯示/找不到 iid/close/destroy)
 
 【驗證】
-- pytest：262 passed（+15 新）、3 pre-existing fail（跟本次無關）
+- pytest:262 passed(+15 新)、3 pre-existing fail(跟本次無關)
 - 語法檢查通過
 - GUI 尚未實體測試、需 William 開 App 看
 
 ═══════════════════════════════════════════════════════════════════════════════
 【v0.9.5-etf-fix 修 Bug 內容】2026-06-19 23:40 (William 23:37 反映)
 ═══════════════════════════════════════════════════════════════════════════════
-【問題】William 開 App 重現：
+【問題】William 開 App 重現:
 ```
 NameError: cannot access free variable 'e' where it is not associated with a value in enclosing scope
   File "StockTool.py", line 6928, in <lambda>
@@ -2581,7 +2586,7 @@ NameError: cannot access free variable 'e' where it is not associated with a val
 ```
 連兩個 lambda 都是。
 
-【根因】Python closure trap：
+【根因】Python closure trap:
 - `except Exception as e` 在 except 區塊結束後、變數 `e` 會被釋放
 - lambda 是 closure、變數名稱是「綁定到外面 scope」、不是 copy 值
 - `self.after(0, lambda: ...)` 是「延遲 callback」、跑到時 except 已結束 → NameError
@@ -2592,72 +2597,72 @@ NameError: cannot access free variable 'e' where it is not associated with a val
 - 這是 Python 常見 idiom、`functools.partial` 也可但沒那麼簡潔
 
 【同時套用到兩處】
-- `_etf_refresh_holdings` 的 worker（line 6926、6930）
-- `_etf_auto_startup_fetch` 的 worker（line 7073、7075）
+- `_etf_refresh_holdings` 的 worker(line 6926、6930)
+- `_etf_auto_startup_fetch` 的 worker(line 7073、7075)
 - 都涉及 threading + after(0, ...) + except e 的模式
 
 【pytest 新增 3 個】test_etf_closure.py
-- test_closure_default_arg_locks_value：用 default arg 鎖住的 lambda 可正常取值
-- test_closure_default_arg_normal_lambda_will_fail：反向驗證、沒鎖的 lambda 真的會 NameError
-- test_dataclass_arg_locks_agg_df：DataFrame 也用 default arg 鎖
+- test_closure_default_arg_locks_value:用 default arg 鎖住的 lambda 可正常取值
+- test_closure_default_arg_normal_lambda_will_fail:反向驗證、沒鎖的 lambda 真的會 NameError
+- test_dataclass_arg_locks_agg_df:DataFrame 也用 default arg 鎖
 
 【驗證】
-- pytest：265 passed（+3 新）、3 pre-existing fail（跟本次無關）
+- pytest:265 passed(+3 新)、3 pre-existing fail(跟本次無關)
 - 語法檢查通過
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-etf-session-fix 修 Bug 內容】2026-06-20 09:12 (William 09:11 反映)
 ════════════════════════════════════════════════════════════════════════════════
-【問題】William 開 v0.9.5-etf-fix App 後 log 出現：
+【問題】William 開 v0.9.5-etf-fix App 後 log 出現:
 ```
 [09:11:52] ♻️ [price] 資料過期 → 重新下載
-[09:11:52] ✅ 啟動時自動股價完成：2377 筆、股價更新：2026-06-20 09:11:52｜資料日期：2026-06-18
+[09:11:52] ✅ 啟動時自動股價完成:2377 筆、股價更新:2026-06-20 09:11:52|資料日期:2026-06-18
 [09:11:53] 📊 [ETF] 開機自動抓取 ETF 持股...
-[09:11:53] ❌ [ETF] 開機抓取例外：'_tkinter.tkapp' object has no attribute 'session'
+[09:11:53] ❌ [ETF] 開機抓取例外:'_tkinter.tkapp' object has no attribute 'session'
 ```
 ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗」。
 
 【根因】
-- ETF 模組（860360b fetcher + 875f0d2 GUI + cd4527a closure fix）三個版本都誤用 `self.session`
+- ETF 模組(860360b fetcher + 875f0d2 GUI + cd4527a closure fix)三個版本都誤用 `self.session`
 - 但 StockTool 主類別從未定義 `session` 屬性 → AttributeError
-- 其他 fetcher（fetch_prices / fetch_revenue_latest / fetch_eps_latest）的呼叫模式：
+- 其他 fetcher(fetch_prices / fetch_revenue_latest / fetch_eps_latest)的呼叫模式:
   - 在呼叫端 `_s = build_session()` 拿 requests.Session
-  - 再傳 `_s` 進 fetcher（不是 self.xxx）
+  - 再傳 `_s` 進 fetcher(不是 self.xxx)
 - 是 ETF 模組自己 copy 時想成「其他地方都有 session」但其實沒有
 
-【修法】3 處都改用 build_session() 拿 session（跟既有 fetcher 一致）
-- `_etf_refresh` 的 worker（line 6951）
-- `_etf_auto_startup_fetch` 的 worker（line 7103）
-- `_load_price_df` 同步方法（line 7146）
+【修法】3 處都改用 build_session() 拿 session(跟既有 fetcher 一致)
+- `_etf_refresh` 的 worker(line 6951)
+- `_etf_auto_startup_fetch` 的 worker(line 7103)
+- `_load_price_df` 同步方法(line 7146)
 
 【pytest 新增 5 個】test_etf_session_attr.py
-- test_stocktool_no_self_session_attr：用 AST 解析、確保沒有真的 self.session attribute access（排除 docstring / 註解 / 字串干擾）
-- test_etf_workers_use_build_session：3 個觸發點都有 build_session()
-- test_etf_fetchers_accept_session_param：fetch_active_etf_list / fetch_etf_top10_holdings / build_etf_holdings_table 第一個參數都叫 session
-- test_etf_method_compiles：py_compile 編譯通過、確保沒漏逗號
-- test_ast_helper_actually_catches_offenders：反向驗證 helper 能抓到 offender + docstring / 字串不會被誤判
+- test_stocktool_no_self_session_attr:用 AST 解析、確保沒有真的 self.session attribute access(排除 docstring / 註解 / 字串干擾)
+- test_etf_workers_use_build_session:3 個觸發點都有 build_session()
+- test_etf_fetchers_accept_session_param:fetch_active_etf_list / fetch_etf_top10_holdings / build_etf_holdings_table 第一個參數都叫 session
+- test_etf_method_compiles:py_compile 編譯通過、確保沒漏逗號
+- test_ast_helper_actually_catches_offenders:反向驗證 helper 能抓到 offender + docstring / 字串不會被誤判
 
 【驗證】
 - pytest 5 個新 test 全綠、總計 270 passed
-- 3 個 pre-existing fail 在 test_dividend_yield_fix.py（test ordering 問題、單跑全綠、跟本次無關）
+- 3 個 pre-existing fail 在 test_dividend_yield_fix.py(test ordering 問題、單跑全綠、跟本次無關)
 - 語法檢查通過
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-etf-popup-fix 修 Bug 內容】2026-06-20 10:21 (William 10:21 反映)
 ════════════════════════════════════════════════════════════════════════════════
 【問題】William 開 App 把滑鼠 hover 到「2330 台積電」的「ETF 數 18」欄
-- popup 出現但只能看到「金像電子（股）公司」這種擠在一起的文字
+- popup 出現但只能看到「金像電子(股)公司」這種擠在一起的文字
 - 看不出每個 ETF 代號跟名稱、無法閱讀
 
 【根因】
 - aggregate_etf_holdings 用 " | " 把 18 個 ETF 串成一行塞進 etf_list
 - popup 用 Label 顯示、Label 把整段當成一行算寬度 → 被擠壓
-- 結果：原本是「00980A 主動野村臺灣優選(9.37%) | 00982A ...」的一行
-       → 被擠成「金像電子（股）公司」這種難以辨識的 column
+- 結果:原本是「00980A 主動野村臺灣優選(9.37%) | 00982A ...」的一行
+       → 被擠成「金像電子(股)公司」這種難以辨識的 column
 
 【修法】2 個改動
-1. etf_list 分隔符：「 | 」→ 「\n」（每個 ETF 一行）
-2. popup widget：Label → Text widget（以最長那行算寬度、不會被擠壓）
+1. etf_list 分隔符:「 | 」→ 「\n」(每個 ETF 一行)
+2. popup widget:Label → Text widget(以最長那行算寬度、不會被擠壓)
    · width = max line length
    · height = min(total_lines, 25)
    · state="disabled" 唯讀
@@ -2672,49 +2677,49 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 
 【附帶更新 test_etf_tab_gui.py】
 - test_etf_show_popup_正常顯示 從 mock Label 改成 mock Text widget
-  （因為 widget 從 Label 換 Text）
+  (因為 widget 從 Label 換 Text)
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-etf-popup-spacing 修 Bug 內容】2026-06-20 11:39 (William 11:39 反映)
 ════════════════════════════════════════════════════════════════════════════════
-【問題】William 10:21 popup 修正後看 v0.9.5-etf-popup-fix 截圖：
+【問題】William 10:21 popup 修正後看 v0.9.5-etf-popup-fix 截圖:
 - 第一行最前面有 📊 icon、不要
 - 行字的間隔太小、太擠不好讀
 
 【根因】
-- title 字串用了 f"📊 {stock_code} {stock_name} 被 {etf_count} 檔 ETF 持有："
+- title 字串用了 f"📊 {stock_code} {stock_name} 被 {etf_count} 檔 ETF 持有:"
 - Text widget 預設 spacing1=0 spacing3=0、行與行之間沒有 padding
 
 【修法】
-1. 拿掉 title 的 📊 icon：「📊 2330 台積電 ...」→「2330 台積電 ...」
-2. Text widget 加 spacing1=4 spacing3=4（每行上下各 4px、行間呼吸感更好）
+1. 拿掉 title 的 📊 icon:「📊 2330 台積電 ...」→「2330 台積電 ...」
+2. Text widget 加 spacing1=4 spacing3=4(每行上下各 4px、行間呼吸感更好)
 
 【pytest 新增 1 個】test_etf_popup_spacing.py
-- test_popup_title_no_emoji:title 不含 📊（或任何 emoji）
+- test_popup_title_no_emoji:title 不含 📊(或任何 emoji)
 - test_popup_text_has_spacing:Text widget 有 spacing1=4 spacing3=4
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-etf-popup-width 修 Bug 內容】2026-06-20 11:50 (William 11:50 反映)
 ════════════════════════════════════════════════════════════════════════════════
-【問題】William 看 v0.9.5-etf-popup-spacing 截圖：
+【問題】William 看 v0.9.5-etf-popup-spacing 截圖:
 - popup 後面有好幾個字被截斷、看不到完整 ETF 列表
 
 【根因】
 - Text widget 的 width 是「平均字元寬度」單位
 - 我用 `max(len(line) for line in lines)` 算 width
 - 但中文實際寬度 ≈ 2× ASCII 寬度
-- 結果：width 計算偏小、中文字超出 width、後面被截斷
+- 結果:width 計算偏小、中文字超出 width、後面被截斷
 
 【修法】新加 _display_width helper
-- 中文（CJK + 全形 + 平假名/片假名）算 2 字元
-- 其他（ASCII、半形標點）算 1 字元
+- 中文(CJK + 全形 + 平假名/片假名)算 2 字元
+- 其他(ASCII、半形標點)算 1 字元
 - popup width 改用 `_display_width(line)` 計算
 
 【實測驗證】
-- ETF 名稱：「主動野村臺灣優選」
+- ETF 名稱:「主動野村臺灣優選」
   - len() = 8 字元 → width 偏小
   - _display_width() = 16 字元 → width 足夠
-- 18 檔 ETF：原本 width 約 25 → 修完 width 約 45
+- 18 檔 ETF:原本 width 約 25 → 修完 width 約 45
 - 顯示完整、不再截斷
 
 【pytest 新增 1 個】test_etf_popup_width.py
@@ -2724,25 +2729,25 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-locale-comma-fix 修 Bug 內容】2026-06-20 12:12 (William 12:12 反映)
 ════════════════════════════════════════════════════════════════════════════════
-【問題】William 開 Windows「語言支援 → 區域格式」看到：
-- 地區：中文（臺灣）、千位=`,`、小數=`.`
+【問題】William 開 Windows「語言支援 → 區域格式」看到:
+- 地區:中文(臺灣)、千位=`,`、小數=`.`
 - 但 StockTool Treeview cell 顯示的價格、市值、手續費等千位分隔是 `.` 不是 `,`
-- 至少價格欄位（Treeview 內）有這問題
+- 至少價格欄位(Treeview 內)有這問題
 
-【根因】延續 V0.9.5-goodinfo4+5 教訓：
+【根因】延續 V0.9.5-goodinfo4+5 教訓:
 - Tkinter Treeview + locale=zh_TW.UTF-8 會把 cell 字串的 `,` 當成歐洲小數點
-- 成交量已解：用 str(int(vol)) 不千分位
-- 但其他 Treeview cell（價格、市值、手續費、股數、損益）仍用 f"{x:,.2f}"
+- 成交量已解:用 str(int(vol)) 不千分位
+- 但其他 Treeview cell(價格、市值、手續費、股數、損益)仍用 f"{x:,.2f}"
   → 一樣被轉成歐洲格式顯示
 
-【修法】4 個 Treeview cell 全改不加千分位：
-1. ETF Treeview price_str（line 7180）
-2. 買賣記錄 mini Treeview（line 7608-7611）
-3. 持倉 Treeview（line 7656-7666）
-4. 交易 Treeview（line 7672-7675）
+【修法】4 個 Treeview cell 全改不加千分位:
+1. ETF Treeview price_str(line 7180)
+2. 買賣記錄 mini Treeview(line 7608-7611)
+3. 持倉 Treeview(line 7656-7666)
+4. 交易 Treeview(line 7672-7675)
 
 【不改的地方】
-- Label widget（持倉總覽、預估視窗 stat()）：純文字、不會被 Tkinter locale bug 影響
+- Label widget(持倉總覽、預估視窗 stat()):純文字、不會被 Tkinter locale bug 影響
   → 保留千分位顯示讓數字易讀
 
 【pytest 新增 1 個】test_locale_comma_fix.py
@@ -2751,11 +2756,11 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-shares-int 修 Bug 內容】2026-06-20 14:13 (William 14:13 反映)
 ════════════════════════════════════════════════════════════════════════════════
-【問題】William 開 App 看買賣紀錄頁面：
+【問題】William 開 App 看買賣紀錄頁面:
 - 股數欄位顯示「1000.0」有小數點、不要
 
 【根因】
-- Transaction.shares: float = 0.0（portfolio.py line 326）
+- Transaction.shares: float = 0.0(portfolio.py line 326)
 - str(t.shares) 對於 float 1000.0 會顯示「1000.0」
 - 對於 float 1000.5 會顯示「1000.5」
 
@@ -2765,8 +2770,8 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 3. 交易 Treeview (line 7703)
 
 【不改的地方】
-- Label widget（持倉總覽、預估視窗 stat()）：已是 f"{x:,.0f}" 整數顯示
-- 計算邏輯（avg_cost、market_value 等）：仍是 float 精確運算
+- Label widget(持倉總覽、預估視窗 stat()):已是 f"{x:,.0f}" 整數顯示
+- 計算邏輯(avg_cost、market_value 等):仍是 float 精確運算
 
 【pytest 新增 1 個】test_shares_int.py
 - test_shares_display_is_integer:Treeview cell 的股數欄位是 str(int(...))
@@ -2775,20 +2780,20 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-etf-history ETF 持股歷史庫】2026-06-20 17:54 (William 17:54 需求)
 ════════════════════════════════════════════════════════════════════════════════
-【需求】William 開 App 看 ETF Tab：
-1. 統計列表最後加「今日異動」欄（張數）
+【需求】William 開 App 看 ETF Tab:
+1. 統計列表最後加「今日異動」欄(張數)
 2. Hover 顯示各 ETF 分別異動的數量
 3. App 啟動只抓一次、歷史存 local DB
 
 【設計決策】
-- 開新 DB：etf_history.db（避免污染既有 dividend_history.db）
-- 抓取源：etfinfo.tw /etf/{code} 的 SSR 資料（__NUXT_DATA__）
+- 開新 DB:etf_history.db(避免污染既有 dividend_history.db)
+- 抓取源:etfinfo.tw /etf/{code} 的 SSR 資料(__NUXT_DATA__)
   → schema dict + 5 values (code, name, weight, shares, unit)
   → shares 直接是「持股股數」、換成張數 = shares / 1000
-- 異動算法：Σ (today_shares_lots - yesterday_shares_lots)
+- 異動算法:Σ (today_shares_lots - yesterday_shares_lots)
   → 新增 ETF = +today_shares_lots
   → 刪除 ETF = -yesterday_shares_lots
-- 不抓 ETF 規模（用 shares 直接算、不需換算）
+- 不抓 ETF 規模(用 shares 直接算、不需換算)
 
 【DB schema】
 - etf_holding_history(date, etf_code, stock_code, stock_name, weight_pct, shares, shares_lots, industry, fetched_at)
@@ -2796,81 +2801,81 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 
 【SSR Parse 技術細節】
 - Nuxt 3 flat array 結構
-- schema dict 內欄位都是 ref（指向 index）
-- 不能用固定 layout 偏移（unit 可能 reuse、weight 可能 reuse）
+- schema dict 內欄位都是 ref(指向 index)
+- 不能用固定 layout 偏移(unit 可能 reuse、weight 可能 reuse)
 - 必須用 _resolve_val(nuxt_list, schema[field]) 拿真實值
-- expected_end 計算：unit ref < i + 5 表示 reuse、只佔 5 位置、否則 6 位置
+- expected_end 計算:unit ref < i + 5 表示 reuse、只佔 5 位置、否則 6 位置
 
 【新增函式】
-- _init_etf_history_db(db_path)：建表
-- _save_etf_holding_snapshot(db, etf_code, holdings, date)：寫入單檔快照
-- _query_etf_holdings_by_date(db, date)：查詢指定日期持股
-- _query_latest_two_dates(db)：查最近兩個有效日期
-- _compute_etf_changes(db)：計算今日 vs 昨日異動張數
+- _init_etf_history_db(db_path):建表
+- _save_etf_holding_snapshot(db, etf_code, holdings, date):寫入單檔快照
+- _query_etf_holdings_by_date(db, date):查詢指定日期持股
+- _query_latest_two_dates(db):查最近兩個有效日期
+- _compute_etf_changes(db):計算今日 vs 昨日異動張數
 
 【fetcher 改動】
-- fetch_etf_top10_holdings 改抓 shares + industry（從 SSR）
-- 保持既有回傳 list of dict 介面（向下相容）
+- fetch_etf_top10_holdings 改抓 shares + industry(從 SSR)
+- 保持既有回傳 list of dict 介面(向下相容)
 
 【下一步】
-- 串接 _etf_auto_startup_fetch：抓完後順便寫 DB
+- 串接 _etf_auto_startup_fetch:抓完後順便寫 DB
 - _etf_tree 加「今日異動」欄 + hover popup
 - 排序改為依總異動絕對值
-- 第一次啟動無昨日資料、顯示「—」+ 狀態列提示
+- 第一次啟動無昨日資料、顯示「-」+ 狀態列提示
 
 【pytest 新增 19 個】
-- tests/test_etf_history_db.py（13 個）：DB schema / save / query / compute 邏輯
-- tests/test_etf_ssr_parse.py（6 個）：SSR parse 守護 + 2 個真實整合測試
+- tests/test_etf_history_db.py(13 個):DB schema / save / query / compute 邏輯
+- tests/test_etf_ssr_parse.py(6 個):SSR parse 守護 + 2 個真實整合測試
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-scrollfix 更新內容】2026-06-19 22:15 (William 反映)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 22:12 本機測試反映 2 點：
+【背景】William 22:12 本機測試反映 2 點:
 1. 「手動選股左邊欄位沒有全部顯示時請提供 scroll bar 可以 scroll」
-2. 「匯出 excel 所生成 file 可以為回策略參數中的選股來源嗎？果可以只要這個功能即可」
+2. 「匯出 excel 所生成 file 可以為回策略參數中的選股來源嗎?果可以只要這個功能即可」
 
 【改動 1】手動選股左面板加垂直捲軸
-- 原實作：left_frame = ttk.LabelFrame(paned) → widget 比視窗高被裁掉
-- 新實作：left_container = Frame(paned) + Canvas + Scrollbar（參考策略參數 Tab pattern）
+- 原實作:left_frame = ttk.LabelFrame(paned) → widget 比視窗高被裁掉
+- 新實作:left_container = Frame(paned) + Canvas + Scrollbar(參考策略參數 Tab pattern)
 - left_frame 改放在 Canvas 內、bind <Configure> 更新 scrollregion
 - 加 <MouseWheel> 滑鼠滾輪支援
 
 【改動 2】「📤 匯出 Excel」補上使用提示
-- 結論：匯出的檔可以直接當「使用 Excel 股票清單」讀取
+- 結論:匯出的檔可以直接當「使用 Excel 股票清單」讀取
   · load_stock_list_from_excel 透過 find_col 找「股票代號」欄
-  · 多餘欄位（殖利率、現價等）不影響
+  · 多餘欄位(殖利率、現價等)不影響
 - 原本上版新增的「💾 存成 Excel 股票清單」按鈕 → 拿掉
   · 與「📤 匯出 Excel」重複
   · 多餘複雜度、撥亂反正
-- messagebox.showinfo 加訊息：「💡 這個檔案可以直接給「策略參數 → 使用 Excel 股票清單」讀取使用」
+- messagebox.showinfo 加訊息:「💡 這個檔案可以直接給「策略參數 → 使用 Excel 股票清單」讀取使用」
 
 【pytest 調整】
-- 刪除 tests/test_ms_save_stock_list.py（4 個 test、針對已拿掉的方法）
-- 新增 tests/test_ms_export_excel_compat.py（1 個整合測試）
+- 刪除 tests/test_ms_save_stock_list.py(4 個 test、針對已拿掉的方法)
+- 新增 tests/test_ms_export_excel_compat.py(1 個整合測試)
 
 【驗證】
-- pytest：237 passed（-4 +1）、3 pre-existing fail（跟本次無關）
+- pytest:237 passed(-4 +1)、3 pre-existing fail(跟本次無關)
 
 ════════════════════════════════════════════════════════════════════════════════
-【v0.9.5-cache-savelist 更新內容】2026-06-19 22:10 (William 要求）
+【v0.9.5-cache-savelist 更新內容】2026-06-19 22:10 (William 要求)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 22:05 本機測試：「手動選股頁少了一個 Save 按鈕」
-- 要求：「勾選要的股票後可以儲存為 excel file」
-- 要求：「至少要勾選一隻股票」
-- 要求：「餵給策略參數頁的「使用 Excel 股票清單」」
+【背景】William 22:05 本機測試:「手動選股頁少了一個 Save 按鈕」
+- 要求:「勾選要的股票後可以儲存為 excel file」
+- 要求:「至少要勾選一隻股票」
+- 要求:「餵給策略參數頁的「使用 Excel 股票清單」」
 
 【設計決策】加新的「💾 存成 Excel 股票清單」按鈕
-- 不同於既有的「📤 匯出 Excel」（包含 20+ 欄全資料）
-  · 既存的：供 user 自己備查、看完整資料
-  · 新的：只存「股票代號」+「股票名稱」兩欄、可被 load_stock_list_from_excel 直接讀取
+- 不同於既有的「📤 匯出 Excel」(包含 20+ 欄全資料)
+  · 既存的:供 user 自己備查、看完整資料
+  · 新的:只存「股票代號」+「股票名稱」兩欄、可被 load_stock_list_from_excel 直接讀取
 
 【改動】
 - btn_row 加 ttk.Button('💾 存成 Excel 股票清單', self._ms_save_stock_list)
-- 新增 _ms_save_stock_list method：
+- 新增 _ms_save_stock_list method:
   · 檢查 _ms_result_df 存在、否則提示「請先按選股」
   · 檢查 _ms_checked 至少 1 隻、否則提示「請至少勾選一隻」
   · 彈 filedialog.asksaveasfilename、預設檔名 stock_list_YYYYMMDD_HHMM.xlsx
-  · 只存兩欄（股票代號、股票名稱）、藍色 header、欄寬 12/24
+  · 只存兩欄(股票代號、股票名稱)、藍色 header、欄寬 12/24
   · 存完 messagebox.showinfo 告訴 user 下一步怎麼用
   · 錯誤 messagebox.showerror + logger.log
 
@@ -2878,65 +2883,65 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 - test_未選股_提示無資料
 - test_沒勾選任何股票_提示未勾選
 - test_勾選至少一隻_寫入乾淨格式
-- test_load_stock_list_from_excel_可讀回_我們存的檔（整合測試）
+- test_load_stock_list_from_excel_可讀回_我們存的檔(整合測試)
 
 【驗證】
-- pytest：240 passed（+4 新）、3 pre-existing fail（跟本次無關）
+- pytest:240 passed(+4 新)、3 pre-existing fail(跟本次無關)
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-hover 更新內容】2026-06-19 22:00 (William 要求)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 21:53 本機測試：「現在看起來 so far so good」
+【背景】William 21:53 本機測試:「現在看起來 so far so good」
 - 要求「滑鼠移到某股票範圍時、把整個 row 都 highlight、這樣比較好讀」
 - 移走時取消、用黃色
 
 【改動】手動選股 Treeview 加 hover highlight
-- 新增 tag_configure：
-  · 'hover'：背景 #fff3a0（黃色）
-  · 'checked'：背景 #d0e8ff（淺藍）
-  · 'unchecked'：背景 #ffffff（白）
-- 新增 event bindings：
-  · <Motion> → _on_tree_hover：進新 row 設 hover tag、離開舊 row 清除
-  · <Leave> → _on_tree_leave：離開 Treeview 時清除 hover
-- 新增 _clear_hover()：根據 _ms_checked 恢復該列原本的 checked/unchecked tag
-- 狀態變數：self._ms_hover_iid 記住目前 hover 的 row iid
+- 新增 tag_configure:
+  · 'hover':背景 #fff3a0(黃色)
+  · 'checked':背景 #d0e8ff(淺藍)
+  · 'unchecked':背景 #ffffff(白)
+- 新增 event bindings:
+  · <Motion> → _on_tree_hover:進新 row 設 hover tag、離開舊 row 清除
+  · <Leave> → _on_tree_leave:離開 Treeview 時清除 hover
+- 新增 _clear_hover():根據 _ms_checked 恢復該列原本的 checked/unchecked tag
+- 狀態變數:self._ms_hover_iid 記住目前 hover 的 row iid
 
 【邊界】
 - 滑鼠移到 header 或捲軸 → 不算 cell → 清 hover
 - 重跑選股刪除 Treeview 時會清除舊 iid 的 hover、用 try/except TclError 保護
 - 點 checkbox toggle 仍能改 checked 狀態、不受 hover 干擾
-  （toggle 最後用 self._ms_tree.item(item_id, tags=('checked' if not current else 'unchecked',)) 
-   設個、hover 狀態會被覆蓋；但該列不變、狀態正確）
+  (toggle 最後用 self._ms_tree.item(item_id, tags=('checked' if not current else 'unchecked',))
+   設個、hover 狀態會被覆蓋;但該列不變、狀態正確)
 
 【驗證】
-- pytest：236 passed、3 pre-existing fail
+- pytest:236 passed、3 pre-existing fail
 - 純 GUI event handler、不易寫 unit test、用本機測試驗證
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-vol-fix2 更新內容】2026-06-19 18:50 (William 反映)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 18:49 本機測試：18:43 按了「🔄 重新抓股價」、cache 抓好了
-- 但 Treeview 「成交量」、「資料日期」還是「—」
-- 原因：手動重抓完成後 _on_bg_price_done 只更新 status bar、沒讓 Treeview 重跑結果
+【背景】William 18:49 本機測試:18:43 按了「🔄 重新抓股價」、cache 抓好了
+- 但 Treeview 「成交量」、「資料日期」還是「-」
+- 原因:手動重抓完成後 _on_bg_price_done 只更新 status bar、沒讓 Treeview 重跑結果
 - 使用者需手動按「選股」才會看到新資料、看起來像是「重抓失敗」
 
 【改動】_on_bg_price_done 自動重跑選股
-- 觸發條件：source == '手動重抓' AND Treeview 已有結果
+- 觸發條件:source == '手動重抓' AND Treeview 已有結果
 - 重跑後 Treeview 立即顯示「成交量」、「資料日期」新資料
-- 不重跑路徑：app 剛起動、Treeview 還是空、使用者沒選過股
-- log 訊息：'自動重跑選股中...'、'✅ 符合條件：N 檔'
+- 不重跑路徑:app 剛起動、Treeview 還是空、使用者沒選過股
+- log 訊息:'自動重跑選股中...'、'✅ 符合條件:N 檔'
 
 【驗證】
-- pytest：12 個 cache_vol test 全綠（fetch_prices 結構、get_or_fetch 遷移）
+- pytest:12 個 cache_vol test 全綠(fetch_prices 結構、get_or_fetch 遷移)
 - Treeview 仍有水平捲軸 (ms_scroll_x)、14 欄超寬可以左右拉
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-vol-fix 更新內容】2026-06-19 18:35 (William 反映)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 18:35 本機測試：Treeview 「成交量」、「資料日期」還是「—」
-- 原因：cache 是 v0.9.5-goodinfo4+5 拿下的、只有 4 欄（沒 成交量_張 / data_date）
+【背景】William 18:35 本機測試:Treeview 「成交量」、「資料日期」還是「-」
+- 原因:cache 是 v0.9.5-goodinfo4+5 拿下的、只有 4 欄(沒 成交量_張 / data_date)
 - 18:29 開 App 是盤後、走 get_or_fetch「last_update==today 用 cache」路徑
-- 所以「啟動時自動」跳過、Treeview 讀舊 cache、顯示「—」
+- 所以「啟動時自動」跳過、Treeview 讀舊 cache、顯示「-」
 
 【改動】get_or_fetch 加「結構遷移」檢查
 - 如果 cache 是今天的、但缺 成交量_張 / data_date 欄位 → 自動強制重抓一次
@@ -2944,219 +2949,219 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 - 一次性邏輯、之後 cache 都是新結構不會再觸發
 
 【pytest 新增 2 個】
-- test_get_or_fetch_cache缺欄位_自動重抓（驗證結構檢查觸發重抓）
-- test_get_or_fetch_cache已完整_不重抓（驗證正常情況不被打擾）
+- test_get_or_fetch_cache缺欄位_自動重抓(驗證結構檢查觸發重抓)
+- test_get_or_fetch_cache已完整_不重抓(驗證正常情況不被打擾)
 
 【pytest 修正 1 個】
-- test_get_or_fetch_market_hours._fake_price_df：原本只 3 欄、加上新欄位
-  · 公司名稱_來源（原本是「股票名稱」、改成跟程式一致）
+- test_get_or_fetch_market_hours._fake_price_df:原本只 3 欄、加上新欄位
+  · 公司名稱_來源(原本是「股票名稱」、改成跟程式一致)
   · 漲跌
   · data_date / 成交量_張
 
 【驗證】
-- pytest：236 passed（+2 新 test）、3 pre-existing fail
-- 跨區關係：同時保護 cache_cleanup1（拿掉 checkbox）+ cache-info（加 data_date）+ cache-vol（加 成交量_張）
+- pytest:236 passed(+2 新 test)、3 pre-existing fail
+- 跨區關係:同時保護 cache_cleanup1(拿掉 checkbox)+ cache-info(加 data_date)+ cache-vol(加 成交量_張)
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-vol 更新內容】2026-06-19 18:00 (William 反映)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 2026-06-19 17:52 本機測試截圖反映 3 點：
-1. 「成交量(張)」、「資料日期」欄位全顯示 —（cache 沒有這兩個欄位）
-2. 視窗標題還是寫 v0.9.5-goodinfo4+5（忘記更新 VERSION 變數）
+【背景】William 2026-06-19 17:52 本機測試截圖反映 3 點:
+1. 「成交量(張)」、「資料日期」欄位全顯示 -(cache 沒有這兩個欄位)
+2. 視窗標題還是寫 v0.9.5-goodinfo4+5(忘記更新 VERSION 變數)
 3. 「提示」框位置太下面被捲拉遮住、難讀
 
-【改動 1】VERSION 變數更新（修視窗標題）
+【改動 1】VERSION 變數更新(修視窗標題)
 - VERSION = "v0.9.5-goodinfo4+5" → "v0.9.5-cache-vol"
 - self.title() 用 VERSION、視窗標題會自動更新
 
 【改動 2】fetch_prices 順便抓成交量
-- TWSE STOCK_DAY_ALL 有 TradeVolume（股）、TPEx 有 TradingShares（股）
+- TWSE STOCK_DAY_ALL 有 TradeVolume(股)、TPEx 有 TradingShares(股)
 - 兩者都是「股」單位 → /1000 變「張」
 - 統一存為 成交量_張 欄位
-- 邊界：API 沒 volume 欄位 → 成交量_張 = None、不 crash
-- 倒果：之前 cache_cleanup1 拿掉「即時抓股價」checkbox、沒人抓成交量
-  → Treeview 一直顯示 —。這修補了這個 regression。
+- 邊界:API 沒 volume 欄位 → 成交量_張 = None、不 crash
+- 倒果:之前 cache_cleanup1 拿掉「即時抓股價」checkbox、沒人抓成交量
+  → Treeview 一直顯示 -。這修補了這個 regression。
 
 【改動 3】「提示」框位置調整
-- 原本：放在 console 下方、被捲拉遮住
-- 改為：放在 console 標題同一行（標題左、提示右）
+- 原本:放在 console 下方、被捲拉遮住
+- 改為:放在 console 標題同一行(標題左、提示右)
 - 提示內容也縮短成一行、字體調小
 
 【pytest 新增】
-- tests/test_data_date_column.py 加 3 個成交量 test：
+- tests/test_data_date_column.py 加 3 個成交量 test:
   · TWSE TradeVolume 股→張
   · TPEx TradingShares 股→張
   · API 沒 volume 欄位不 crash
 
 【驗證】
-- pytest：234 passed（+3 新 test）、3 pre-existing fail
-- 順便驗證 fetch_prices mock 測試：2330 25000 張、6547 5000 張 都能正確轉換
+- pytest:234 passed(+3 新 test)、3 pre-existing fail
+- 順便驗證 fetch_prices mock 測試:2330 25000 張、6547 5000 張 都能正確轉換
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-info 更新內容】2026-06-19 17:00 (William 決定)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】2026-06-19 14:17 William 延續討論：「手動選股筛選結果中增加一個欄位
-顯示個股資料所參考的最新日期」。這樣可以一眼看出筛選結果用的是哪天的收盤資料，
+【背景】2026-06-19 14:17 William 延續討論:「手動選股筛選結果中增加一個欄位
+顯示個股資料所參考的最新日期」。這樣可以一眼看出筛選結果用的是哪天的收盤資料,
 避免「股價跟我看到的不一樣」混淆。
 
 【改動 1】Treeview 加「資料日期」欄位
-- fetch_prices 加 data_date 欄位（從 TWSE/TPEx 的 Date 欄位）
+- fetch_prices 加 data_date 欄位(從 TWSE/TPEx 的 Date 欄位)
   · TWSE / TPEx Date 都是民國年格式 "1150618" → 西元 "2026-06-18"
   · 內部實作 _roc_to_ad() 轉換
-  · 邊界：API 沒 Date 欄位或格式不對 → 回空字串、不 crash
+  · 邊界:API 沒 Date 欄位或格式不對 → 回空字串、不 crash
 - _run_manual_selection 的 price_cols / out_cols / final_cols 都加 data_date
-- _ms_display_results 在 Treeview 最右邊加「資料日期」欄位（14 欄變 15 欄）
-- 顯示規則：有 date 顯示日期、無 date 顯示 "—"
+- _ms_display_results 在 Treeview 最右邊加「資料日期」欄位(14 欄變 15 欄)
+- 顯示規則:有 date 顯示日期、無 date 顯示 "-"
 
 【改動 2】_is_market_hours() 加半日盤例外
-- 新增 _HALF_DAY_DATES set（清單內容：過年封關日、其他需要提前收盤的特殊交易日）
-- 目前只有 "2026-02-13"（2026 過年封關日、除夕 2/16 前最後交易日）
-- 預設 半日盤 13:00 收盤（平日 13:30 收盤）
-- 註解標明來源：台灣證交所公告的「市場開休市日程」
+- 新增 _HALF_DAY_DATES set(清單內容:過年封關日、其他需要提前收盤的特殊交易日)
+- 目前只有 "2026-02-13"(2026 過年封關日、除夕 2/16 前最後交易日)
+- 預設 半日盤 13:00 收盤(平日 13:30 收盤)
+- 註解標明來源:台灣證交所公告的「市場開休市日程」
 
 【改動 3】_on_bg_price_done 在 status bar 加股價更新時間 + 資料日期
-- 原本：「✅ 股價資料就緒（啓動時自動、2376 筆）｜可點「選股」」
-- 改為：「✅ 股價資料就緒（...）｜股價更新：2026-06-19 17:00:00｜資料日期：2026-06-18｜可點「選股」」
+- 原本:「✅ 股價資料就緒(啓動時自動、2376 筆)|可點「選股」」
+- 改為:「✅ 股價資料就緒(...)|股價更新:2026-06-19 17:00:00|資料日期:2026-06-18|可點「選股」」
 - 讓使用者不用切到手動選股 Tab 也看得到更新時間
 
 【pytest 新增】
-- tests/test_market_hours.py 加 5 個半日盤 test（含清單包含 2026 封關日）
-- tests/test_data_date_column.py 新檔、7 個 test：
-  · 民國年轉西元（正常 / 民國 100 / 民國 114 / 格式錯誤）
+- tests/test_market_hours.py 加 5 個半日盤 test(含清單包含 2026 封關日)
+- tests/test_data_date_column.py 新檔、7 個 test:
+  · 民國年轉西元(正常 / 民國 100 / 民國 114 / 格式錯誤)
   · API 沒 Date 欄位不 crash
   · TPEx 股也有 data_date
   · _run_manual_selection 保留 data_date
 
 【驗證】
 - python -c "import ast; ast.parse(...)" → ✅ syntax OK
-- pytest：231 passed（+12 新 test 全綠）、3 pre-existing fail（test_dividend_yield_fix、跟本次改動無關）
+- pytest:231 passed(+12 新 test 全綠)、3 pre-existing fail(test_dividend_yield_fix、跟本次改動無關)
 - 比 v0.9.5-cache-cleanup1 的 219 passed 多 12
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-cache-cleanup1 更新內容】2026-06-19 14:17 (William 決定)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】2026-06-19 13:55 William 提出股神股票現價抓取邏輯討論：
-- 「App 隨時要有最新的收盤個股資訊（cache）、開機發現不是最新則去抓」
+【背景】2026-06-19 13:55 William 提出股神股票現價抓取邏輯討論:
+- 「App 隨時要有最新的收盤個股資訊(cache)、開機發現不是最新則去抓」
 - 「手動選股中應該不需要有 TWSE 即時股價的開關」
 
 【改動】手動選股 Tab 拿掉「🔄 TWSE 即時股價」checkbox + 速率模式 radio
-- 拿掉 UI：_ms_refresh_price_var BooleanVar + Checkbutton
-- 拿掉 UI：_ms_twse_slow_mode BooleanVar + 兩個 Radiobutton（🚀快速 / 🐌緩慢）
-- 拿掉 method：_ms_twse_rate_mode_changed() （更新狀態列用）
-- 拿掉 _ms_run_selection 裡的「即時抓股價」if 分支（94 行）
-- _fetch_twse_realtime_batch 拿掉 slow_mode 參數（已無 UI 控件呼喚）
+- 拿掉 UI:_ms_refresh_price_var BooleanVar + Checkbutton
+- 拿掉 UI:_ms_twse_slow_mode BooleanVar + 兩個 Radiobutton(🚀快速 / 🐌緩慢)
+- 拿掉 method:_ms_twse_rate_mode_changed() (更新狀態列用)
+- 拿掉 _ms_run_selection 裡的「即時抓股價」if 分支(94 行)
+- _fetch_twse_realtime_batch 拿掉 slow_mode 參數(已無 UI 控件呼喚)
   · batch sleep 從 `5.0 if slow_mode else 0.3` 簡化為固定 `0.3`
-  · 函式本身保留（未來可能還用得到 batch 抓股價）
+  · 函式本身保留(未來可能還用得到 batch 抓股價)
 
 【為什麼可以拿掉】
-- 手動選股邏輯：本來就用 cache 的 close 收盤價、即時 tick 會干擾篩選
-- 看即時 tick：去「買賣紀錄」Tab、已有 30 秒 polling
-- 想重抓 cache close：原本就有「🔄 重新抓股價」按鈕（強制重抓、走 fetch_prices）
+- 手動選股邏輯:本來就用 cache 的 close 收盤價、即時 tick 會干擾篩選
+- 看即時 tick:去「買賣紀錄」Tab、已有 30 秒 polling
+- 想重抓 cache close:原本就有「🔄 重新抓股價」按鈕(強制重抓、走 fetch_prices)
 
 【pre-commit hook 擴充】
-- 原本 regex：`v0.9.5-(goodinfo|twser)[0-9]+([.][0-9]+)?`
-- 改為：`v0.9.5-(goodinfo|twser|cache)[a-z0-9]*([.][0-9]+)?`
+- 原本 regex:`v0.9.5-(goodinfo|twser)[0-9]+([.][0-9]+)?`
+- 改為:`v0.9.5-(goodinfo|twser|cache)[a-z0-9]*([.][0-9]+)?`
 - 讓 cache 系列也能自動更新 fileheader 時間戳
 
 【驗證】
 - python -c "import ast; ast.parse(...)" → ✅ syntax OK
 - grep 確認 _ms_refresh_price_var / _ms_twse_slow_mode / _ms_twse_rate_mode_changed 在 code 已無引用
-- 跑 pytest：下面報告
+- 跑 pytest:下面報告
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-alpha 更新內容】2026-06-14
 ════════════════════════════════════════════════════════════════════════════════
-【手動選股 Tab 升級】（Phase 1：背景重抓股價 + PE 過濾）
-- App 啟動時背景重抓股價（跳過今天已抓的 cache）
+【手動選股 Tab 升級】(Phase 1:背景重抓股價 + PE 過濾)
+- App 啟動時背景重抓股價(跳過今天已抓的 cache)
 - 手動選股 Tab「🔄 重新抓股價」按鈕
-- Race condition 防呆（_bg_price_fetching flag）
-- PE 接近 0 過濾（EPS < 0.05 → PE = None，解決大城地產 PE=300 爆炸值）
+- Race condition 防呆(_bg_price_fetching flag)
+- PE 接近 0 過濾(EPS < 0.05 → PE = None,解決大城地產 PE=300 爆炸值)
 
-【手動選股 Tab 升級】（Phase 2：股利DB + 修殖利率年份對應 bug）
-- 股利歷史庫 dividend_history.db（同 eps_history 風格）
-- 修 Bug：殖利率年份對應錯誤（cy-1=今年、cy-2=去年、cy-3=前年）
+【手動選股 Tab 升級】(Phase 2:股利DB + 修殖利率年份對應 bug)
+- 股利歷史庫 dividend_history.db(同 eps_history 風格)
+- 修 Bug:殖利率年份對應錯誤(cy-1=今年、cy-2=去年、cy-3=前年)
 
-【手動選股 Tab 升級】（Phase 3：補抓股利 + 100檔/次分批）
+【手動選股 Tab 升級】(Phase 3:補抓股利 + 100檔/次分批)
 - 「💰 補抓全部股利 (一次性)」→「💰 掃描全部股票 (100檔/次)」
 - 新增「🎯 指定股補抓 (推薦 Free tier)」按鈕
-- 每次只抓 100 檔、可分散跑（Free tier 300-1000 筆/月額度友善）
-- 新增 scripts/fetch_dividend.py（CLI 補抓介面、對話中也能跑）
+- 每次只抓 100 檔、可分散跑(Free tier 300-1000 筆/月額度友善)
+- 新增 scripts/fetch_dividend.py(CLI 補抓介面、對話中也能跑)
 
-【手動選股 Tab 升級】（Phase 4：B 邏輯篩選 + DB cache 過期）
+【手動選股 Tab 升級】(Phase 4:B 邏輯篩選 + DB cache 過期)
 - 改用 pass_score (達標) + data_score (有資料) 雙計分
 - 殖利率 None 不再被視為達標、None 排到結果後面
 - 至少要有一個條件有資料才納入結果
 - 沒結果 → 「❌ 這次篩選沒有合格股票」+ 可能原因提示
-- DB cache 過期（> 30 天）→ 自動重抓 FinMind
-- 新加 _query_div_history_with_fetched 函數（用 fetched_at 判斷過期）
-- 強化 402 額度訊息（已完成 X/Y 檔｜請下月重置或升級 plan）
+- DB cache 過期(> 30 天)→ 自動重抓 FinMind
+- 新加 _query_div_history_with_fetched 函數(用 fetched_at 判斷過期)
+- 強化 402 額度訊息(已完成 X/Y 檔|請下月重置或升級 plan)
 
-【手動選股 Tab 升級】（Phase 5：「即時抓股價」checkbox）
+【手動選股 Tab 升級】(Phase 5:「即時抓股價」checkbox)
 - 跑選股前可勾選「🔄 即時抓股價」→ 重新抓 price_df 全部股票的最新股價
-- 預設不勾（用 cache 背景抓的版本、較快）
-- 設計原因：背景重抓股價的時間跟使用者看見的時間可能有差
-  → 勾選後跑選股前會用最新股價（但會等股價抓完、較慢）
-- 順手加 CLI 手動覆寫工具（fetch_dividend.py update）
+- 預設不勾(用 cache 背景抓的版本、較快)
+- 設計原因:背景重抓股價的時間跟使用者看見的時間可能有差
+  → 勾選後跑選股前會用最新股價(但會等股價抓完、較慢)
+- 順手加 CLI 手動覆寫工具(fetch_dividend.py update)
 
-【手動選股 Tab 升級】（Phase 6：修 Bug + 402 主動提示）2026-06-15
+【手動選股 Tab 升級】(Phase 6:修 Bug + 402 主動提示)2026-06-15
 - 【修 Bug】勾選「去年現金殖利率 ≥ X%」不會再拋 UnboundLocalError
-  - 根因：Phase 4「B 邏輯」改一半，line 1168-1175 殘留 data_score / pass_score
-    雙計分死 code（變數從未初始化）
-  - 修法：line 1168-1175 改成跟 line 1163-1166（今年現金殖利率）一樣的
-    no-op（只設 any_checked=True），排序階段用 _yld_has_data 自然處理
-  - 表現：原本勾選「去年現金殖利率」就會崩潰、修完正常運行
+  - 根因:Phase 4「B 邏輯」改一半,line 1168-1175 殘留 data_score / pass_score
+    雙計分死 code(變數從未初始化)
+  - 修法:line 1168-1175 改成跟 line 1163-1166(今年現金殖利率)一樣的
+    no-op(只設 any_checked=True),排序階段用 _yld_has_data 自然處理
+  - 表現:原本勾選「去年現金殖利率」就會崩潰、修完正常運行
 - 【UX 改善】手動選股跑完主動提示 FinMind 402 額度錯誤
-  - 情境：_fetch_finmind_dividend 中途被 402 中斷（已抓 X 筆寫入 DB），
+  - 情境:_fetch_finmind_dividend 中途被 402 中斷(已抓 X 筆寫入 DB),
     _run_manual_selection 仍會完成並回傳部分結果
-  - 原本：使用者只看到「殖利率欄位一堆 None」、困惑為什麼
-  - 修完：狀態列附加「⚠️ FinMind 額度用完（已抓 X/Y 檔）｜部分股票殖利率為 None｜💡 改用指定股補抓或等下月重置」
-- pytest 新增 test_filter_last_yld_unbound.py（4 個）：
-  - test_勾選去年現金殖利率_不拋UnboundLocalError（核心守護）
+  - 原本:使用者只看到「殖利率欄位一堆 None」、困惑為什麼
+  - 修完:狀態列附加「⚠️ FinMind 額度用完(已抓 X/Y 檔)|部分股票殖利率為 None|💡 改用指定股補抓或等下月重置」
+- pytest 新增 test_filter_last_yld_unbound.py(4 個):
+  - test_勾選去年現金殖利率_不拋UnboundLocalError(核心守護)
   - test_去年殖利率軟條件_不擋mask
   - test_去年殖利率有值但未達標_不擋mask
   - test_只勾選去年現金殖利率_仍可運行
 
-【手動選股 Tab 升級】（Phase 7：股價時段邏輯 + Preset 開機自動載入）2026-06-15
-- 【新規則】股價時段邏輯（William 09:56）
-  - 09:00 後到 13:30 收盤前：股價會一直變 → 任何需要現價的功能都要 refresh
-  - 13:30 收盤後：股價固定 → 一天只 refresh 一次（last_update == today 用 cache）
-  - 週末：不開盤 → 用上週五收盤價、一天只 refresh 一次
+【手動選股 Tab 升級】(Phase 7:股價時段邏輯 + Preset 開機自動載入)2026-06-15
+- 【新規則】股價時段邏輯(William 09:56)
+  - 09:00 後到 13:30 收盤前:股價會一直變 → 任何需要現價的功能都要 refresh
+  - 13:30 收盤後:股價固定 → 一天只 refresh 一次(last_update == today 用 cache)
+  - 週末:不開盤 → 用上週五收盤價、一天只 refresh 一次
 - 【實作】新增 _is_market_hours() 工具函式
-  - 判斷：週一~五 09:00 ~ 13:30 為台股盤中
-  - 套用在 get_or_fetch：當 name == "price" 且盤中 → 強制 refresh、不限次數
-  - revenue/eps 不受時段影響（仍用原本 last_update == today 判斷）
+  - 判斷:週一~五 09:00 ~ 13:30 為台股盤中
+  - 套用在 get_or_fetch:當 name == "price" 且盤中 → 強制 refresh、不限次數
+  - revenue/eps 不受時段影響(仍用原本 last_update == today 判斷)
 - 【UX 改善】Preset 開機自動載入
-  - 修 Bug：儲存 preset 後重開 App、preset 下拉是空的、UI 條件沒還原
-  - 根因：_ms_preset_var 預設空字串、_ms_load_preset 拿空字串會早退
-  - 修法：開機時先呼叫 _ms_refresh_preset_list() 把 manual_select_last_preset
+  - 修 Bug:儲存 preset 後重開 App、preset 下拉是空的、UI 條件沒還原
+  - 根因:_ms_preset_var 預設空字串、_ms_load_preset 拿空字串會早退
+  - 修法:開機時先呼叫 _ms_refresh_preset_list() 把 manual_select_last_preset
     設進 var、再呼叫 _ms_load_preset() 載入條件
-  - 表現：開機自動套用上次的 Preset、checkbox / entry 還原成儲存時的狀態
-- pytest 新增 test_market_hours.py（16 個）：_is_market_hours() 邊界守護
-- pytest 新增 test_get_or_fetch_market_hours.py（5 個）：
-  - test_price_盤中_即使cache是今天也強制refresh（核心守護）
+  - 表現:開機自動套用上次的 Preset、checkbox / entry 還原成儲存時的狀態
+- pytest 新增 test_market_hours.py(16 個):_is_market_hours() 邊界守護
+- pytest 新增 test_get_or_fetch_market_hours.py(5 個):
+  - test_price_盤中_即使cache是今天也強制refresh(核心守護)
   - test_price_盤後_用cache不refresh
   - test_price_盤後_cache是昨天_走正常refresh路徑
   - test_revenue_盤中_不強制refresh_走原本邏輯
   - test_eps_盤中_不強制refresh_走原本邏輯
 
-【手動選股 Tab 升級 + 買賣記錄 Tab】（Phase 8：股利金額顯示 + 30秒 refresh）2026-06-15
+【手動選股 Tab 升級 + 買賣記錄 Tab】(Phase 8:股利金額顯示 + 30秒 refresh)2026-06-15
 - 【修 Bug + 改善】手動選股結果顯示今年/去年股利金額
-  - 修 Bug：_ms_display_results 內 row.get 沒讀「今年現金股利(元)」、「去年現金股利(元)」
+  - 修 Bug:_ms_display_results 內 row.get 沒讀「今年現金股利(元)」、「去年現金股利(元)」
     → 雖然 DataFrame 結果有、但 Treeview 沒顯示
-  - 修法：加 2 個 column「今現金」、「去年現金」+ 對應的 row.get 讀取
-  - 表現：Treeview 從 11 個 column 變 13 個、使用者可以直接看到「現金股利金額 + 殖利率」驗算
-- 【新規則】買賣記錄 Tab 開盤 30 秒 refresh 持倉現價（William 11:02）
-  - 切到買賣記錄 Tab 且在開盤時段（09:00~13:30）→ 每 30 秒 refresh 持倉現價
+  - 修法:加 2 個 column「今現金」、「去年現金」+ 對應的 row.get 讀取
+  - 表現:Treeview 從 11 個 column 變 13 個、使用者可以直接看到「現金股利金額 + 殖利率」驗算
+- 【新規則】買賣記錄 Tab 開盤 30 秒 refresh 持倉現價(William 11:02)
+  - 切到買賣記錄 Tab 且在開盤時段(09:00~13:30)→ 每 30 秒 refresh 持倉現價
   - 收盤後、週末、切離買賣記錄 Tab → 自動停止
-  - 實作：_schedule_portfolio_refresh / _portfolio_refresh_loop / _cancel_portfolio_refresh
-  - 與現有「切到 Tab 時抓一次」共存：第一次切到 Tab 仍抓一次、之後每 30 秒抓一次
-- pytest 新增 test_ms_display_div_columns.py（5 個）：
-  - test_run_manual_selection_產出含元後綴股利欄位（核心整合守護）
+  - 實作:_schedule_portfolio_refresh / _portfolio_refresh_loop / _cancel_portfolio_refresh
+  - 與現有「切到 Tab 時抓一次」共存:第一次切到 Tab 仍抓一次、之後每 30 秒抓一次
+- pytest 新增 test_ms_display_div_columns.py(5 個):
+  - test_run_manual_selection_產出含元後綴股利欄位(核心整合守護)
   - test_股票股利格式化_用對的key
   - test_現金股利格式化_用對的key
   - test_殖利率None時_格式化為橫線
-  - test_股利為0時_現金殖利率應為None（邊界）
-- pytest 新增 test_portfolio_refresh_loop.py（10 個）：
+  - test_股利為0時_現金殖利率應為None(邊界)
+- pytest 新增 test_portfolio_refresh_loop.py(10 個):
   - test_盤中_排程下一次refresh
   - test_盤後_不排程
   - test_重複排程_取消上次的
@@ -3168,332 +3173,332 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
   - test_on_tab_changed_切到買賣記錄_啟動refresh
   - test_on_tab_changed_切走_取消refresh
 
-【買賣記錄 Tab】（Phase 9：00403A 現價 fallback）2026-06-15
+【買賣記錄 Tab】(Phase 9:00403A 現價 fallback)2026-06-15
 - 【修 Bug】00403A 現價一直停在 10.61 不動
-  - 根因：TWSE 在「沒成交瞬間」 z='-' → _num('z') 轉成 0.0
+  - 根因:TWSE 在「沒成交瞬間」 z='-' → _num('z') 轉成 0.0
          → _apply_fetched_prices price=0 跳過更新 → 保持舊值
-  - 修法：fetch_stock_info z=0 時 fallback 到 h+l 中價（今日高低价中點）
-    - 比 y（昨收）更接近即時
+  - 修法:fetch_stock_info z=0 時 fallback 到 h+l 中價(今日高低价中點)
+    - 比 y(昨收)更接近即時
     - 標記 price_fallback='mid'、UI 可依此判斷
-  - 二層 fallback：h/l 也為 0 → fallback 到 y（昨收）、標記 price_fallback='prev_close'
-  - 三層 fallback：y 也為 0 → price 保持 0、不更新
-  - logger 提示：「⚠️ XXX 無即時成交價、用今日高低价中點估算」
-- 影響範圍：所有交易不活躍的標的（特別是主動式 ETF、0050 這類有時 z='-' 的）
-- pytest 新增 test_fetch_stock_info_fallback.py（9 個）：
-  - test_z是橫線_fallback到h_l中價（核心）
+  - 二層 fallback:h/l 也為 0 → fallback 到 y(昨收)、標記 price_fallback='prev_close'
+  - 三層 fallback:y 也為 0 → price 保持 0、不更新
+  - logger 提示:「⚠️ XXX 無即時成交價、用今日高低价中點估算」
+- 影響範圍:所有交易不活躍的標的(特別是主動式 ETF、0050 這類有時 z='-' 的)
+- pytest 新增 test_fetch_stock_info_fallback.py(9 個):
+  - test_z是橫線_fallback到h_l中價(核心)
   - test_z是None_fallback到h_l中價
   - test_hl也都0_fallback到昨收
   - test_全都0_price保持0
-  - test_z有即時成交_不fallback（守護正常路徑）
+  - test_z有即時成交_不fallback(守護正常路徑)
   - test_z有即時成交_就算接近昨收也不誤判fallback
   - test_fetch_prices_batch_00403A_fallback正常運作
   - test_apply_fetched_prices_fallback也更新
   - test_apply_fetched_prices_price為0仍然跳過
 
-【手動選股 Tab + 買賣記錄 Tab】（Phase 10：去年現金殖利率算法 + 30 秒 polling 動態顯示）2026-06-15
-- 【修 Bug + 改善】去年現金殖利率應除以「去年除息日收盤價」不是現價（William 11:39）
-  - 原本：除以現價 → 譯導（殖利率看似高、實際上是用現價算的）
-  - 修正：除以「去年除息日收盤價」→ 真正表示「拿去年現金股利、除以當時除息日的股價」
+【手動選股 Tab + 買賣記錄 Tab】(Phase 10:去年現金殖利率算法 + 30 秒 polling 動態顯示)2026-06-15
+- 【修 Bug + 改善】去年現金殖利率應除以「去年除息日收盤價」不是現價(William 11:39)
+  - 原本:除以現價 → 譯導(殖利率看似高、實際上是用現價算的)
+  - 修正:除以「去年除息日收盤價」→ 真正表示「拿去年現金股利、除以當時除息日的股價」
 - 【實作】
-  - DB schema migration：加 ex_date（除息日）、ex_date_close（除息日收盤價）兩個欄位
-    - 重複 init 安全（漏了加也不會爆）
+  - DB schema migration:加 ex_date(除息日)、ex_date_close(除息日收盤價)兩個欄位
+    - 重複 init 安全(漏了加也不會爆)
   - _fetch_finmind_dividend 保留 FinMind 的 date 欄位、寫入 DB
-  - 新增 _fetch_ex_date_close(stock_id, ex_date)：
-    - 抓 ex_date ±3 天的股價（避免除息日是假日沒資料）
+  - 新增 _fetch_ex_date_close(stock_id, ex_date):
+    - 抓 ex_date ±3 天的股價(避免除息日是假日沒資料)
     - 額度用完 / 沒資料 / close=0 → silently 回 None
-  - 新增 _update_ex_date_close()：寫入 DB 緩存、避免下次重抓
-  - 改寫 _run_manual_selection 去年現金殖利率算法：
-    - 優先用 ex_date_close（DB 緩存優先 → 沒有才打 FinMind → 寫回 DB）
-    - fallback：沒 ex_date_close → 用現價（避免 DB 還沒建完、殖利率全 None）
-- 【動態顯示】30 秒 polling 看不到進行狀態（William 11:39 反映）
-  - 修法：fetch_prices_batch 加 progress_callback
-  - _auto_fetch_positions_prices 用 callback 動態 log：
+  - 新增 _update_ex_date_close():寫入 DB 緩存、避免下次重抓
+  - 改寫 _run_manual_selection 去年現金殖利率算法:
+    - 優先用 ex_date_close(DB 緩存優先 → 沒有才打 FinMind → 寫回 DB)
+    - fallback:沒 ex_date_close → 用現價(避免 DB 還沒建完、殖利率全 None)
+- 【動態顯示】30 秒 polling 看不到進行狀態(William 11:39 反映)
+  - 修法:fetch_prices_batch 加 progress_callback
+  - _auto_fetch_positions_prices 用 callback 動態 log:
     - 「⏰ 下次 refresh HH:MM:SS」起動提示
     - 「🔄 [3/8] 抓 2330 中... (37%)」每一檔進度
-    - 「✅ refresh 完成：5.2 秒抓完 5 檔」結束報告
-- pytest 新增 test_ex_date_yield.py（15 個）：
-  - DB schema migration：test_db_init_加ex_date欄位、test_db_init_重複跑不爆
-  - _upsert_div_history：test_upsert_7tuple_含ex_date寫入、test_upsert_5tuple向後相容
-  - _update_ex_date_close：test_update_ex_date_close寫入緩存
-  - _fetch_ex_date_close：6 個（正常、假日、空字串、額度、沒資料、close=0）
-  - _run_manual_selection 整合：4 個（用 ex_date_close 不是現價、沒 ex_date、現金=0、自動 fetch 緩存）
+    - 「✅ refresh 完成:5.2 秒抓完 5 檔」結束報告
+- pytest 新增 test_ex_date_yield.py(15 個):
+  - DB schema migration:test_db_init_加ex_date欄位、test_db_init_重複跑不爆
+  - _upsert_div_history:test_upsert_7tuple_含ex_date寫入、test_upsert_5tuple向後相容
+  - _update_ex_date_close:test_update_ex_date_close寫入緩存
+  - _fetch_ex_date_close:6 個(正常、假日、空字串、額度、沒資料、close=0)
+  - _run_manual_selection 整合:4 個(用 ex_date_close 不是現價、沒 ex_date、現金=0、自動 fetch 緩存)
 
-【買賣記錄 Tab】（Phase 11：持倉現價累計證交稅 + 計入總損益）2026-06-15 19:15
+【買賣記錄 Tab】(Phase 11:持倉現價累計證交稅 + 計入總損益)2026-06-15 19:15
 - 【William 19:15 新需求】累計證交稅請以持股現價計算顯示出來並記入總損益中
-- 【原本】累計證交稅 = 已賣出交易實際付過的稅（historical）
-- 【修正】累計證交稅 = Σ(現價 × 股數 × 0.003) for 有現價的持倉（current_tax）
-  - 歷史已付稅另外以「歷史累計已付稅」欄位顯示（不丟失資訊）
+- 【原本】累計證交稅 = 已賣出交易實際付過的稅(historical)
+- 【修正】累計證交稅 = Σ(現價 × 股數 × 0.003) for 有現價的持倉(current_tax)
+  - 歷史已付稅另外以「歷史累計已付稅」欄位顯示(不丟失資訊)
 - 【PortfolioSummary 新欄位】
-  - current_tax：持倉現價累計證交稅（V0.9.5+ Phase 11）
-  - total_tax：保留為歷史已付稅（向後相容）
+  - current_tax:持倉現價累計證交稅(V0.9.5+ Phase 11)
+  - total_tax:保留為歷史已付稅(向後相容)
 - 【total_pl 算法修正】
-  - 原本：未實現 + 已實現淨損益 → 會高估（未實現沒扣現價稅）
-  - 修正：未實現 + 已實現淨損益 - 現價稅
-  - 邏輯：未實現是「假設全部賣出的毛利」、賣出還要付現價稅、要扣
-- 【UI】Row 1 改成「現價累計證交稅 / 歷史累計已付稅 / 已實現淨損益 / 總損益（含現價稅）」
+  - 原本:未實現 + 已實現淨損益 → 會高估(未實現沒扣現價稅)
+  - 修正:未實現 + 已實現淨損益 - 現價稅
+  - 邏輯:未實現是「假設全部賣出的毛利」、賣出還要付現價稅、要扣
+- 【UI】Row 1 改成「現價累計證交稅 / 歷史累計已付稅 / 已實現淨損益 / 總損益(含現價稅)」
 - 【Phase 11 hotfix 21:26】威廉反映 Refresh 報 KeyError 'total_return_pct'
-  - 原因：row1 加 historical_tax 後變 4 個、total_return_pct 沒地方放、KeyError
-  - 修法：row0 加回 total_return_pct 變 5 個、row1 維持 4 個
-- pytest 新增 test_current_tax.py（12 個）：
-  - 核心算法（4 個）：現價×股數×0.003、沒現價不計、持股=0 不計、部分賣只算剩餘
-  - 歷史稅保留（2 個）：historical_tax 不變、current_tax 跟 historical_tax 可同時存在
-  - 總損益扣除現價稅（4 個）：部分賣、沒持倉、現價下跌仍扣、報酬率分母
-  - PortfolioSummary 結構（1 個）
+  - 原因:row1 加 historical_tax 後變 4 個、total_return_pct 沒地方放、KeyError
+  - 修法:row0 加回 total_return_pct 變 5 個、row1 維持 4 個
+- pytest 新增 test_current_tax.py(12 個):
+  - 核心算法(4 個):現價×股數×0.003、沒現價不計、持股=0 不計、部分賣只算剩餘
+  - 歷史稅保留(2 個):historical_tax 不變、current_tax 跟 historical_tax 可同時存在
+  - 總損益扣除現價稅(4 個):部分賣、沒持倉、現價下跌仍扣、報酬率分母
+  - PortfolioSummary 結構(1 個)
 
 【v0.9.5-goodinfo 更新內容】2026-06-16
 【手動選股 Tab + 環境架構】goodinfo 歷史資料一次匯入 + 每日排程補抓
 
 【Phase 1 - goodinfo 歷史資料一次匯入】
 - 新增 scripts/import_goodinfo_history.py
-  把 goodinfo 18 個 .xls 檔案匯入本地 SQLite DB：
+  把 goodinfo 18 個 .xls 檔案匯入本地 SQLite DB:
   * dividend_history.db: 股利 15,253 列 / 2,040 檔 / 10 年 (2017-2026)
   * eps_history.db: EPS 22,040 列 / 1,965 檔 / 12 年 (2014-2025)
   * .tmp/avg_price_history.json: 平均股價 2,375 檔 / 12 年 (2015-2026)
-- 重要 mapping 規則：goodinfo「發放年度」= 除息年 = DB year（不用 -1）
+- 重要 mapping 規則:goodinfo「發放年度」= 除息年 = DB year(不用 -1)
 - 支援 --dry 預演模式 + --only {div,eps,price,2026exdate,nodiv} 個別子任務
 - 【使用量】dry run 4.5 秒、正式寫入 5.0 秒
 
 【Phase 2 - 每日排程自動補抓】
-- 新增 scripts/daily_fetch_dividend.sh（crontab shell 腳本）
-  - 15:00 自動跑 FinMind 差額補抓（batch=100）
-  - 週一到週五（避開週末未開盤）
+- 新增 scripts/daily_fetch_dividend.sh(crontab shell 腳本)
+  - 15:00 自動跑 FinMind 差額補抓(batch=100)
+  - 週一到週五(避開週末未開盤)
   - Log 寫入 .tmp/logs/fetch_dividend_YYYY-MM-DD.log
   - 最後抓取時間寫入 .tmp/dividend_last_fetch.txt
 - crontab entry: 0 15 * * 1-5 /home/aping/MyProjects/StockTools/scripts/daily_fetch_dividend.sh
-  - 走系統 crontab（不包 LLM agent）以避開 FinMind 額度被 M2.7 過載
+  - 走系統 crontab(不包 LLM agent)以避開 FinMind 額度被 M2.7 過載
 - scripts/fetch_dividend.py 新增 --all --batch N 全市場補抓 CLI
   - 全市場 2,040 檔股號自動從 TWSE 即時 API 取得
-  - 補抓 100 檔/次（Free tier 300-1000/月 額度友善）
+  - 補抓 100 檔/次(Free tier 300-1000/月 額度友善)
 
 【Phase 3 - App 狀態面板】
 - _ms_refresh_dividend_status() 加上「最後自動抓取時間」顯示
   - 讀取 .tmp/dividend_last_fetch.txt
-  - 狀態列格式：「股利 DB: ✅ 2040/2040 檔（全部就絡）｜自動抓取 2026-06-16 22:09」
+  - 狀態列格式:「股利 DB: ✅ 2040/2040 檔(全部就絡)|自動抓取 2026-06-16 22:09」
   - App 重啟時自動重讀
 
 【Phase 4 - 2026 股利除息日補入】
-- 讀 goodinfo 3 個 2026 股利股息檔（P50U/P20-50/P20L）
-- 解析「除息交易日」欄位（ROC 'YY/MM/DD 格式 → 西元 YYYY-MM-DD）
-- 1,666 筆 UPDATE ex_date（只補除息日、不覆寫 cash/stock）
-- 0 筆 INSERT（DB 已有 2026 金額記錄、只補日期）
-- 2026 股票股利除權息日尚未到：ex_date_close 留 NULL
-  → App 殖利率計算會用最新收盤價 fallback（V0.9.5+ Phase 10 設計）
+- 讀 goodinfo 3 個 2026 股利股息檔(P50U/P20-50/P20L)
+- 解析「除息交易日」欄位(ROC 'YY/MM/DD 格式 → 西元 YYYY-MM-DD)
+- 1,666 筆 UPDATE ex_date(只補除息日、不覆寫 cash/stock)
+- 0 筆 INSERT(DB 已有 2026 金額記錄、只補日期)
+- 2026 股票股利除權息日尚未到:ex_date_close 留 NULL
+  → App 殖利率計算會用最新收盤價 fallback(V0.9.5+ Phase 10 設計)
 
-【Phase 5 - 修 Bug：335 檔「goodinfo 已查無股利」股號】
-- William 反映手動選股「股利 DB: 2030/2374 檔（缺漏 335）」
-- 根因：goodinfo 10Y 檔對 335 檔「無股利」標的沒資料
+【Phase 5 - 修 Bug:335 檔「goodinfo 已查無股利」股號】
+- William 反映手動選股「股利 DB: 2030/2374 檔(缺漏 335)」
+- 根因:goodinfo 10Y 檔對 335 檔「無股利」標的沒資料
   - 新發行的主動式 ETF (00400A~00406A)
   - 槓桿/反向型 ETF (006205~00646)
   - 跨境 ETF 無股利 (0057、0061、00636 等)
-- 修法：mark_no_dividend_stocks() 函式
+- 修法:mark_no_dividend_stocks() 函式
   - 把 price_df 有、但 DB 沒的股號 INSERT 標記 (cash=0, source='goodinfo_no_div')
-  - 手動選股即可正確顯示「無缺漏」（避免誤報 335 缺漏）
-- 結果：DB 股號總數 2040 → 2375（+335 標記）
-- 標記 source='goodinfo_no_div'，方便之後區分「實際有股利」vs「查無股利」
+  - 手動選股即可正確顯示「無缺漏」(避免誤報 335 缺漏)
+- 結果:DB 股號總數 2040 → 2375(+335 標記)
+- 標記 source='goodinfo_no_div',方便之後區分「實際有股利」vs「查無股利」
 
 【TWSE / FinMind 分工重大設計決策】
-- 月營收 / 營收 YoY：TWSE t187ap05_L.csv（App 已在用，不走 FinMind）
-- 季 EPS：TWSE t187ap14_L.csv（App 已在用，不走 FinMind）
-- 股利分派：TWSE 找不到公開 CSV（試過 t05st10ifrs_L.csv → 404）
+- 月營收 / 營收 YoY:TWSE t187ap05_L.csv(App 已在用,不走 FinMind)
+- 季 EPS:TWSE t187ap14_L.csv(App 已在用,不走 FinMind)
+- 股利分派:TWSE 找不到公開 CSV(試過 t05st10ifrs_L.csv → 404)
   → 仍用 FinMind + goodinfo 互補
-- 歷史股利 (10-12 年)：goodinfo 一次匯入
-- 每日新股利：FinMind 差額補抓（crontab 15:00）
+- 歷史股利 (10-12 年):goodinfo 一次匯入
+- 每日新股利:FinMind 差額補抓(crontab 15:00)
 
-【pytest】146 個 test 全部通過 ✅（與 v0.9.5-alpha 相同）
-- test_dividend_year_mapping.py（5 個）
-- test_pe_filter.py（5 個）
-- test_dividend_specific.py（10 個）
-- test_dividend_fetch_all.py（6 個）
-- test_dividend_scan_batch.py（8 個）
-- test_fetch_dividend_cli.py（10 個）
-- test_filter_b_logic.py（7 個）
-- test_div_cache_expiry.py（8 個）
-- test_ms_refresh_price.py（3 個）
-- test_filter_last_yld_unbound.py（4 個）
-- test_fetch_dividend_update.py（8 個）
-- test_market_hours.py（16 個）
-- test_get_or_fetch_market_hours.py（5 個）
-- test_ms_display_div_columns.py（5 個）
-- test_portfolio_refresh_loop.py（10 個）
-- test_fetch_stock_info_fallback.py（9 個）
-- test_ex_date_yield.py（15 個）
-- test_current_tax.py（12 個）
+【pytest】146 個 test 全部通過 ✅(與 v0.9.5-alpha 相同)
+- test_dividend_year_mapping.py(5 個)
+- test_pe_filter.py(5 個)
+- test_dividend_specific.py(10 個)
+- test_dividend_fetch_all.py(6 個)
+- test_dividend_scan_batch.py(8 個)
+- test_fetch_dividend_cli.py(10 個)
+- test_filter_b_logic.py(7 個)
+- test_div_cache_expiry.py(8 個)
+- test_ms_refresh_price.py(3 個)
+- test_filter_last_yld_unbound.py(4 個)
+- test_fetch_dividend_update.py(8 個)
+- test_market_hours.py(16 個)
+- test_get_or_fetch_market_hours.py(5 個)
+- test_ms_display_div_columns.py(5 個)
+- test_portfolio_refresh_loop.py(10 個)
+- test_fetch_stock_info_fallback.py(9 個)
+- test_ex_date_yield.py(15 個)
+- test_current_tax.py(12 個)
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-twser2 更新內容】2026-06-18 10:31 (William 反映)
 ════════════════════════════════════════════════════════════════════════════════
 【William 反映】
-1. 殖利率欄位全部顯示「-」（一個都沒有）
-2. 現金股利數字錯了（懷疑股票+現金被加總）
+1. 殖利率欄位全部顯示「-」(一個都沒有)
+2. 現金股利數字錯了(懷疑股票+現金被加總)
 
-【Bug 1：殖利率全部 "-" — 根因 + 修法】
-- 根因：`_fetch_finmind_dividend` 用 `_query_div_history` 查 DB
-  → `_query_div_history` 只回 `cash/stock/ex_date`，不包含 `cash_yield_pct/share_yield_pct`
+【Bug 1:殖利率全部 "-" - 根因 + 修法】
+- 根因:`_fetch_finmind_dividend` 用 `_query_div_history` 查 DB
+  → `_query_div_history` 只回 `cash/stock/ex_date`,不包含 `cash_yield_pct/share_yield_pct`
   → 所以輸出的 `{cy}現金殖利率_goodinfo` 等欄位全部是 None → Treeview 顯示「-」
-- 修法：改用 `_query_div_history_with_fetched`（有完整 9 欄含殖利率）
-  - 同時注意 nested 結構差異：`.get("years", {})` → `.get(year)`
+- 修法:改用 `_query_div_history_with_fetched`(有完整 9 欄含殖利率)
+  - 同時注意 nested 結構差異:`.get("years", {})` → `.get(year)`
 
-【Bug 2：_upsert_div_history 只寫 7 欄 — 會洗掉 goodinfo 殖利率】
-- 根因：`INSERT OR REPLACE` 只給 7 欄（stock_id~ex_date_close）
-  → `cash_yield_pct/share_yield_pct` 兩個欄位變成 NULL（被洗掉）
-  → 這是「次要風險」（主要 App 用 `skip_remote=True` 不會跑 upsert）
-- 修法：`_upsert_div_history` 擴充支援 9-tuple
-  - 5-tuple（舊）：補足到 9 欄
-  - 7-tuple（現有 caller）：補 2 個 None
-  - 9-tuple（新）：直接寫入、不洗掉既有值
+【Bug 2:_upsert_div_history 只寫 7 欄 - 會洗掉 goodinfo 殖利率】
+- 根因:`INSERT OR REPLACE` 只給 7 欄(stock_id~ex_date_close)
+  → `cash_yield_pct/share_yield_pct` 兩個欄位變成 NULL(被洗掉)
+  → 這是「次要風險」(主要 App 用 `skip_remote=True` 不會跑 upsert)
+- 修法:`_upsert_div_history` 擴充支援 9-tuple
+  - 5-tuple(舊):補足到 9 欄
+  - 7-tuple(現有 caller):補 2 個 None
+  - 9-tuple(新):直接寫入、不洗掉既有值
 
-【pytest】test_dividend_yield_fix.py（5 個守護 test）
+【pytest】test_dividend_yield_fix.py(5 個守護 test)
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-twser3 更新內容】2026-06-18 11:16 (William 反映)
 ════════════════════════════════════════════════════════════════════════════════
 【William 反映】
-1. 現金股利你還是把現金＋股票加總了！所以殖利率是錯的數字！
-   → 【查證結果】DB 跟螢幕值完全一致、現金股利確實是 cash only：
-     - DB cash + stock 是分開存分開顯示（goodinfo 6 檔：3 現金 + 3 股票）
-     - 2548 華固：DB cash=8.5, stock=0.5 → 螢幕「今現金=8.50, 今股票=0.50」✓
-     - 2442 新美齊：DB cash=2.7, stock=0.7 → 螢幕「今現金=2.70, 今股票=0.70」✓
-   - 殖利率也是從 goodinfo cash_yield_pct 直接拿（不是現金/現價 算出來的）
-   - 【為什麼看起來「錯」】goodinfo 用「除息日前 5 日均價」（= ex-date close）
-     算殖利率、跟現價不同 → 2548 cash=8.5、殖利率 6.53% → 隱含價 130.17（不是現價 107）
+1. 現金股利你還是把現金+股票加總了!所以殖利率是錯的數字!
+   → 【查證結果】DB 跟螢幕值完全一致、現金股利確實是 cash only:
+     - DB cash + stock 是分開存分開顯示(goodinfo 6 檔:3 現金 + 3 股票)
+     - 2548 華固:DB cash=8.5, stock=0.5 → 螢幕「今現金=8.50, 今股票=0.50」✓
+     - 2442 新美齊:DB cash=2.7, stock=0.7 → 螢幕「今現金=2.70, 今股票=0.70」✓
+   - 殖利率也是從 goodinfo cash_yield_pct 直接拿(不是現金/現價 算出來的)
+   - 【為什麼看起來「錯」】goodinfo 用「除息日前 5 日均價」(= ex-date close)
+     算殖利率、跟現價不同 → 2548 cash=8.5、殖利率 6.53% → 隱含價 130.17(不是現價 107)
    - 應不會有加總問題、但加了 test_cash_strictly_cash_only 整合測試守護
-2. 篩選結果中不需要看股票殖利率、盤中不顯示成交量（顯示 "-"）、收盤後顯示總成交量
+2. 篩選結果中不需要看股票殖利率、盤中不顯示成交量(顯示 "-")、收盤後顯示總成交量
 
-【修法 1：Treeview 拿掉股票殖利率欄】
+【修法 1:Treeview 拿掉股票殖利率欄】
 - 原本 15 欄 → 改後 13 欄
-- 拿掉「今股票殖%」、「去年股票殖%」（Treeview header + display values）
-- DataFrame 還是產出 stock_yield 欄位（Excel 匯出還想保留）
+- 拿掉「今股票殖%」、「去年股票殖%」(Treeview header + display values)
+- DataFrame 還是產出 stock_yield 欄位(Excel 匯出還想保留)
 
-【修法 2：盤中成交量顯示 "-"、收盤後顯示總成交量】
-- 用 _is_market_hours() 判斷盤中（週一~五 09:00~13:30）
-- 盤中 → vol_str = "-"（TWSE 即時 API 每 15-20 秒更新累積量、顯示沒意義還會誤導）
-- 收盤後（含週末）→ 維持原本邏輯、顯示千分位總成交量
+【修法 2:盤中成交量顯示 "-"、收盤後顯示總成交量】
+- 用 _is_market_hours() 判斷盤中(週一~五 09:00~13:30)
+- 盤中 → vol_str = "-"(TWSE 即時 API 每 15-20 秒更新累積量、顯示沒意義還會誤導)
+- 收盤後(含週末)→ 維持原本邏輯、顯示千分位總成交量
 
-【pytest】test_ms_no_stock_yield_vol_display.py（7 個守護 test）
-- test_treeview_columns_拿掉股票殖利率（13 欄結構守護）
-- test_成交量_盤中顯示橫線（盤中邏輯守護）
-- test_成交量_收盤後顯示總量（收盤後邏輯守護）
-- test_成交量_收盤後None顯示橫線（None 守護）
-- test_成交量_週末收盤後顯示總量（週末守護）
-- test_run_manual_selection_還是產出_stock_yield_欄位（Excel 匯出守護）
-- test_cash_strictly_cash_only（現金 vs 股票分開守護）
+【pytest】test_ms_no_stock_yield_vol_display.py(7 個守護 test)
+- test_treeview_columns_拿掉股票殖利率(13 欄結構守護)
+- test_成交量_盤中顯示橫線(盤中邏輯守護)
+- test_成交量_收盤後顯示總量(收盤後邏輯守護)
+- test_成交量_收盤後None顯示橫線(None 守護)
+- test_成交量_週末收盤後顯示總量(週末守護)
+- test_run_manual_selection_還是產出_stock_yield_欄位(Excel 匯出守護)
+- test_cash_strictly_cash_only(現金 vs 股票分開守護)
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-goodinfo4+5 更新內容】2026-06-18 13:05 (William 反映)
 ════════════════════════════════════════════════════════════════════════════════
 【William 反映】
-1. 現金股利你還是把現金＋股票加總了！以 2442 為例 今年現金=2.0、去年現金=0.079 才對！
+1. 現金股利你還是把現金+股票加總了!以 2442 為例 今年現金=2.0、去年現金=0.079 才對!
 2. 順便把股票股利及現金股利改成顯示小數點下 3 位數
 
-【Bug 1：goodinfo 10Y_div 本來就是「合計股利」（2017-2026 全部都是）】
+【Bug 1:goodinfo 10Y_div 本來就是「合計股利」(2017-2026 全部都是)】
 - 【根因】William 2026-06-18 17:56 反映
-  - 「dividend10Y 的股利是股票＋現金股利所以要減掉 Share10Y 的股票股利！」
+  - 「dividend10Y 的股利是股票+現金股利所以要減掉 Share10Y 的股票股利!」
   - 原本理解是「goodinfo 從 2026 才改成合計」→ 錯了、其實十年都是合計
   - 2017-2025 之所以看起來 cash 對、是因為該年股票股利=0 (10Y_div = 10Y_div - 0 = cash)
-  - 2017-2025 沒股票股利的股、看起來 cash 對；有股票股利的股、cash 就錯了
-- 【證據】對照 goodinfo 2442 2025 公開資料：
+  - 2017-2025 沒股票股利的股、看起來 cash 對;有股票股利的股、cash 就錯了
+- 【證據】對照 goodinfo 2442 2025 公開資料:
   - 10Y_div=0.237 (合計), 10Y_share=0.158 (股票), 公開 cash=0.079
-  - 0.237 - 0.158 = 0.079 ✓（這就是 William 一直反映的 0.079）
-  - 其他股驗證：
+  - 0.237 - 0.158 = 0.079 ✓(這就是 William 一直反映的 0.079)
+  - 其他股驗證:
     | 代號 | 2019 | 2021 | 2022 | 2023 | 2024 |
     | 2442 cash | 0.502 | 0.102 | 0.204 | 0.051 | 0.110 |
     | 2442 stock | 1.004 | 0.202 | 0.511 | 0.120 | 0.224 |
     | 2442 10Y_div | 1.506 | 0.304 | 0.715 | 0.171 | 0.334 |
     | 1.506-1.004=0.502 ✓ | 0.304-0.202=0.102 ✓ | 0.715-0.511=0.204 ✓ | 0.171-0.120=0.051 ✓ | 0.334-0.224=0.110 ✓ |
-- 【修法】改 `import_dividend()` 為 `cash = 10Y_div - 10Y_share`（處理 2017-2026 全部）
-  - 拿掉原本的 `import_2026_dividend()` 函式（不需要單獨覆寫 2026）
-  - 用 NaN 防呆：若 cash < 0（10Y_share 異常 > 10Y_div）、警告 + 設 0
-- 【run 順序】`import_dividend()` → `import_yield_rate()`（不再需要 import_2026_dividend）
-- 【DB 修補範圍】2017-2025 全部（不是只有 2026）
+- 【修法】改 `import_dividend()` 為 `cash = 10Y_div - 10Y_share`(處理 2017-2026 全部)
+  - 拿掉原本的 `import_2026_dividend()` 函式(不需要單獨覆寫 2026)
+  - 用 NaN 防呆:若 cash < 0(10Y_share 異常 > 10Y_div)、警告 + 設 0
+- 【run 順序】`import_dividend()` → `import_yield_rate()`(不再需要 import_2026_dividend)
+- 【DB 修補範圍】2017-2025 全部(不是只有 2026)
 
-【Bug 2：股利顯示精度不夠】
-- 原本 `_fmt_float(..., decimals=2)` → 2442 2025 現金 0.237 顯示 0.24（精度丟失）
-- 改 `_fmt_float(..., decimals=3)` → 顯示 0.237（保留精度）
-- 應用範圍：4 個股利欄位（今年股票/今年現金/去年股票/去年現金）
-  其他欄位（現價/殖利率/PE/成交量）仍維持 2 位
+【Bug 2:股利顯示精度不夠】
+- 原本 `_fmt_float(..., decimals=2)` → 2442 2025 現金 0.237 顯示 0.24(精度丟失)
+- 改 `_fmt_float(..., decimals=3)` → 顯示 0.237(保留精度)
+- 應用範圍:4 個股利欄位(今年股票/今年現金/去年股票/去年現金)
+  其他欄位(現價/殖利率/PE/成交量)仍維持 2 位
 
-【pytest】test_dividend_3decimal_2026_cash_bug.py（10 個守護 test）
+【pytest】test_dividend_3decimal_2026_cash_bug.py(10 個守護 test)
 - test_股票股利顯示_3位小數
 - test_現金股利顯示_3位小數
 - test_去年股票股利顯示_3位小數
 - test_DB_2026_cash_不等於_cash_plus_stock
 - test_2442_2026_cash_等於_2_0_不是_2_7
-- test_2442_2025_cash_等於_0_079_不是_0_237（William 一直反映的 0.079 來源）
-- test_2442_歷年_cash_符合_10Y_div_扣_10Y_share（2019-2026 全部）
+- test_2442_2025_cash_等於_0_079_不是_0_237(William 一直反映的 0.079 來源)
+- test_2442_歷年_cash_符合_10Y_div_扣_10Y_share(2019-2026 全部)
 - test_2548_2026_cash_等於_8_0_不是_8_5
 - test_import_2026_dividend_保留_殖利率
 - test_季配股_2026_cash_未公布_保留_既有值
 
 【DB 修補結果】
-- 2017-2025 全部重算 cash（10Y_div - 10Y_share）
-- 受影響股數：所有有股票股利的股（2017-2026 加起來估計幾千筆）
-- 修法：重跑 `python3 scripts/import_goodinfo_history.py --only div` 自動修補
-- 修補後重點驗證：
+- 2017-2025 全部重算 cash(10Y_div - 10Y_share)
+- 受影響股數:所有有股票股利的股(2017-2026 加起來估計幾千筆)
+- 修法:重跑 `python3 scripts/import_goodinfo_history.py --only div` 自動修補
+- 修補後重點驗證:
   - 2442 2025 cash: 0.237 → 0.079 ✓
   - 2442 2026 cash: 2.7 → 2.0 ✓
   - 2442 2019 cash: 1.506 → 0.502 ✓
-  - 2542 cash 大多下降（之前是 cash+stock 合計）
-  - 9946 2026 cash 保留 1.37（季配 2026 cash=NaN、保留 10Y 加總）
+  - 2542 cash 大多下降(之前是 cash+stock 合計)
+  - 9946 2026 cash 保留 1.37(季配 2026 cash=NaN、保留 10Y 加總)
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-goodinfo4+5 (vol + sort) 更新內容】2026-06-18 18:12 (William 反映)
 ════════════════════════════════════════════════════════════════════════════════
 【William 反映】
-1. 「成交量不是我要的今日成交量！」 → 拿掉盤中/收盤後切換邏輯
+1. 「成交量不是我要的今日成交量!」 → 拿掉盤中/收盤後切換邏輯
 2. 「順便將篩選結果依照營收累計YoY由大到小排序」
 
-【修法 1：成交量直接顯示今日量】
-- 【原本 V0.9.5-twser3】盤中 → "-"，收盤後 → 總成交量
+【修法 1:成交量直接顯示今日量】
+- 【原本 V0.9.5-twser3】盤中 → "-",收盤後 → 總成交量
 - 【V0.9.5-goodinfo4+5 修正】拿掉 _is_market_hours() 判斷、直接顯示 price_df 的「成交量(張)」
 - William 說「就是要看今日即時量」→ 盤中的累積量也是有意義的
 
-【修法 2：主排序改為營收累計YoY 降序】
+【修法 2:主排序改為營收累計YoY 降序】
 - 【原本】sort = [_yld_has_data, _sort_yld, _sort_stock, _sort_rev, _sort_pe]
   → 殖利率有資料、殖利率高、股票股利高、營收YoY 高、PE 低
 - 【新】sort = [_sort_rev, _yld_has_data, _sort_yld, _sort_stock, _sort_pe]
   → 營收YoY 高、殖利率有資料、殖利率高、股票股利高、PE 低
 - 主排序從「殖利率」改為「營收累計YoY」
 - 同營收YoY 時、還是依殖利率排序
-- None 排最後（用 -9999 作 sort key）
+- None 排最後(用 -9999 作 sort key)
 
 【pytest】
-- test_ms_vol_rev_sort.py（6 個新守護 test）
+- test_ms_vol_rev_sort.py(6 個新守護 test)
   - test_成交量_直接顯示今日量_不管時段
   - test_成交量_None_顯示橫線
-  - test_成交量_盤中不再顯示橫線（regression 守護：盤中也不再 "-"）
+  - test_成交量_盤中不再顯示橫線(regression 守護:盤中也不再 "-")
   - test_排序_以營收累計YoY_降序為主
   - test_排序_同_營收YoY_時_殖利率高排前
   - test_排序_None_排最後
-- test_ms_no_stock_yield_vol_display.py 重寫（拿掉舊的盤中/收盤後 test）
+- test_ms_no_stock_yield_vol_display.py 重寫(拿掉舊的盤中/收盤後 test)
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-goodinfo4+5 (vol+cache) 更新內容】2026-06-18 18:34 (William 反映)
 ════════════════════════════════════════════════════════════════════════════════
 【William 反映 3 點】
-1. 現價沒資料：抓不到的股應該 delay + retry、收盤後為什麼會沒資料？兩個股都重跑都一樣
+1. 現價沒資料:抓不到的股應該 delay + retry、收盤後為什麼會沒資料?兩個股都重跑都一樣
 2. 抓完應該要 update cache
 3. 成交量依舊不是今日總成交量
 
-【修法 1：成交量單位修正】
-- 【根因】TWSE MIS API 的 v 欄位是「股」、不是「張」！原本 int(v/1000) 會把 4016 股變成 4 張
-  例：v=4016 股 → 原本 int(4.016)=4 張（只 4000 股、偏小 16 股）
-  修法：vol = v / 1000 保留小數（張）、顯示用 f"{vol:,.3f}"
-- 驗證：2548 v=4016 → 4.016 張（原來顯示 4 張，現顯示 4.016 張）
-  1815 v=21416 → 21.416 張（原來顯示 21 張，現顯示 21.416 張）
+【修法 1:成交量單位修正】
+- 【根因】TWSE MIS API 的 v 欄位是「股」、不是「張」!原本 int(v/1000) 會把 4016 股變成 4 張
+  例:v=4016 股 → 原本 int(4.016)=4 張(只 4000 股、偏小 16 股)
+  修法:vol = v / 1000 保留小數(張)、顯示用 f"{vol:,.3f}"
+- 驗證:2548 v=4016 → 4.016 張(原來顯示 4 張,現顯示 4.016 張)
+  1815 v=21416 → 21.416 張(原來顯示 21 張,現顯示 21.416 張)
 
-【修法 2：otc_ fallback（修 6 開頭 = 上櫃 的誤判）】
+【修法 2:otc_ fallback(修 6 開頭 = 上櫃 的誤判)】
 - 【根因】原本 _prefix_v2 判斷「6 開頭 = otc_」、但 6669 緯穎是上市
-  結果：6669 用 otc_ 抓不到、現價 = None
-  修法：先打 tse_、c="" 的股再用 otc_ 重打（fallback 邏輯）
-- 驗證：6669 現在能抓到 5130.0 現價（修正前是 None）
-  5386 青雲（otc_） 521.0、5274 信驊（otc_） 18960.0 都能抓到
+  結果:6669 用 otc_ 抓不到、現價 = None
+  修法:先打 tse_、c="" 的股再用 otc_ 重打(fallback 邏輯)
+- 驗證:6669 現在能抓到 5130.0 現價(修正前是 None)
+  5386 青雲(otc_) 521.0、5274 信驊(otc_) 18960.0 都能抓到
 
-【修法 3：抓完後 update cache】
+【修法 3:抓完後 update cache】
 - 【William 反映】「手動選股有開啟 TWSE 即時股價時、抓完全部的股價應該要去 update cache 中的股價資料」
-- 修法：merge 完後 save_cache(get_cache_file("price"), price_df)
-- 效果：下次開啟 App 不必重抓、從 cache 讀
+- 修法:merge 完後 save_cache(get_cache_file("price"), price_df)
+- 效果:下次開啟 App 不必重抓、從 cache 讀
 
-【pytest】test_twse_realtime_vol_otc.py（9 個守護 test）
+【pytest】test_twse_realtime_vol_otc.py(9 個守護 test)
 - test_vol_換算_股轉張_保留小數
 - test_vol_2548_正確值
 - test_vol_大於1000張_用千分位
@@ -3501,51 +3506,51 @@ ETF 開機抓取整個掛掉、Status bar 永遠是「❌ ETF 開機抓取失敗
 - test_vol_NaN_顯示橫線
 - test_vol_0_保留為0
 - test_otc_fallback_合併6開頭上櫃股
-- test_otc_fallback_6開頭上市股（如 6669）
+- test_otc_fallback_6開頭上市股(如 6669)
 - test_抓完後_save_cache
 
 【驗證】
-- 修正前 2548 顯示 4 張、修正後顯示 4.016 張（/1000 保留小數）
-- 修正前 6669 緯穎「—」、修正後 5130.00
-- 修正前 5386 青雲「—」、修正後 521.00
-- 修正前 5274 信驊「—」、修正後 18960.00
+- 修正前 2548 顯示 4 張、修正後顯示 4.016 張(/1000 保留小數)
+- 修正前 6669 緯穎「-」、修正後 5130.00
+- 修正前 5386 青雲「-」、修正後 521.00
+- 修正前 5274 信驊「-」、修正後 18960.00
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-goodinfo4+5 (retry+vol) 更新內容】2026-06-18 19:25 (William 反映)
 ════════════════════════════════════════════════════════════════════════════════
 【William 反映 3 點】
-1. 成交量還是不對：5386 顯示 0.000（vol=0）
+1. 成交量還是不對:5386 顯示 0.000(vol=0)
 2. 這個篩選條件為什麼沒抓到 6669
-3. 還是有很多沒現價的：otc fallback 整批失敗（Connection aborted）
+3. 還是有很多沒現價的:otc fallback 整批失敗(Connection aborted)
 
-console：⚠️ TWSE API otc fallback 失敗：('Connection aborted.', RemoteDisconnected(...))
-console：⚠️ TWSE API 失敗（批48/48、tse）：('Connection aborted.', ...)
+console:⚠️ TWSE API otc fallback 失敗:('Connection aborted.', RemoteDisconnected(...))
+console:⚠️ TWSE API 失敗(批48/48、tse):('Connection aborted.', ...)
 
-【修法 1：retry 機制】_query_twse 加 3 次 retry
+【修法 1:retry 機制】_query_twse 加 3 次 retry
 - 原本 0 retry、48 批連打可能導致後面幾批被 rate limit
-- 修法：重試 3 次、間隔 1.0s / 2.0s / 3.0s 成長退避
+- 修法:重試 3 次、間隔 1.0s / 2.0s / 3.0s 成長退避
 - otc_ fallback 同一份 retry 邏輯
 
-【修法 2：batch 間 sleep】避免連打被 rate limit
+【修法 2:batch 間 sleep】避免連打被 rate limit
 - 原本 0 sleep、48 批連打 0.15s/批 → 連續發 7.2s 請求
-- 修法：batch 1 之後每批 sleep 0.5s
+- 修法:batch 1 之後每批 sleep 0.5s
 
-【修法 3：cache 現價 fillna 股價】
-- 【根因】cache 的「現價」欄位可能是 NaN（之前 TWSE 抓不到）、但「股價」有值
+【修法 3:cache 現價 fillna 股價】
+- 【根因】cache 的「現價」欄位可能是 NaN(之前 TWSE 抓不到)、但「股價」有值
 - merge 後 fillna(現價) 拿不到舊值、結果還是 NaN
-- 修法：merge 前先把 cache 現價用股價 fallback 填補
+- 修法:merge 前先把 cache 現價用股價 fallback 填補
 
-【修法 4：vol=0 顯示 "—" 不是 0.000】
+【修法 4:vol=0 顯示 "-" 不是 0.000】
 - 原本 vol=0.0 顯示 "0.000"、看起來像「有資料但成交量為 0」、會誤導
-- 修法：vol=0 一律顯示 "—" 表「無資料」
+- 修法:vol=0 一律顯示 "-" 表「無資料」
 
 【6669 為什麼没被抓到】
 - 6669 本益比 = 現價 5130 / EPS 49.46 = 103.7
 - 本益比 ≤ 70 過濾掉是正確的
-- 之前版本 cache 股價較低（可能是 5080）→ PE 102.7 仍 > 70
+- 之前版本 cache 股價較低(可能是 5080)→ PE 102.7 仍 > 70
 - 【真的要看 6669、請把「本益比 (PE) ≤」改為 110 或 150】
 
-【pytest】test_twse_realtime_retry.py（4 個新守護 test）
+【pytest】test_twse_realtime_retry.py(4 個新守護 test)
 - test_query_twse_retry_一次失敗後成功
 - test_query_twse_三次都失敗回傳空
 - test_vol_0_顯示橫線不是0_000
@@ -3558,20 +3563,20 @@ console：⚠️ TWSE API 失敗（批48/48、tse）：('Connection aborted.', .
 1. 「你說 2548 成交量 4.016 修了、是錯的、每日總成交量不會有小數點」
 2. 「今天 2548 成交量是 4020 張」
 
-【修法：張是整數單位】
-- 之前寫 vol = v / 1000.0 顯示 4.016 張、是錯的（沒這個單位）
+【修法:張是整數單位】
+- 之前寫 vol = v / 1000.0 顯示 4.016 張、是錯的(沒這個單位)
 - 「張」是整數單位、v=4,020,000 股 → vol = int(v) // 1000 = 4020 張
-- 16 股 = 0 張（零股不算進張）
-- 顯示：f"{int(vol):,}" → "4,020"（帶千分位整數）
+- 16 股 = 0 張(零股不算進張)
+- 顯示:f"{int(vol):,}" → "4,020"(帶千分位整數)
 
 【pytest】
-- test_twse_realtime_vol_otc.py：4 個 vol 測試改為整數守護
-- test_twse_realtime_retry.py：format_vol 改為整數
-- test_twse_realtime.py：test_成交量單位是張 改為 == 5（int）
+- test_twse_realtime_vol_otc.py:4 個 vol 測試改為整數守護
+- test_twse_realtime_retry.py:format_vol 改為整數
+- test_twse_realtime.py:test_成交量單位是張 改為 == 5(int)
 
 【重要教訓】
 - 「張」是整數單位、不是浮點數
-- 寫單位換算時要對照實際業務語意（零股另外處理）
+- 寫單位換算時要對照實際業務語意(零股另外處理)
 - 我之前測試用 v=4016 剛好是 4 張 16 股、用浮點顯示 4.016 看起來合理
   → 但實際交易中「張」永遠是整數、不會有 4.016 張
 
@@ -3579,36 +3584,36 @@ console：⚠️ TWSE API 失敗（批48/48、tse）：('Connection aborted.', .
 【v0.9.5-goodinfo4+5 (vol-no-divide) 更新內容】2026-06-18 21:54 (William 反映)
 ════════════════════════════════════════════════════════════════════════════════
 【William 反映】
-- 「成交量不要除以1000應該就對了！」
-- 之前版本：v=4016 → vol = int(4016/1000) = 4 張（錯）
-- 正確版本：v=4016 → vol = int(4016) = 4,016 張（接近你說的 4020 張收盤量）
+- 「成交量不要除以1000應該就對了!」
+- 之前版本:v=4016 → vol = int(4016/1000) = 4 張(錯)
+- 正確版本:v=4016 → vol = int(4016) = 4,016 張(接近你說的 4020 張收盤量)
 - → TWSE MIS API 的 v 欄位已經是「張」、不要再除以 1000
 
 【根因】
 - 我之前看 Asoul/tsrtc GitHub 文件以為 v 是「股」、所以寫 // 1000
-- 但你的實際驗證（2548 收盤 4020 張、API 抓 4016）證明 v 已經是「張」
+- 但你的實際驗證(2548 收盤 4020 張、API 抓 4016)證明 v 已經是「張」
 - → 不要被第三方文件誤導、要對照實際 API response
 
 【修法】
-- _fetch_twse_realtime_batch：vol = int(float(v_raw))（不再 // 1000）
-- _ms_display_results：保持 f"{int(vol):,}"（顯示邏輯不變、只是輸入值變大）
+- _fetch_twse_realtime_batch:vol = int(float(v_raw))(不再 // 1000)
+- _ms_display_results:保持 f"{int(vol):,}"(顯示邏輯不變、只是輸入值變大)
 - cache 內舊的「int(v/1000)」值清空、讓下次抓股價用新邏輯重抓
 
 【pytest】
-- test_twse_realtime.py：test_成交量單位是張 改為 == 5000
-- test_twse_realtime.py：test_現價欄位型態 改為 == 5000
-- test_twse_realtime_vol_otc.py：test_vol_換算 改為張直接顯示
-- test_twse_realtime_vol_otc.py：test_vol_2548_正確值 改為 4016
-- test_twse_realtime_vol_otc.py：test_otc_fallback_6開頭上市股 改為 1537
+- test_twse_realtime.py:test_成交量單位是張 改為 == 5000
+- test_twse_realtime.py:test_現價欄位型態 改為 == 5000
+- test_twse_realtime_vol_otc.py:test_vol_換算 改為張直接顯示
+- test_twse_realtime_vol_otc.py:test_vol_2548_正確值 改為 4016
+- test_twse_realtime_vol_otc.py:test_otc_fallback_6開頭上市股 改為 1537
 
 【驗證】
-- 2548 v=4016 → vol=4,016 張（接近收盤量 4020 張）
+- 2548 v=4016 → vol=4,016 張(接近收盤量 4020 張)
 - 6669 v=1537 → vol=1,537 張
 - 5386 v=1162 → vol=1,162 張
 - 5274 v=148 → vol=148 張
 
 【重要教訓】
-- 「不要被第三方文件誤導」：Asoul/tsrtc 說 v 是股、實際是張
+- 「不要被第三方文件誤導」:Asoul/tsrtc 說 v 是股、實際是張
 - 寫單位換算時要對照實際 API response、不能只信文件
 - 你是 API 真正使用者、你的觀察比文件更權威
 
@@ -3623,29 +3628,29 @@ console：⚠️ TWSE API 失敗（批48/48、tse）：('Connection aborted.', .
 - 之前舊 cache 只有 data sheet、沒有 meta sheet
 - save_cache 後來才加入 meta sheet、但已經存在的 cache 檔案沒有 meta
 - load_cache 嘗試讀 meta sheet → 直接 crash
-- get_or_fetch 失敗 → fallback 讀舊 cache（讀 data OK）
+- get_or_fetch 失敗 → fallback 讀舊 cache(讀 data OK)
 - 但同時「TWSE 即時抓股價」觸發路徑被中斷 → 沒重抓
-- → 所有成交量都是 None、顯示為 "—"
+- → 所有成交量都是 None、顯示為 "-"
 
 【修法】
-1. load_cache：meta sheet 不存在時 fallback 回傳今天日期（不 crash）
-2. _is_cache_fresh：meta sheet 不存在時 return True（視為剛抓的、不觸發重抓）
-3. cache/price.xlsx：手動補上 meta sheet（下次 save_cache 會自動寫入）
-4. fileheader：版本號升級為 (2026-06-18 22:07)
+1. load_cache:meta sheet 不存在時 fallback 回傳今天日期(不 crash)
+2. _is_cache_fresh:meta sheet 不存在時 return True(視為剛抓的、不觸發重抓)
+3. cache/price.xlsx:手動補上 meta sheet(下次 save_cache 會自動寫入)
+4. fileheader:版本號升級為 (2026-06-18 22:07)
 
-【pytest】test_cache_meta_sheet_fallback.py（4 個新守護 test）
+【pytest】test_cache_meta_sheet_fallback.py(4 個新守護 test)
 - test_load_cache_沒有meta_sheet_不crash
 - test_load_cache_有meta_sheet_正常讀取
 - test_is_cache_fresh_沒有meta_回傳True
 - test_save_cache_同時寫data和meta
 
-【驗證】pytest 217/217 全綠（213 → 217）
+【驗證】pytest 217/217 全綠(213 → 217)
 
 【重要教訓】
 - 「新版本加新功能、要保留舊檔案容錯」
-- 「Tkinter Treeview 會把千分位逗號轉成小數點」：locale=zh_TW.UTF-8 時，
-  Treeview values 傳 "4,016" 會顯示成 "4.016"（逗號被當成歐洲小數點）
-  → 解決：vol 是整數、不需要千分位、直接 str(int(vol))
+- 「Tkinter Treeview 會把千分位逗號轉成小數點」:locale=zh_TW.UTF-8 時,
+  Treeview values 傳 "4,016" 會顯示成 "4.016"(逗號被當成歐洲小數點)
+  → 解決:vol 是整數、不需要千分位、直接 str(int(vol))
   → 如果未來需要千分位、Treeview cell 必須避免字串含逗號
 
 ════════════════════════════════════════════════════════════════════════════════
@@ -3653,12 +3658,12 @@ console：⚠️ TWSE API 失敗（批48/48、tse）：('Connection aborted.', .
 ════════════════════════════════════════════════════════════════════════════════
 【William 要求】2026-06-18 23:57
 - 「跑到 14xx 筆時開始有 error message 跟剛才沒什麼差別」
-- TWSE 全批失敗（rate limit）、batch 10 也失敗、耗時 123 秒
+- TWSE 全批失敗(rate limit)、batch 10 也失敗、耗時 123 秒
 
-【修法】新增 TWSE 速率模式 UI 切換（🚀 快速 / 🐌 緩慢）
-- 🚀 快速：batch delay 0.3s，省時但逾 1,400 批可能被 TWSE 限制
-- 🐌 緩慢：batch delay 5.0s，確保完成（2376 檔約需 20 分鐘）
-- UI：在「TWSE 即時股價」checkbox 下方新增 Radiobutton 切換
+【修法】新增 TWSE 速率模式 UI 切換(🚀 快速 / 🐌 緩慢)
+- 🚀 快速:batch delay 0.3s,省時但逾 1,400 批可能被 TWSE 限制
+- 🐌 緩慢:batch delay 5.0s,確保完成(2376 檔約需 20 分鐘)
+- UI:在「TWSE 即時股價」checkbox 下方新增 Radiobutton 切換
 
 【程式碼改動】
 - _fetch_twse_realtime_batch 加 slow_mode 參數
@@ -3669,44 +3674,44 @@ console：⚠️ TWSE API 失敗（批48/48、tse）：('Connection aborted.', .
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-goodinfo4+5 (batch-10+treeview-comma) 更新內容】2026-06-18 23:52
 ════════════════════════════════════════════════════════════════════════════════
-【問題】William 2026-06-18 21:54 反映：成交量顯示 4.016（小數點）
+【問題】William 2026-06-18 21:54 反映:成交量顯示 4.016(小數點)
 【根因】Tkinter Treeview + locale=zh_TW.UTF-8 → 逗號被當成歐洲數字小數分隔符
-  → 傳入 values=("4,016") 會被渲染成 "4.016"（句點）
-【修法】vol_str = str(int(vol))（不做千分位格式化）
-【附帶】_TWSE_REALTIME_BATCH_SIZE 50→10（避免 rate limit）
+  → 傳入 values=("4,016") 會被渲染成 "4.016"(句點)
+【修法】vol_str = str(int(vol))(不做千分位格式化)
+【附帶】_TWSE_REALTIME_BATCH_SIZE 50→10(避免 rate limit)
 
 【重要教訓】
 - 「Tkinter Treeview 格式化要測試 locale 情境」
-- 「系統 locale 會改變 Tkinter 數字渲染行為」：save_cache 後加 meta sheet
+- 「系統 locale 會改變 Tkinter 數字渲染行為」:save_cache 後加 meta sheet
   → 但舊 cache 沒 meta → load_cache crash → 整條 get_or_fetch 中斷
-  → 解法：load_cache 容錯讀不到 meta 時用 today 日期 fallback
-- 「忘記更新 fileheader 是新手錯誤」：每次改完要更新版本號
+  → 解法:load_cache 容錯讀不到 meta 時用 today 日期 fallback
+- 「忘記更新 fileheader 是新手錯誤」:每次改完要更新版本號
   → pre-commit hook 會自動更新「最後更新」、但「版本號」要手動
   → 我這次 22:07 改了 4 處 code、忘了更新 fileheader、被 William 抓包
   - test_排序_None_排最後
-- test_ms_no_stock_yield_vol_display.py 重寫（拿掉舊的盤中/收盤後 test）
+- test_ms_no_stock_yield_vol_display.py 重寫(拿掉舊的盤中/收盤後 test)
 
 ════════════════════════════════════════════════════════════════════════════════
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-twser 更新內容】2026-06-18 10:05 (William 指示)
 ════════════════════════════════════════════════════════════════════════════════
-【背景】William 確認 TWSE 即時資訊延遲只有 15-20 秒（不是 15 分鐘），且有免費 JSON API 可用。
+【背景】William 確認 TWSE 即時資訊延遲只有 15-20 秒(不是 15 分鐘),且有免費 JSON API 可用。
 
-【重大改版：FinMind 股價 → TWSE 即時 API】
-- 新增 _fetch_twse_realtime_batch()：完全用 TWSE 即時 API 取代 FinMind 股價
+【重大改版:FinMind 股價 → TWSE 即時 API】
+- 新增 _fetch_twse_realtime_batch():完全用 TWSE 即時 API 取代 FinMind 股價
   - URL: https://mis.twse.com.tw/stock/api/getStockInfo.jsp
-  - 上市: tse_XXXX.tw，上櫃: otc_XXXX.tw
-  - 主力欄位: z=現價，o/h/l/y=開高低昨
-  - 預開盤（9:00-9:30）z="-" → fallback 到 o（開盤拍賣價）
-  - 完全免費，無額度限制，可無限次呼叫
+  - 上市: tse_XXXX.tw,上櫃: otc_XXXX.tw
+  - 主力欄位: z=現價,o/h/l/y=開高低昨
+  - 預開盤(9:00-9:30)z="-" → fallback 到 o(開盤拍賣價)
+  - 完全免費,無額度限制,可無限次呼叫
 - _ms_run_selection 的「即時抓股價」checkbox 改走 TWSE API
-  - 2376 檔分批（50 檔/批）約 20-30 秒完成
+  - 2376 檔分批(50 檔/批)約 20-30 秒完成
   - UI 動態顯示「🔄 TWSE 即時股價抓取中... X/Y (Z%)」
-- FinMind 額度完全解放，專注留給股利補抓（crontab每日 15:00）
-- checkbox label 改：「🔄 TWSE 即時股價（走 TWSE 免費 API，盤中 15-20 秒延遲）」
+- FinMind 額度完全解放,專注留給股利補抓(crontab每日 15:00)
+- checkbox label 改:「🔄 TWSE 即時股價(走 TWSE 免費 API,盤中 15-20 秒延遲)」
 
-【pytest】test_twse_realtime.py 新增（6 個守護 test）
+【pytest】test_twse_realtime.py 新增(6 個守護 test)
 
 ════════════════════════════════════════════════════════════════════════════════
 
@@ -3714,20 +3719,20 @@ console：⚠️ TWSE API 失敗（批48/48、tse）：('Connection aborted.', .
 【v0.9.5-goodinfo4 更新內容】2026-06-17 21:04 (William 反映)
 ════════════════════════════════════════════════════════════════════════════════
 【William 3 點反映】
-1. 選股結果殖利率都是破折號（0.0 被當 None）
-2. 選股現價是昨日收盤（不是 6/17 盤中即時）
-3. 持倉總攬算法確認 OK（未實現 + net_realized - current_tax）
+1. 選股結果殖利率都是破折號(0.0 被當 None)
+2. 選股現價是昨日收盤(不是 6/17 盤中即時)
+3. 持倉總攬算法確認 OK(未實現 + net_realized - current_tax)
 
-【修法 1：殖利率 0.0 不再被當 None】
+【修法 1:殖利率 0.0 不再被當 None】
 - 【原本】_ms_display_results 7 個欄位用「if val and ...」truthy 判斷
-  → 0.0 是 falsy → 被當 None 顯示 '—'
+  → 0.0 是 falsy → 被當 None 顯示 '-'
   → 5386 現金殖利率 0.3 看起來像 0.0 一樣是破折號
 - 【修法】新增 _fmt_float() module-level helper
-  → 用 pd.isna(v) 判斷（None/NaN 才視為空）
-  → 0.0 顯示 '0.00'、0.3 顯示 '0.30'、None 顯示 '—'
+  → 用 pd.isna(v) 判斷(None/NaN 才視為空)
+  → 0.0 顯示 '0.00'、0.3 顯示 '0.30'、None 顯示 '-'
 - 修法 1 是「顯示問題」、DB 內 cash_yield_pct 本來就有 0.0 值
 
-【修法 2：盤中現價不再取昨日收盤】
+【修法 2:盤中現價不再取昨日收盤】
 - 【原本】_fetch_finmind_prices_batch 用 data[-1] 拿「最後一筆」
   → 盤中時 data[-1] 的 date 是「今日」但 close 是盤中即時
   → 收盤後 data[-1] 的 date 是「今日」但 close 是今日收盤
@@ -3735,35 +3740,35 @@ console：⚠️ TWSE API 失敗（批48/48、tse）：('Connection aborted.', .
   → 原本不會誤判、但若 TWSE 資料型態是 tick 會出問題
 - 【修法】新增 _pick_latest_price_row() helper
   → 從後往前找 date == today 的那筆
-  → 找不到（週末）→ 取 data[-1]（上週五收盤、合理 fallback）
-- 同時順手拿掉股利 finmind 抓取（設 skip_remote=True）
+  → 找不到(週末)→ 取 data[-1](上週五收盤、合理 fallback)
+- 同時順手拿掉股利 finmind 抓取(設 skip_remote=True)
   → DB 內已有 goodinfo 寫的 1,710 筆股利資料、finmind 不再需要
-  → 歷史資料來自 goodinfo、現價來自 TWSE+TPEx+finmind（盤中）
+  → 歷史資料來自 goodinfo、現價來自 TWSE+TPEx+finmind(盤中)
 
-【修法 3：拿掉股利 finmind 抓取】
+【修法 3:拿掉股利 finmind 抓取】
 - 【原本】_run_manual_selection 內 _fetch_finmind_dividend(all_codes)
-  → DB 沒的會去抓 finmind、finmind 額度限制（每小時 300 次）出問題
+  → DB 沒的會去抓 finmind、finmind 額度限制(每小時 300 次)出問題
 - 【修法】改成 _fetch_finmind_dividend(all_codes, skip_remote=True)
   → DB 沒的永遠不抓、殖利率直接 None → 跟未配息一樣顯示
   → 全部 1,710 檔股利從 goodinfo DB 來、不依賴 finmind
 
 【pytest】163 個 test 全部通過 ✅
-- test_goodinfo_yield_rate.py：+ 2 個 test（殖利率 0.0 守護）
-- test_pick_latest_price_row.py：+ 6 個 test（新 helper 守護）
+- test_goodinfo_yield_rate.py:+ 2 個 test(殖利率 0.0 守護)
+- test_pick_latest_price_row.py:+ 6 個 test(新 helper 守護)
 - 其他既有 test 全部保留過
 
 【使用】
 - App 重啟生效
 - 「即時抓股價」按鈕的 finmind 股價抓取已加 date 判斷、避開昨日收盤 bug
 - 選股結果不會再顯示「殖利率破折號」、會顯示 0.00
-- 持倉總攬的 599,501 數字不變（算法原本就對、已驗證）
+- 持倉總攬的 599,501 數字不變(算法原本就對、已驗證)
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-goodinfo3 更新內容】2026-06-17 12:03
 ════════════════════════════════════════════════════════════════════════════════
 【William 三點修正要求】
-1. 拿掉 10Y 平均殖利率欄位（不需要了）
-2. 舊邏輯：「cash=0 → continue 跳過 → 殖利率 None」 是錯的
+1. 拿掉 10Y 平均殖利率欄位(不需要了)
+2. 舊邏輯:「cash=0 → continue 跳過 → 殖利率 None」 是錯的
    ex: 5386 cash=0 但 goodinfo cash_yield=0.76% → 應用 goodinfo 值
 3. 「殖利率應該不用任何計算直接用才對」→ 拿掉所有 fallback
 
@@ -3775,64 +3780,64 @@ console：⚠️ TWSE API 失敗（批48/48、tse）：('Connection aborted.', .
 2. 拿掉 cash/現價、cash/ex_date_close、現價所有 fallback
    - 殖利率 100% 直接用 goodinfo cash_yield_pct / share_yield_pct
    - cash=0 但 goodinfo 有殖利率值 → 殖利率直接用 goodinfo 值
-   - goodinfo 殖利率 = 0（未配息）→ 顯示 0%
+   - goodinfo 殖利率 = 0(未配息)→ 顯示 0%
    - goodinfo 殖利率 = None → 殖利率 None
-3. 順手修 import_dividend 合併 bug：
+3. 順手修 import_dividend 合併 bug:
    - 【原本】`{**cash_agg, **share_agg}` 用 dict unpack、後者覆蓋前者
-     對 cash 跟 share 都有資料的股票（ex: 5386 2018）cash 被洗成 0
-     受影響：1,710 筆 / 646 檔
+     對 cash 跟 share 都有資料的股票(ex: 5386 2018)cash 被洗成 0
+     受影響:1,710 筆 / 646 檔
    - 【修法】明確取 cash_agg.cash + share_agg.stock
 4. 重跑 import_dividend + import_yield_rate、修復 5386 等 646 檔 cash 資料
-5. 修正後驗證：
-   - 3231 緯創：今 5.5/3.48%、去 3.799/3.3% ✅
-   - 5386 捷敏：今 6.5/0.3%、去 1.968/0.76% ✅（cash=0 但殖利率照顯示）
+5. 修正後驗證:
+   - 3231 緯創:今 5.5/3.48%、去 3.799/3.3% ✅
+   - 5386 捷敏:今 6.5/0.3%、去 1.968/0.76% ✅(cash=0 但殖利率照顯示)
 
 【pytest】155 個 test 全部通過 ✅
-- test_dividend_year_mapping.py：更新 3 個 test 預期（殖利率用 goodinfo）
-- test_ex_date_yield.py：更新 3 個 test 預期（殖利率用 goodinfo）
-- test_fetch_dividend_update.py：更新 1 個 test 預期
-- test_ms_display_div_columns.py：更新 1 個 test 預期
-- test_goodinfo_yield_rate.py：重寫為 9 個（V0.9.5-goodinfo3 行為）
+- test_dividend_year_mapping.py:更新 3 個 test 預期(殖利率用 goodinfo)
+- test_ex_date_yield.py:更新 3 個 test 預期(殖利率用 goodinfo)
+- test_fetch_dividend_update.py:更新 1 個 test 預期
+- test_ms_display_div_columns.py:更新 1 個 test 預期
+- test_goodinfo_yield_rate.py:重寫為 9 個(V0.9.5-goodinfo3 行為)
 
 【使用】
-- 重跑 import_dividend（已自動跑過、5386 等 646 檔 cash 修對了）
-- 重跑 import_yield_rate（已自動跑過）
+- 重跑 import_dividend(已自動跑過、5386 等 646 檔 cash 修對了)
+- 重跑 import_yield_rate(已自動跑過)
 - App 重啟即可生效
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.5-goodinfo2 更新內容】2026-06-17 11:10
 ════════════════════════════════════════════════════════════════════════════════
-【手動選股殖利率改用 goodinfo 來源】（William 2026-06-17 11:10 反映）
-- 問題：原本殖利率算法 = 現金股利 / 現價 → 只反映「最近一次配息 vs 現價」
+【手動選股殖利率改用 goodinfo 來源】(William 2026-06-17 11:10 反映)
+- 問題:原本殖利率算法 = 現金股利 / 現價 → 只反映「最近一次配息 vs 現價」
   偏差大、不適合做「歷史殖利率」参考
-- 修正：優先用 goodinfo 提供的「該年現金/股票殖利率」（%）
+- 修正:優先用 goodinfo 提供的「該年現金/股票殖利率」(%)
   * goodinfo 用「除息日前 5 日均價」算 → 不被單日股價波動干擾
   * 涵蓋全年多次配息、不會只算第一次除息
 - 【DB schema 擴充】
   * dividend_history 新增 cash_yield_pct / share_yield_pct 兩欄
-  * ALTER TABLE 自動 migration（既有 DB 不需手動處理）
+  * ALTER TABLE 自動 migration(既有 DB 不需手動處理)
 - 【import script 擴充】scripts/import_goodinfo_history.py
   * 新增 import_yield_rate() 函式、讀 6 個 .xls 檔
-    - P50U/P20-50/P20L_DividendRate.xls（現金殖利率，2017~2026）
-    - P50U/P20-50/P20L_ShareRate.xls（股票殖利率，2017~2026）
+    - P50U/P20-50/P20L_DividendRate.xls(現金殖利率,2017~2026)
+    - P50U/P20-50/P20L_ShareRate.xls(股票殖利率,2017~2026)
   * 新增 --only yield 選項
-  * 寫入結果：UPDATE 15,394 筆、現金殖利率涵蓋 2,209 檔
-  * 同一 stock_id + year 跨三個價位帶「取平均」（不像股利加總）
+  * 寫入結果:UPDATE 15,394 筆、現金殖利率涵蓋 2,209 檔
+  * 同一 stock_id + year 跨三個價位帶「取平均」(不像股利加總)
   * 只 UPDATE cash_yield_pct / share_yield_pct、不動 cash/stock/ex_date
 - 【演算法優先順序】_run_manual_selection
-  * 今年現金殖利率：goodinfo → cash/現價 fallback
-  * 去年現金殖利率：goodinfo → cash/ex_date_close → cash/現價 fallback
-  * 重要：goodinfo 殖利率 = 0 代表「該年未配息」→ 不誤判為高殖利率
+  * 今年現金殖利率:goodinfo → cash/現價 fallback
+  * 去年現金殖利率:goodinfo → cash/ex_date_close → cash/現價 fallback
+  * 重要:goodinfo 殖利率 = 0 代表「該年未配息」→ 不誤判為高殖利率
 - 【新增 3 個欄位】
-  * 今年股票殖利率(%) / 去年股票殖利率(%) — goodinfo 提供
-  * 歷史平均現金殖利率(%) — 10 年平均、解決「平均價算歷史殖利率偏差大」問題
+  * 今年股票殖利率(%) / 去年股票殖利率(%) - goodinfo 提供
+  * 歷史平均現金殖利率(%) - 10 年平均、解決「平均價算歷史殖利率偏差大」問題
   * 排序優先用「歷史平均現金殖利率」(10Y) → 不被單一年度高殖利率股票誤導
 - 【UI】
   * 手動選股 Treeview 新增「今股票殖%」、「去年股票殖%」、「10Y平均殖%」3 欄
-  * Treeview 現共 16 欄（原本 13 欄）
-- 【pytest】156 個 test 全部通過 ✅（v0.9.5-goodinfo 146 個 + 新增 10 個）
-  * test_goodinfo_yield_rate.py（10 個新）
-    - 殖利率優先用 goodinfo（今年/去年）
+  * Treeview 現共 16 欄(原本 13 欄)
+- 【pytest】156 個 test 全部通過 ✅(v0.9.5-goodinfo 146 個 + 新增 10 個)
+  * test_goodinfo_yield_rate.py(10 個新)
+    - 殖利率優先用 goodinfo(今年/去年)
     - fallback 到 cash/現價、cash/ex_date_close、現價
     - 股票殖利率 goodinfo 提供
     - 歷史平均殖利率 = goodinfo 各年算術平均
@@ -3840,31 +3845,31 @@ console：⚠️ TWSE API 失敗（批48/48、tse）：('Connection aborted.', .
     - 排序優先用歷史平均
 
 【未來修】finmind 跟 goodinfo year 語意不一致
-- finmind year=2025 = 「2025 盈餘的股利」（在 2026 除息）
+- finmind year=2025 = 「2025 盈餘的股利」(在 2026 除息)
 - goodinfo year=2025 = 「2025 除息」
-- 同一 DB row 兩種語意混合（例如 2408 2025：finmind cash=1.347、goodinfo cash_yield=0.0）
-- 建議：_fetch_finmind_dividend 寫入 DB 時 year +1（變 payment year）
+- 同一 DB row 兩種語意混合(例如 2408 2025:finmind cash=1.347、goodinfo cash_yield=0.0)
+- 建議:_fetch_finmind_dividend 寫入 DB 時 year +1(變 payment year)
 - 本版先不動、要覍察看其他股票是否也有同樣問題
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.4 更新內容】2026-06-11
 ════════════════════════════════════════════════════════════════════════════════
-Phase 2.3 — 買賣記錄 5 項更新：
-1. 股票股利配發（price=0）支援
-2. 萬年曆日期挑選（_CalendarDialog，純 Tkinter 原生）
-3. 成本加計手續費 + 證交稅（Treeview 新增「證交稅」欄）
-4. 策略參數設定支援券商折扣（broker_discount，預設 1.0）
-5. 交易明細可編輯（✏️編輯，action/shares/price/date 皆可改）
+Phase 2.3 - 買賣記錄 5 項更新:
+1. 股票股利配發(price=0)支援
+2. 萬年曆日期挑選(_CalendarDialog,純 Tkinter 原生)
+3. 成本加計手續費 + 證交稅(Treeview 新增「證交稅」欄)
+4. 策略參數設定支援券商折扣(broker_discount,預設 1.0)
+5. 交易明細可編輯(✏️編輯,action/shares/price/date 皆可改)
 
 ════════════════════════════════════════════════════════════════════════════════
 【v0.9.3 緊急修正內容】2026-06-08
 ════════════════════════════════════════════════════════════════════════════════
 
 【問題描述】
-- EPSYoY_raw 欄位完全為空，導致 EPSYoY_顯示(%) 全部為 0
-- Score 欄位計算異常，出現 -1e+18 負無限大值
+- EPSYoY_raw 欄位完全為空,導致 EPSYoY_顯示(%) 全部為 0
+- Score 欄位計算異常,出現 -1e+18 負無限大值
 - PE 欄位出現 inf 無限值未正確處理
-- 簡易評分門檻過濾邏輯錯誤，導致所有個股被排除
+- 簡易評分門檻過濾邏輯錯誤,導致所有個股被排除
 - Top10 選股結果全部為 ETF 而非正常個股
 
 【修正內容】
@@ -3874,7 +3879,7 @@ Phase 2.3 — 買賣記錄 5 項更新：
 
 2. 修正 calculate_simple_score() 函數
    - 新增 PE 和 EPSYoY_raw 的無限值處理
-   - 修正門檻過濾邏輯（改用 -998 判斷閾值啟用狀態）
+   - 修正門檻過濾邏輯(改用 -998 判斷閾值啟用狀態)
    - 未通過門檻的 Score 改為 pd.NA 而非 -1e+18
 
 3. 修正 calculate_multi_factor_score() 函數
@@ -3891,7 +3896,7 @@ Phase 2.3 — 買賣記錄 5 項更新：
 ════════════════════════════════════════════════════════════════════════════════
 
 1. 儲存本檔案
-2. 刪除 cache/ 目錄（強制重新下載資料）
+2. 刪除 cache/ 目錄(強制重新下載資料)
 3. 重新執行 python StockTool.py
 4. 確認 GUI 中簡易評分門檻皆為 -999 / 999
 5. 按下「執行策略」驗證結果
@@ -3902,14 +3907,14 @@ Phase 2.3 — 買賣記錄 5 項更新：
 from __future__ import annotations
 
 # 【V1.2.0-kb-focus-v19】模組 import 立即寫 log、證明 v19 source 真的有跑
-# v19 發現 v18 的所有 log 在 docstring 內、根本沒跑（被 python 視為註解）
+# v19 發現 v18 的所有 log 在 docstring 內、根本沒跑(被 python 視為註解)
 try:
     import os as _v19_os
     _v19_log = "/tmp/stocktool_v19_module.log"
     with open(_v19_log, "a", encoding="utf-8") as _f19:
         import datetime as _v19_dt
         _f19.write(f"[v19 module] StockTool.py imported @{_v19_dt.datetime.now().isoformat()}\n")
-    # 也寫到 stderr fd 2（繞過任何 redirect）
+    # 也寫到 stderr fd 2(繞過任何 redirect)
     try:
         _v19_os.write(2, f"[v19 module] StockTool.py imported (fd=2)\n".encode("utf-8"))
     except Exception:
@@ -3918,7 +3923,7 @@ except Exception as _v19_exc:
     print(f"[v19] module log failed: {_v19_exc}")
 
 # ==========================================================
-# Version 常數（V0.9.5-goodinfo4 設定）
+# Version 常數(V0.9.5-goodinfo4 設定)
 # ==========================================================
 # 【v1.1 重構】VERSION 已搬到 stocktool.config
 # ==========================================================
@@ -3961,7 +3966,7 @@ warnings.filterwarnings("ignore")
 # ==========================================================
 
 # ==========================================================
-# v1.1 重構：Config 從 stocktool.config 統一管理
+# v1.1 重構:Config 從 stocktool.config 統一管理
 # ==========================================================
 from stocktool.config import (
     CONFIG_FILE,
@@ -4107,9 +4112,9 @@ from stocktool.paper_scheduler import PaperScheduler
 # 像 Windows file explorer 一樣:click heading 切換升降冪
 # - 第一次 click → 降冪 (large → small, 由大到小)
 # - 再 click 一次 → 升冪 (small → large, 由小到大)
-# - 顯示「—」/空字串的 row → 一律排最後（不管升降冪）
+# - 顯示「-」/空字串的 row → 一律排最後(不管升降冪)
 # - 數字欄自動 parse (處理千分位、單位「股/張/%」)
-# - 文字欄當字串排（代號/名稱/日期）
+# - 文字欄當字串排(代號/名稱/日期)
 
 def _price_tag_for(v):
     """【V1.1-price-color】根據顀跌值決定 row 的 price_* tag
@@ -4135,9 +4140,9 @@ def _fmt_change(v, decimals=1, na="--"):
     """【V1.1-add-change-col】顀跌價欄位顯示
 
     Args:
-        v: 顀跌值（可能是 None / NaN / 0 / +5.0 / -3.2）
-        decimals: 小數位數（預設 1）
-        na: 缺失值顯示（預設 "--"）
+        v: 顀跌值(可能是 None / NaN / 0 / +5.0 / -3.2)
+        decimals: 小數位數(預設 1)
+        na: 缺失值顯示(預設 "--")
 
     Returns:
         "+5.0" / "-3.2" / "0.0" / "--"
@@ -4161,8 +4166,8 @@ def _parse_sort_value(v):
 
     Returns:
         (sort_key, is_missing)
-        - sort_key: float（數字欄）或 str（文字/日期欄）
-        - is_missing: True 表示「—」/空字串、要排最後
+        - sort_key: float(數字欄)或 str(文字/日期欄)
+        - is_missing: True 表示「-」/空字串、要排最後
     """
     s = str(v).strip()
     if s == "" or s == "—" or s == "-" or s == "--":
@@ -4172,7 +4177,7 @@ def _parse_sort_value(v):
     try:
         return (float(s_clean), False)
     except (ValueError, TypeError):
-        # 文字欄（代號/名稱/日期）→ 當字串排
+        # 文字欄(代號/名稱/日期)→ 當字串排
         return (s, False)
 
 
@@ -4194,10 +4199,10 @@ def _sort_treeview_by_column(tree, col, sort_state):
         sort_key, is_missing = _parse_sort_value(v)
         items.append((sort_key, is_missing, iid))
 
-    # 判斷此欄型別：以「此欄大多數都是 number」為基準、防止混雜 str+float 從爆
-    # 規則：
+    # 判斷此欄型別:以「此欄大多數都是 number」為基準、防止混雜 str+float 從爆
+    # 規則:
     #   1. 全部都 parse 成 number → 數字排
-    #   2. 有 number 也有非 number → 統一當 str 排（避免 TypeError）
+    #   2. 有 number 也有非 number → 統一當 str 排(避免 TypeError)
     #   3. 全部都是 str → 文字排
     type_counts = {"num": 0, "str": 0}
     for k, missing, _ in items:
@@ -4214,7 +4219,7 @@ def _sort_treeview_by_column(tree, col, sort_state):
         # 全部都是 str → 文字排
         sort_type = "str"
     else:
-        # 混雜：統一當 str 排（防止 < TypeError）
+        # 混雜:統一當 str 排(防止 < TypeError)
         sort_type = "str_mixed"
 
     # 分離 missing、missing 永遠排最後
@@ -4243,7 +4248,7 @@ def _sort_treeview_by_column(tree, col, sort_state):
             arrow = " ↑" if new_dir == "asc" else " ↓"
             tree.heading(c, text=c + arrow)
         else:
-            # 移除其他欄的箭頭（用 heading() GET 形式回傳 dict-like、取 "text" 欄位）
+            # 移除其他欄的箭頭(用 heading() GET 形式回傳 dict-like、取 "text" 欄位)
             try:
                 cur_info = tree.heading(c)
                 cur_text = cur_info.get("text", c) if isinstance(cur_info, dict) else c
@@ -4263,11 +4268,11 @@ def _make_treeview_click_sort(tree, cols, skip_col=None, skip_cols=None):
     Args:
         tree: ttk.Treeview
         cols: tuple of column names
-        skip_col: 不設 click handler 的欄位（舊版 API、單一欄位、例如「勾選」）
-        skip_cols: 不設 click handler 的欄位集合（新版 API、可多個、例如「勾選」、「名稱」）
+        skip_col: 不設 click handler 的欄位(舊版 API、單一欄位、例如「勾選」)
+        skip_cols: 不設 click handler 的欄位集合(新版 API、可多個、例如「勾選」、「名稱」)
 
     Returns:
-        sort_state dict（給 caller 存起來、跨多次顯示保留狀態）
+        sort_state dict(給 caller 存起來、跨多次顯示保留狀態)
     """
     sort_state = {}  # {col: 'asc'|'desc'}
 
@@ -4300,10 +4305,10 @@ class StrategyGUI(tk.Tk):
         self.log_queue = queue.Queue()
         self.logger = GuiLogger(self.log_queue)
 
-        # 【v1.1.5-console-log-file】2026-07-02 10:06 William 反映：
-        # 「整批失敗訊息還是沒顯示在 console」— 實際有進 queue、但 console scrollbar 沒自動到尾
-        # 雙保險：每則 log 同步寫一份到 daily log file（即使 console 視覺沒看到、也能從 file trace）
-        # 位置：./cache/console/console_YYYY-MM-DD.log
+        # 【v1.1.5-console-log-file】2026-07-02 10:06 William 反映:
+        # 「整批失敗訊息還是沒顯示在 console」- 實際有進 queue、但 console scrollbar 沒自動到尾
+        # 雙保險:每則 log 同步寫一份到 daily log file(即使 console 視覺沒看到、也能從 file trace)
+        # 位置:./cache/console/console_YYYY-MM-DD.log
         try:
             os.makedirs("cache/console", exist_ok=True)
             self._console_log_path = (
@@ -4312,28 +4317,28 @@ class StrategyGUI(tk.Tk):
             self._console_log_file = open(self._console_log_path, "a", encoding="utf-8")
             self._console_log_file.write(f"\n=== App 啟動 {datetime.now().isoformat()} ===\n")
             self._console_log_file.flush()
-            self.logger.log(f"📄 console log 寫入：{self._console_log_path}")
+            self.logger.log(f"📄 console log 寫入:{self._console_log_path}")
             # App 結束時 flush + close file
             atexit.register(self._close_console_log)
         except Exception as e:
             # log file 開失敗不影響 GUI
             self._console_log_path = None
             self._console_log_file = None
-            print(f"[WARN] 開 console log file 失敗：{e}")
+            print(f"[WARN] 開 console log file 失敗:{e}")
 
         saved_config = load_config()
         self.cfg = StrategyConfig()
         self.cfg.update_from_dict(saved_config)
 
-        # V0.9.4 phase2.3: 買賣記錄（broker_discount 從 StrategyConfig 讀）
+        # V0.9.4 phase2.3: 買賣記錄(broker_discount 從 StrategyConfig 讀)
         self.portfolio = PortfolioDB(DEFAULT_PORTFOLIO_DB,
                                     broker_discount=self.cfg.broker_discount)
-        # 記憶體中現價（stock_id → price）
+        # 記憶體中現價(stock_id → price)
         self._current_prices: Dict[str, float] = {}
-        # 記憶體中股票名稱（stock_id → name，fetch 回來時順便快取）
+        # 記憶體中股票名稱(stock_id → name,fetch 回來時順便快取)
         self._current_names: Dict[str, str] = {}
 
-        # 【V1.2.0-kb-focus-v9】key nav guard（v16 依然使用）
+        # 【V1.2.0-kb-focus-v9】key nav guard(v16 依然使用)
         self._kbd_nav_guard_until_ms = 0
         self._kbd_nav_mouse_pos_at_guard = (0, 0)
 
@@ -4341,18 +4346,18 @@ class StrategyGUI(tk.Tk):
         self._poll_log_queue()
         self._load_config_to_ui()
 
-        # V0.9.5: 啟動時背景重抓股價（若 cache 過期就重抓、今天就跳過）
+        # V0.9.5: 啟動時背景重抓股價(若 cache 過期就重抓、今天就跳過)
         # 用 flag 避免和「手動重抓股價」按鈕重複觸發
         self._bg_price_fetching = False
         self._price_last_update: Optional[datetime] = None
         self.after(800, self._startup_bg_fetch_price)
 
-        # V0.9.5+ Phase 8：買賣記錄 Tab 開盤 30 秒 refresh 持倉現價的 job id
+        # V0.9.5+ Phase 8:買賣記錄 Tab 開盤 30 秒 refresh 持倉現價的 job id
         self._portfolio_refresh_job_id = None
 
-        # 【V0.9.5-etf】ETF Tab 背景自動抓取 flag（防止重複）
+        # 【V0.9.5-etf】ETF Tab 背景自動抓取 flag(防止重複)
         self._etf_fetching = False
-        # ETF Tab 背景自動抓（延後 2.5 秒、讙 manual_select 跟 price fetch 先跑）
+        # ETF Tab 背景自動抓(延後 2.5 秒、讙 manual_select 跟 price fetch 先跑)
         self.after(2500, self._etf_auto_startup_fetch)
 
     def _v18_log(self, msg):
@@ -4362,7 +4367,7 @@ class StrategyGUI(tk.Tk):
             _log_path = "/tmp/stocktool_v18.log"
             with open(_log_path, "a", encoding="utf-8") as _f:
                 _f.write(msg + "\n")
-            # 也 print stdout + flush（避免 buffered）
+            # 也 print stdout + flush(避免 buffered)
             print(msg, flush=True)
         except Exception:
             try:
@@ -4378,7 +4383,7 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _build_ui(self):
-        self._v18_log("[v19 _build_ui] 進入（v19 啟動 log）")
+        self._v18_log("[v19 _build_ui] 進入(v19 啟動 log)")
         try:
             import datetime as _v19_d
             with open("/tmp/stocktool_v19_startup.log", "a", encoding="utf-8") as _f19:
@@ -4387,48 +4392,48 @@ class StrategyGUI(tk.Tk):
             pass
         self.geometry("1280x720")
 
-        # 【v1.1.1 HOTFIX #5】2026-06-24 22:10 William 反映：App 啟動時 crash
+        # 【v1.1.1 HOTFIX #5】2026-06-24 22:10 William 反映:App 啟動時 crash
         # _init_tab_presets_on_startup() 會讀 self._preset_vars / self.vars /
         # _apply_tab_values(tab_key, preset) 讀 self.vars.get(k)
         # 但 _add_preset_bar() 和 self.vars = {} 都在後面才 call/初始化。
-        # 原設計靠內部「if not hasattr」defensive check 負責初始化，
+        # 原設計靠內部「if not hasattr」defensive check 負責初始化,
         # 但 _init 早於 _add 就會 crash。
-        # 修法：_build_ui 一進來就預設初始化 _preset_vars / _preset_combos / vars
-        #      （後面 _add_preset_bar 的 hasattr check 仍是安全網）
+        # 修法:_build_ui 一進來就預設初始化 _preset_vars / _preset_combos / vars
+        #      (後面 _add_preset_bar 的 hasattr check 仍是安全網)
         self._preset_vars = {}
         self._preset_combos = {}
         self.vars = {}
 
-        # V0.9.4 Tab 化：notebook 包兩個分頁（不改 V0.9.3 既有 widget 結構）
-        # 2026-06-20 V0.9.5-tab-split-fix3：先建 top_frame 並 pack、
-        # notebook 以 top_frame 為 master 直接建構（pack(in_=...) 不會 reparent）
-        # V0.9.5-tab-split-fix3：用 grid 切上下兩列、top_frame expand、console 固定 180
-        self.grid_rowconfigure(0, weight=1)  # 上（notebook）拿剩餘空間
-        self.grid_rowconfigure(1, weight=0)  # 下（console）固定 180px
+        # V0.9.4 Tab 化:notebook 包兩個分頁(不改 V0.9.3 既有 widget 結構)
+        # 2026-06-20 V0.9.5-tab-split-fix3:先建 top_frame 並 pack、
+        # notebook 以 top_frame 為 master 直接建構(pack(in_=...) 不會 reparent)
+        # V0.9.5-tab-split-fix3:用 grid 切上下兩列、top_frame expand、console 固定 180
+        self.grid_rowconfigure(0, weight=1)  # 上(notebook)拿剩餘空間
+        self.grid_rowconfigure(1, weight=0)  # 下(console)固定 180px
         self.grid_columnconfigure(0, weight=1)
         self._top_frame = ttk.Frame(self)
         self._top_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
 
-        # 【V0.9.5-tree-row-pad】2026-06-28 20:51 William 反映：
+        # 【V0.9.5-tree-row-pad】2026-06-28 20:51 William 反映:
         # 「所有的篩選結果顯示行距應該要再加至少 2 dots.
-        #  現在你看股票名稱的中文字最下面條線（line）不見了！」
+        #  現在你看股票名稱的中文字最下面條線(line)不見了!」
         # 預設 Treeview rowheight 在 Win10/11 = 18-20px、中文字底部橫劃被切到
-        # 修法：Treeview rowheight 加 4 點（≈ 26-28px）
+        # 修法:Treeview rowheight 加 4 點(≈ 26-28px)
         #   - 「2 dots」→ 2 倍 點 size、Win11 預設 9pt → +18px 太離譜
         #   - 「2 dots」用 tkinter 語意 = 「加 2 個點的高度」、實作約 +4-6px
-        #   - 這裡設 28（Win11 預設 18-20 + 6-8px padding）
-        # 套用範圍：全 App 所有 ttk.Treeview（系統選股 / 手動選股 / ETF / 買賣記錄 / 回測）
+        #   - 這裡設 28(Win11 預設 18-20 + 6-8px padding)
+        # 套用範圍:全 App 所有 ttk.Treeview(系統選股 / 手動選股 / ETF / 買賣記錄 / 回測)
         # 透過 ttk.Style.configure("Treeview", rowheight=28) 一次設、所有 tree 都生效
         _style = ttk.Style(self)
         _style.configure("Treeview", rowheight=28)
-        # 【V1.2.0-keyboard-toggle-fix】2026-07-06 15:58 William 反映：
+        # 【V1.2.0-keyboard-toggle-fix】2026-07-06 15:58 William 反映:
         # 「鍵盤 highlight 是藍色、跟 mouse hover 的黃色不同步」
-        # 根因：Treeview 預設 selection (selected state) 背景色是系統藍色
-        # 修法：透過 ttk.Style.map 設定 selected 背景為 hover 同色 #fff3a0
+        # 根因:Treeview 預設 selection (selected state) 背景色是系統藍色
+        # 修法:透過 ttk.Style.map 設定 selected 背景為 hover 同色 #fff3a0
         # 讓鍵盤 highlight 跟 mouse hover 看起來一致
         # 【V1.2.0-kb-focus-v4】2026-07-06 21:55 William 反映「click 後高亮白色」
-        # 根因：Linux ttk 主題 selected state 預設 foreground 為白色
-        # 修法：style.map 同時設定 foreground 為黑色、避免變白
+        # 根因:Linux ttk 主題 selected state 預設 foreground 為白色
+        # 修法:style.map 同時設定 foreground 為黑色、避免變白
         _style.map(
             "Treeview",
             background=[("selected", "#fff3a0")],
@@ -4437,25 +4442,25 @@ class StrategyGUI(tk.Tk):
 
         self.notebook = ttk.Notebook(self._top_frame)
 
-        # 【V0.9.5-tab-split-phase3-C】tab 順序重排（William 09:02 要求）
-        # 新順序：系統選股 → 主動式 ETF → 手動選股 → 買賣記錄 → 回測模擬
+        # 【V0.9.5-tab-split-phase3-C】tab 順序重排(William 09:02 要求)
+        # 新順序:系統選股 → 主動式 ETF → 手動選股 → 買賣記錄 → 回測模擬
 
-        # Tab 1：系統選股
+        # Tab 1:系統選股
         self.select_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.select_tab, text="📊 系統選股")
 
-        # Tab 2：主動式 ETF（從 Tab 5 拉到 Tab 2）
+        # Tab 2:主動式 ETF(從 Tab 5 拉到 Tab 2)
         self.etf_tab = ttk.Frame(self.notebook)
         self._init_etf_history()
         self.notebook.add(self.etf_tab, text="📊 主動式 ETF")
         self._build_etf_tab(self.etf_tab)
 
-        # Tab 3：手動選股（從 Tab 4 拉到 Tab 3）
+        # Tab 3:手動選股(從 Tab 4 拉到 Tab 3)
         self.manual_select_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.manual_select_tab, text="🔍 手動選股")
         self._build_manual_select_tab(self.manual_select_tab)
 
-        # Tab 4：買賣記錄（從 Tab 3 拉到 Tab 4）
+        # Tab 4:買賣記錄(從 Tab 3 拉到 Tab 4)
         self.portfolio_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.portfolio_tab, text="📒 買賣記錄")
         self._build_portfolio_tab(self.portfolio_tab)
@@ -4463,29 +4468,29 @@ class StrategyGUI(tk.Tk):
         # Fix14: 啟動時自動載入每個 tab 上次的 Preset
         self._init_tab_presets_on_startup()
 
-        # Tab 5：回測模擬（從 Tab 2 拉到 Tab 5）
+        # Tab 5:回測模擬(從 Tab 2 拉到 Tab 5)
         self.backtest_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.backtest_tab, text="🧪 回測模擬")
         self._build_backtest_tab(self.backtest_tab)
 
-        # 【V1.2.0-paper-trading】Tab 6：模擬買賣
+        # 【V1.2.0-paper-trading】Tab 6:模擬買賣
         self.paper_tab_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.paper_tab_frame, text="📈 模擬買賣")
         self.paper_tab = PaperTradingTab(self, self.paper_tab_frame)
 
-        # 【V1.2.0-paper-trading stage 6】14:00 自動排程 — 只實例化、稍後啟動
+        # 【V1.2.0-paper-trading stage 6】14:00 自動排程 - 只實例化、稍後啟動
         self.paper_scheduler = PaperScheduler(self)
 
         # 綁定 Tab 切換 → 切到買賣記錄時自動 refresh
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-        # V0.9.5-tab-split Phase 3：兩個 tab 用 _build_tab_layout（左 params + 右 results）
+        # V0.9.5-tab-split Phase 3:兩個 tab 用 _build_tab_layout(左 params + 右 results)
         # 【V0.9.5-tab-split-phase3-C】改回傳 (left, right_frame, tree)、select_tab 加 export 按鈕
         left, self.select_right, self.select_tree = self._build_tab_layout(self.select_tab)
         bt_left, self.backtest_right, self.backtest_tree = self._build_tab_layout(self.backtest_tab)
         self._bt_left = bt_left
 
-        # 【V0.9.5-tab-split-phase3-C】「💾 匯出股票清單」按鈕（select_tab）
+        # 【V0.9.5-tab-split-phase3-C】「💾 匯出股票清單」按鈕(select_tab)
         # 放在 right_top 內、跟 title 同一行
         self.export_select_btn = ttk.Button(
             self.select_right.winfo_children()[0],  # right_top
@@ -4518,7 +4523,7 @@ class StrategyGUI(tk.Tk):
         self.use_enhanced_score_var = tk.BooleanVar(value=self.cfg.use_enhanced_score)
         ttk.Radiobutton(score_frame, text="多因子評分 (動能+成長)", variable=self.use_enhanced_score_var, value=True).pack(anchor="w")
 
-        # 多因子評分的設定（與 radio button 同一個視覺區塊）
+        # 多因子評分的設定(與 radio button 同一個視覺區塊)
         weight_frame = ttk.Frame(score_frame)
         weight_frame.pack(fill="x", padx=(20, 0), pady=(0, 5))
         ttk.Label(weight_frame, text="因子權重:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
@@ -4530,14 +4535,14 @@ class StrategyGUI(tk.Tk):
 
         ttk.Radiobutton(score_frame, text="簡易評分 (可調權重+門檻)", variable=self.use_enhanced_score_var, value=False).pack(anchor="w")
 
-        # 簡易評分的設定（與 radio button 同一個視覺區塊）
+        # 簡易評分的設定(與 radio button 同一個視覺區塊)
         self.adv_btn = ttk.Button(score_frame, text="⚙ 簡易評分進階設定", command=self._open_simple_score_settings)
         self.adv_btn.pack(fill="x", padx=(20, 0), pady=(0, 5))
 
         # Fix15 (2026-06-21): 回測模擬 Preset bar 移到最頂端
         self._add_preset_bar(bt_left, "backtest")
 
-        # 3. 技術指標（V0.9.5-tab-split Phase 2：移到回測模擬 tab）
+        # 3. 技術指標(V0.9.5-tab-split Phase 2:移到回測模擬 tab)
         tech_frame = ttk.LabelFrame(bt_left, text="📈 技術指標 (強化版)", padding=5)
         tech_frame.pack(fill="x", pady=5)
 
@@ -4571,7 +4576,7 @@ class StrategyGUI(tk.Tk):
         self._add_entry(tech_frame, "超跌檢查天數", "oversold_lookback", tk.IntVar, self.cfg.oversold_lookback)
         self._add_entry(tech_frame, "MA20 斜率計算天數", "ma_slope_days", tk.IntVar, self.cfg.ma_slope_days)
 
-        # 4. 出場參數（V0.9.5-tab-split Phase 2：移到回測模擬 tab）
+        # 4. 出場參數(V0.9.5-tab-split Phase 2:移到回測模擬 tab)
         exit_frame = ttk.LabelFrame(bt_left, text="🚪 出場參數", padding=5)
         exit_frame.pack(fill="x", pady=5)
         self._add_entry(exit_frame, "停損 (%)", "stop_loss", tk.DoubleVar, self.cfg.stop_loss * 100)
@@ -4580,7 +4585,7 @@ class StrategyGUI(tk.Tk):
         self._add_entry(exit_frame, "最大持有天數", "hold_days", tk.IntVar, self.cfg.hold_days)
         self._add_entry(exit_frame, "交易成本 (%)", "roundtrip_cost_pct", tk.DoubleVar, self.cfg.roundtrip_cost_pct * 100)
 
-        # 5. Walk-forward 分析（V0.9.5-tab-split Phase 2：移到回測模擬 tab）
+        # 5. Walk-forward 分析(V0.9.5-tab-split Phase 2:移到回測模擬 tab)
         wf_frame = ttk.LabelFrame(bt_left, text="🔄 Walk-forward 分析", padding=5)
         wf_frame.pack(fill="x", pady=5)
 
@@ -4593,15 +4598,15 @@ class StrategyGUI(tk.Tk):
         self._add_entry(wf_params_frame, "測試期 (年)", "wf_test_years", tk.IntVar, self.cfg.wf_test_years)
         self._add_entry(wf_params_frame, "步進 (年)", "wf_step_years", tk.IntVar, self.cfg.wf_step_years)
 
-        # 6. 選股來源（V0.9.5-tab-split Phase 2：移到回測模擬 tab）
-        # V0.9.5-tab-split-phase3-C Fix3：回測永遠從 Excel 讀，移除 toggle
-        source_frame = ttk.LabelFrame(bt_left, text="📁 選股來源（永遠從 Excel 讀取）", padding=5)
+        # 6. 選股來源(V0.9.5-tab-split Phase 2:移到回測模擬 tab)
+        # V0.9.5-tab-split-phase3-C Fix3:回測永遠從 Excel 讀,移除 toggle
+        source_frame = ttk.LabelFrame(bt_left, text="📁 選股來源(永遠從 Excel 讀取)", padding=5)
         source_frame.pack(fill="x", pady=5)
 
-        # Excel 檔案：entry + 瀏覽按鈕（Fix3 新增）
+        # Excel 檔案:entry + 瀏覽按鈕(Fix3 新增)
         file_row = ttk.Frame(source_frame)
         file_row.pack(fill="x", pady=2)
-        ttk.Label(file_row, text="Excel 檔案：").pack(side="left")
+        ttk.Label(file_row, text="Excel 檔案:").pack(side="left")
         self.excel_file_var = tk.StringVar(value=self.cfg.excel_stock_file)
         file_entry = ttk.Entry(file_row, textvariable=self.excel_file_var)
         file_entry.pack(side="left", fill="x", padx=(2, 0))
@@ -4622,25 +4627,25 @@ class StrategyGUI(tk.Tk):
         self.excel_force_buy_var = tk.BooleanVar(value=self.cfg.excel_force_buy)
         ttk.Checkbutton(
             source_frame,
-            text="📊 Excel 清單強制買點模式\n   （跳過技術買點過濾）",
+            text="📊 Excel 清單強制買點模式\n   (跳過技術買點過濾)",
             variable=self.excel_force_buy_var
         ).pack(anchor="w", pady=(5, 0))
-        ttk.Label(source_frame, text="  ※ 使用 Excel 股票清單 + 不經過買點過濾（強制滿倉）", foreground="gray").pack(anchor="w")
+        ttk.Label(source_frame, text="  ※ 使用 Excel 股票清單 + 不經過買點過濾(強制滿倉)", foreground="gray").pack(anchor="w")
 
-        # 7. 回測參數（Fix5：持股檔數+總投入資金移至此）
+        # 7. 回測參數(Fix5:持股檔數+總投入資金移至此)
         bt_params_frame = ttk.LabelFrame(bt_left, text="📊 回測參數", padding=5)
         bt_params_frame.pack(fill="x", pady=5)
         self._add_entry(bt_params_frame, "同時持股檔數", "topk", tk.IntVar, self.cfg.topk)
         self._add_entry(bt_params_frame, "總投入資金 (元)", "capital", tk.DoubleVar, self.cfg.capital)
 
-        # 7. 強勢股過濾（系統選股 tab）
+        # 7. 強勢股過濾(系統選股 tab)
         strong_frame = ttk.LabelFrame(left, text="💪 強勢股過濾", padding=5)
         strong_frame.pack(fill="x", pady=5)
         self._add_entry(strong_frame, "最低營收YoY (%)", "strong_revenue_yoy", tk.DoubleVar, self.cfg.strong_revenue_yoy)
         self._add_entry(strong_frame, "最高本益比", "strong_pe_max", tk.DoubleVar, self.cfg.strong_pe_max)
         self._add_entry(strong_frame, "最低股價", "strong_price_min", tk.DoubleVar, self.cfg.strong_price_min)
 
-        # 8. 按鈕區（V0.9.5-tab-split Phase 2：拆兩份、各自放自己 tab 底部）
+        # 8. 按鈕區(V0.9.5-tab-split Phase 2:拆兩份、各自放自己 tab 底部)
         # 系統選股 tab 的按鈕
         btn_frame = ttk.Frame(left)
         btn_frame.pack(fill="x", pady=10)
@@ -4648,9 +4653,9 @@ class StrategyGUI(tk.Tk):
         self.run_btn = ttk.Button(btn_frame, text="▶ 執行系統選股", command=self._on_run)
         self.run_btn.pack(fill="x", pady=2)
 
-        # 【v1.1.5c-force-refresh-sys】2026-07-02 22:14 William 要求：
+        # 【v1.1.5c-force-refresh-sys】2026-07-02 22:14 William 要求:
         # 「系統選股 tab 的左欄也加「重新抓股價」按鈕」
-        # 修法：呼叫共用 _force_refresh_price("系統重抓")
+        # 修法:呼叫共用 _force_refresh_price("系統重抓")
         # - 不再需要手動選股 tab 跳來重抓股價
         # - 兩個 tab 都用同一個 cache、不會重複打 FinMind
         self.sys_refresh_price_btn = ttk.Button(
@@ -4659,30 +4664,30 @@ class StrategyGUI(tk.Tk):
         self.sys_refresh_price_btn.pack(fill="x", pady=2)
 
         # Fix15 (2026-06-21): 移除「💾 儲存設定」「🔄 載入預設」按鈕
-        # Preset bar 已取代這兩個功能（手動選股也是這樣）
+        # Preset bar 已取代這兩個功能(手動選股也是這樣)
         self.clear_btn = ttk.Button(btn_frame, text="🗑 清除控制台", command=self._on_clear_console)
         self.clear_btn.pack(fill="x", pady=2)
 
-        # 【v1.1.5-console-log-file】加開 log file 按鈕（雙保險）
+        # 【v1.1.5-console-log-file】加開 log file 按鈕(雙保險)
         # 若 user 覺得 console 看不到某些訊息、可以直接開 log file 看
         ttk.Button(btn_frame, text="📄 開啟 console log 檔", command=self._on_open_console_log).pack(fill="x", pady=2)
 
-        # 回測模擬 tab 的按鈕（階段 C 實作執行回測、目前先 disabled）
+        # 回測模擬 tab 的按鈕(階段 C 實作執行回測、目前先 disabled)
         bt_btn_frame = ttk.Frame(bt_left)
         bt_btn_frame.pack(fill="x", pady=10)
 
-        ttk.Label(bt_btn_frame, text="選擇 Excel 檔案後，直接按「執行回測模擬」", foreground="gray").pack(fill="x", pady=2)
+        ttk.Label(bt_btn_frame, text="選擇 Excel 檔案後,直接按「執行回測模擬」", foreground="gray").pack(fill="x", pady=2)
         self.bt_run_btn = ttk.Button(bt_btn_frame, text="▶ 執行回測模擬", command=self._on_bt_run, state="normal")
         self.bt_run_btn.pack(fill="x", pady=2)
 
-        # V0.9.5-tab-split：console 已改為全域（在 _build_ui 結尾建構）
+        # V0.9.5-tab-split:console 已改為全域(在 _build_ui 結尾建構)
         # 原本這裡有 title_row + tip label 在 right 內、已廢除
 
-        # V0.9.5-tab-split-fix3：notebook 已建好、只要確保 layout 完整
+        # V0.9.5-tab-split-fix3:notebook 已建好、只要確保 layout 完整
         self.notebook.pack(fill="both", expand=True)
 
-        # 全域 console 放下（grid row=1、固定 220px）【v1.1.5-console-log-file 加高到 16 行可見】
-        console_container = ttk.LabelFrame(self, text="📝 執行記錄 (Program Console) — 全域（同步寫到 cache/console/console_YYYY-MM-DD.log）", padding=2)
+        # 全域 console 放下(grid row=1、固定 220px)【v1.1.5-console-log-file 加高到 16 行可見】
+        console_container = ttk.LabelFrame(self, text="📝 執行記錄 (Program Console) - 全域(同步寫到 cache/console/console_YYYY-MM-DD.log)", padding=2)
         console_container.grid(row=1, column=0, sticky="ew", padx=8, pady=(4, 8))
         console_container.grid_propagate(False)
         console_container.configure(height=220)
@@ -4704,11 +4709,11 @@ class StrategyGUI(tk.Tk):
 
         【V0.9.5-tab-split-phase3-C】改回傳值多一個 right_frame
         - 原本 (left, tree) → 改 (left, right_frame, tree)
-        - right_frame 給 caller 加按鈕用（select_tab 加「💾 匯出股票清單」）
+        - right_frame 給 caller 加按鈕用(select_tab 加「💾 匯出股票清單」)
         - backtest_tab 暫不加、但簽名統一
 
         Args:
-            parent: parent widget（select_tab 或 backtest_tab）
+            parent: parent widget(select_tab 或 backtest_tab)
 
         Returns:
             (left_scrollable_frame, right_frame, results_tree)
@@ -4716,7 +4721,7 @@ class StrategyGUI(tk.Tk):
         container = ttk.Frame(parent)
         container.pack(fill="both", expand=True, padx=4, pady=4)
 
-        # 左：params
+        # 左:params
         left_canvas = tk.Canvas(container, width=400)
         left_scrollbar = ttk.Scrollbar(container, orient="vertical", command=left_canvas.yview)
         left_scrollable_frame = ttk.Frame(left_canvas)
@@ -4732,7 +4737,7 @@ class StrategyGUI(tk.Tk):
         left_scrollbar.pack(side="left", fill="y")
 
         # Fix14 (2026-06-21): mousewheel 滾輪 scroll
-        # 綁 <Enter>/<Leave> 動態切換 active，避免和其他 scrollable widget 搶
+        # 綁 <Enter>/<Leave> 動態切換 active,避免和其他 scrollable widget 搶
         def _on_canvas_enter(_e):
             left_canvas.bind_all("<MouseWheel>", lambda ev: left_canvas.yview_scroll(int(-1 * (ev.delta / 120)), "units"))
             left_canvas.bind_all("<Button-4>", lambda _ev: left_canvas.yview_scroll(-1, "units"))
@@ -4746,7 +4751,7 @@ class StrategyGUI(tk.Tk):
         left_canvas.bind("<Enter>", _on_canvas_enter)
         left_canvas.bind("<Leave>", _on_canvas_leave)
 
-        # 右：results Treeview（先空、之後 Phase 3B 填資料）
+        # 右:results Treeview(先空、之後 Phase 3B 填資料)
         right_frame = ttk.Frame(container)
         right_frame.pack(side="left", fill="both", expand=True, padx=(10, 0))
 
@@ -4754,9 +4759,9 @@ class StrategyGUI(tk.Tk):
         # (回傳 right_frame 給 caller、用 caller 決定要不要加按鈕)
         right_top = ttk.Frame(right_frame)
         right_top.pack(fill="x", pady=(0, 5))
-        title_label = ttk.Label(right_top, text="📋 結果（執行後顯示）", font=("Segoe UI", 11, "bold"))
+        title_label = ttk.Label(right_top, text="📋 結果(執行後顯示)", font=("Segoe UI", 11, "bold"))
         title_label.pack(side="left", anchor="w")
-        # export 按鈕由 caller 決定要不要加（select_tab 加、backtest_tab 暫不加）
+        # export 按鈕由 caller 決定要不要加(select_tab 加、backtest_tab 暫不加)
 
         # Treeview
         tree_frame = ttk.Frame(right_frame)
@@ -4774,47 +4779,47 @@ class StrategyGUI(tk.Tk):
         results_tree.tag_configure("checked", background="#d0e8ff")
         results_tree.tag_configure("unchecked", background="#ffffff")
         results_tree.tag_configure("hover", background="#fff3a0")
-        # 【V1.1-price-color】選股結果漲跌價染色 tag（只設 foreground、不設 background）
-        # ttk.Treeview tag 可以多個組合（row tags=("checked","price_up")）
+        # 【V1.1-price-color】選股結果漲跌價染色 tag(只設 foreground、不設 background)
+        # ttk.Treeview tag 可以多個組合(row tags=("checked","price_up"))
         # → checked 控背景、price_* 控前景、兩者不會衝突
         results_tree.tag_configure("price_up", foreground=COLOR_PROFIT_POS)
         results_tree.tag_configure("price_down", foreground=COLOR_PROFIT_NEG)
         results_tree.tag_configure("price_zero", foreground=COLOR_PROFIT_ZERO)
-        # 【V1.1-price-color-fix2】hover × price 組合 tag（3 種、避免 ttk 多 tag 組合 bug）
-        # 根因：hover 設了 background + 多 tag 組合時、Linux ttk 前景會被吃掉變黑
-        # 解法：hover 時不套 "hover" + price_* 雙 tag、改用「hover_<price>」單一 tag
+        # 【V1.1-price-color-fix2】hover × price 組合 tag(3 種、避免 ttk 多 tag 組合 bug)
+        # 根因:hover 設了 background + 多 tag 組合時、Linux ttk 前景會被吃掉變黑
+        # 解法:hover 時不套 "hover" + price_* 雙 tag、改用「hover_<price>」單一 tag
         # 該 tag 同時設 background (黃) + foreground (對應色)、不再有 attribute 遺失
         for ptag, fcolor in [("up", COLOR_PROFIT_POS), ("down", COLOR_PROFIT_NEG), ("zero", COLOR_PROFIT_ZERO)]:
             results_tree.tag_configure(f"hover_{ptag}", background="#fff3a0", foreground=fcolor)
         # 【V1.2.0-kb-focus-v3】2026-07-06 18:54 William 反映「hover 沒黃色 / click 變藍色」
-        # 根因：v1.1-price-color-fix2 設計 hover_<price> tag、但三個 tree 都沒註冊（只有 hover 單 tag）
+        # 根因:v1.1-price-color-fix2 設計 hover_<price> tag、但三個 tree 都沒註冊(只有 hover 單 tag)
         # 這裡已經註冊了、等等 ETF/MS 三個 tree 都要註冊同樣的三個 tag
-        # 修法：在主檔加一個 _register_hover_price_tags(tree) helper、統一三個 tree 調用
+        # 修法:在主檔加一個 _register_hover_price_tags(tree) helper、統一三個 tree 調用
         results_tree.bind("<Motion>", self._on_select_tree_hover)
         results_tree.bind("<Leave>", self._on_select_tree_leave)
         results_tree.bind("<Enter>", self._on_tree_enter_focus)
         results_tree.bind("<Button-1>", self._on_select_tree_click)
         results_tree.bind("<<TreeviewSelect>>", self._on_tree_select_sync_hover)
         # 【V1.2.0-kb-focus-v20】補 KeyRelease binding、v18 起就遺漏
-        # v4 原文：「不需額外 bind <Up>/<Down>、也不要覆寫」
+        # v4 原文:「不需額外 bind <Up>/<Down>、也不要覆寫」
         # 但 ↑/↓ 內建的 focus() 调用確實跟我們的 hover sync cursor 滑不在同個 handler
         # → 綁 <KeyRelease> 給 _on_tree_key_see_focus
         for _kb_e in ("<KeyRelease-Up>", "<KeyRelease-Down>",
                       "<KeyRelease-Home>", "<KeyRelease-End>",
                       "<KeyRelease-Prior>", "<KeyRelease-Next>"):
             results_tree.bind(_kb_e, self._on_tree_key_see_focus)
-        self._v18_log("[v20] bind KeyRelease to results_tree（system select + backtest）")
+        self._v18_log("[v20] bind KeyRelease to results_tree(system select + backtest)")
         # 【V1.2.0-keyboard-toggle】Space 鍵 toggle focus row 勾選
         # 【V1.2.0-kb-focus-v4】Treeview selectmode="browse" 下、↑/↓ 自動會切 focus + scroll
-        #             不需額外 bind <Up>/<Down>、也不要覆寫（要 return "break"）
+        #             不需額外 bind <Up>/<Down>、也不要覆寫(要 return "break")
         results_tree.bind("<space>", self._on_tree_space_toggle)
         # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單
-        # 原本：results_tree.bind("<Button-3>", self._on_select_tree_rclick)
-        # 為什麼拿：header 已是 ☐/☑/▣ 動態 checkbox、點下去就是全選/全不選
+        # 原本:results_tree.bind("<Button-3>", self._on_select_tree_rclick)
+        # 為什麼拿:header 已是 ☐/☑/▣ 動態 checkbox、點下去就是全選/全不選
         #   右鍵選單多一重入口、重複、已不需要
-        #   拿掉 <Button-3> bind 後右鍵點 tree 不會跳選單（避免出現空選單）
+        #   拿掉 <Button-3> bind 後右鍵點 tree 不會跳選單(避免出現空選單)
 
-        # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐（看起來像個 checkbox）
+        # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐(看起來像個 checkbox)
         try:
             first_col = results_tree["columns"][0]
             results_tree.heading(first_col, text="☐")
@@ -4827,17 +4832,17 @@ class StrategyGUI(tk.Tk):
     def _build_backtest_tab(self, parent):
         """【V0.9.5-tab-split Phase 2】回測模擬 tab 內容
 
-        Phase 2：已加技術指標、出場、WF、選股來源、執行回測按鈕
-        Phase 3（下次）：加右側 Treeview 顯示回測結果
+        Phase 2:已加技術指標、出場、WF、選股來源、執行回測按鈕
+        Phase 3(下次):加右側 Treeview 顯示回測結果
         """
         # 這個 method 在 _build_ui 內已被呼叫、
         # 實際的「左側 params」由 _build_ui 的 bt_left 處理
-        # 此 method 留作未來擴充（ex: 全域提示訊息、tab 切換處理）
+        # 此 method 留作未來擴充(ex: 全域提示訊息、tab 切換處理)
         # 暫時不做事
         pass
 
     # 【V0.9.5-tab-split-phase3-D Fix14】Tab Preset 機制
-    # 白名單：每個 tab 包含哪些 self.vars key
+    # 白名單:每個 tab 包含哪些 self.vars key
     TAB_VAR_KEYS = {
         "system_select": [
             "top_n_for_tech", "history_months", "tech_months",
@@ -4889,7 +4894,7 @@ class StrategyGUI(tk.Tk):
         ttk.Button(bar, text="🗑️ 刪除", width=7,
                    command=lambda k=tab_key: self._delete_tab_preset(k)).pack(side="left", padx=1)
 
-        # 初始化：填入現有 preset 列表
+        # 初始化:填入現有 preset 列表
         self._refresh_preset_list(tab_key)
         return bar
 
@@ -4923,13 +4928,13 @@ class StrategyGUI(tk.Tk):
                 continue
             try:
                 v = var.get()
-                # 百分比類型 key 從 % 還原成小數（與 _save_ui_to_config 一致）
+                # 百分比類型 key 從 % 還原成小數(與 _save_ui_to_config 一致)
                 if k in ["stop_loss", "take_profit", "roundtrip_cost_pct", "ma20_tolerance"]:
                     v = float(v) / 100.0
                 out[k] = v
             except Exception:
                 pass
-        # 加 boolean / checkbox vars（不在 self.vars 但也屬於這個 tab）
+        # 加 boolean / checkbox vars(不在 self.vars 但也屬於這個 tab)
         if tab_key == "system_select":
             for attr in ["use_enhanced_score_var", "volume_filter_var",
                          "mtf_var", "divergence_var", "trend_filter_var",
@@ -4942,7 +4947,7 @@ class StrategyGUI(tk.Tk):
     def _apply_tab_values(self, tab_key, data: dict):
         """把 preset 套回 UI (self.vars)"""
         for k, v in (data or {}).items():
-            # boolean / checkbox 變數（_xxx_var 結尾）
+            # boolean / checkbox 變數(_xxx_var 結尾)
             if k.endswith("_var"):
                 vobj = getattr(self, k, None)
                 if vobj is not None:
@@ -4971,7 +4976,7 @@ class StrategyGUI(tk.Tk):
         from tkinter import simpledialog, messagebox
         name = simpledialog.askstring(
             "儲存 Preset",
-            f"請輸入 [{self.TAB_DISPLAY_NAME.get(tab_key, tab_key)}] Preset 名稱：",
+            f"請輸入 [{self.TAB_DISPLAY_NAME.get(tab_key, tab_key)}] Preset 名稱:",
             initialvalue=f"{self.TAB_DISPLAY_NAME.get(tab_key, 'preset')}_1",
         )
         if not name:
@@ -5026,7 +5031,7 @@ class StrategyGUI(tk.Tk):
         if not name:
             messagebox.showwarning("未選", "請先從下拉選單選一個 preset")
             return
-        if not messagebox.askyesno("確認刪除", f"刪除 Preset「{name}」？"):
+        if not messagebox.askyesno("確認刪除", f"刪除 Preset「{name}」?"):
             return
         presets = self._get_tab_presets(tab_key)
         if name in presets:
@@ -5092,7 +5097,7 @@ class StrategyGUI(tk.Tk):
                     value = value / 100.0
                 setattr(self.cfg, key, value)
         self.cfg.use_enhanced_score = self.use_enhanced_score_var.get()
-        # Fix3：回測永遠從 Excel 讀（移除 use_excel_var toggle）
+        # Fix3:回測永遠從 Excel 讀(移除 use_excel_var toggle)
         self.cfg.use_excel_stock_list = True
         self.cfg.require_volume_filter = self.volume_filter_var.get()
         self.cfg.use_mtf_confirmation = self.mtf_var.get()
@@ -5113,7 +5118,7 @@ class StrategyGUI(tk.Tk):
             self.logger.log("❌ 設定儲存失敗")
 
     def _on_reset_config(self):
-        if messagebox.askyesno("確認", "確定要恢復所有預設設定嗎？"):
+        if messagebox.askyesno("確認", "確定要恢復所有預設設定嗎?"):
             self.cfg.update_from_dict(DEFAULT_CONFIG)
             self._load_config_to_ui()
             save_config(self.cfg.to_dict())
@@ -5139,60 +5144,60 @@ class StrategyGUI(tk.Tk):
 
         row = 0
 
-        ttk.Label(scrollable_frame, text="═ 權重設定（總和建議100%） ═", font=("Segoe UI", 10, "bold")).grid(row=row, column=0, columnspan=2, pady=(10, 5), sticky="w")
+        ttk.Label(scrollable_frame, text="═ 權重設定(總和建議100%) ═", font=("Segoe UI", 10, "bold")).grid(row=row, column=0, columnspan=2, pady=(10, 5), sticky="w")
         row += 1
 
         self.simple_vars = {}
 
-        ttk.Label(scrollable_frame, text="營收YoY 權重 (%)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        ttk.Label(scrollable_frame, text="營收YoY 權重 (%):").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["weight_rev"] = tk.DoubleVar(value=self.cfg.simple_score_weight_rev)
         ttk.Entry(scrollable_frame, textvariable=self.simple_vars["weight_rev"], width=10).grid(row=row, column=1, sticky="w")
         row += 1
 
-        ttk.Label(scrollable_frame, text="EPSYoY 權重 (%)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        ttk.Label(scrollable_frame, text="EPSYoY 權重 (%):").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["weight_eps"] = tk.DoubleVar(value=self.cfg.simple_score_weight_eps)
         ttk.Entry(scrollable_frame, textvariable=self.simple_vars["weight_eps"], width=10).grid(row=row, column=1, sticky="w")
         row += 1
 
-        ttk.Label(scrollable_frame, text="殖利率 權重 (%)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        ttk.Label(scrollable_frame, text="殖利率 權重 (%):").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["weight_div"] = tk.DoubleVar(value=self.cfg.simple_score_weight_div)
         ttk.Entry(scrollable_frame, textvariable=self.simple_vars["weight_div"], width=10).grid(row=row, column=1, sticky="w")
         row += 1
 
-        ttk.Label(scrollable_frame, text="本益比 權重 (%)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        ttk.Label(scrollable_frame, text="本益比 權重 (%):").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["weight_pe"] = tk.DoubleVar(value=self.cfg.simple_score_weight_pe)
         ttk.Entry(scrollable_frame, textvariable=self.simple_vars["weight_pe"], width=10).grid(row=row, column=1, sticky="w")
-        ttk.Label(scrollable_frame, text="（負值表示扣分）", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
+        ttk.Label(scrollable_frame, text="(負值表示扣分)", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
         row += 1
 
         ttk.Separator(scrollable_frame, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=10)
         row += 1
 
-        ttk.Label(scrollable_frame, text="═ 門檻過濾（低於門檻直接排除） ═", font=("Segoe UI", 10, "bold")).grid(row=row, column=0, columnspan=2, pady=(5, 5), sticky="w")
+        ttk.Label(scrollable_frame, text="═ 門檻過濾(低於門檻直接排除) ═", font=("Segoe UI", 10, "bold")).grid(row=row, column=0, columnspan=2, pady=(5, 5), sticky="w")
         row += 1
 
-        ttk.Label(scrollable_frame, text="最低營收YoY (%)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        ttk.Label(scrollable_frame, text="最低營收YoY (%):").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["min_rev_yoy"] = tk.DoubleVar(value=self.cfg.simple_min_rev_yoy)
         ttk.Entry(scrollable_frame, textvariable=self.simple_vars["min_rev_yoy"], width=10).grid(row=row, column=1, sticky="w")
-        ttk.Label(scrollable_frame, text="（-999 = 不限制）", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
+        ttk.Label(scrollable_frame, text="(-999 = 不限制)", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
         row += 1
 
-        ttk.Label(scrollable_frame, text="最低EPSYoY (%)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        ttk.Label(scrollable_frame, text="最低EPSYoY (%):").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["min_eps_yoy"] = tk.DoubleVar(value=self.cfg.simple_min_eps_yoy)
         ttk.Entry(scrollable_frame, textvariable=self.simple_vars["min_eps_yoy"], width=10).grid(row=row, column=1, sticky="w")
-        ttk.Label(scrollable_frame, text="（-999 = 不限制）", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
+        ttk.Label(scrollable_frame, text="(-999 = 不限制)", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
         row += 1
 
-        ttk.Label(scrollable_frame, text="最低EPS (元)：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        ttk.Label(scrollable_frame, text="最低EPS (元):").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["min_eps"] = tk.DoubleVar(value=self.cfg.simple_min_eps)
         ttk.Entry(scrollable_frame, textvariable=self.simple_vars["min_eps"], width=10).grid(row=row, column=1, sticky="w")
-        ttk.Label(scrollable_frame, text="（-999 = 不限制）", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
+        ttk.Label(scrollable_frame, text="(-999 = 不限制)", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
         row += 1
 
-        ttk.Label(scrollable_frame, text="最高本益比：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        ttk.Label(scrollable_frame, text="最高本益比:").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["max_pe"] = tk.DoubleVar(value=self.cfg.simple_max_pe)
         ttk.Entry(scrollable_frame, textvariable=self.simple_vars["max_pe"], width=10).grid(row=row, column=1, sticky="w")
-        ttk.Label(scrollable_frame, text="（999 = 不限制）", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
+        ttk.Label(scrollable_frame, text="(999 = 不限制)", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
         row += 1
 
         ttk.Separator(scrollable_frame, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=10)
@@ -5215,10 +5220,10 @@ class StrategyGUI(tk.Tk):
         ttk.Label(scrollable_frame, text="═ 交易成本設定 ═", font=("Segoe UI", 10, "bold")).grid(row=row, column=0, columnspan=2, pady=(4, 5), sticky="w")
         row += 1
 
-        ttk.Label(scrollable_frame, text="券商折扣：").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        ttk.Label(scrollable_frame, text="券商折扣:").grid(row=row, column=0, sticky="w", padx=10, pady=2)
         self.simple_vars["broker_discount"] = tk.DoubleVar(value=self.cfg.broker_discount)
         ttk.Entry(scrollable_frame, textvariable=self.simple_vars["broker_discount"], width=10).grid(row=row, column=1, sticky="w")
-        ttk.Label(scrollable_frame, text="（1.0 = 無折扣，0.6 = 6折，0.5 = 5折）", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
+        ttk.Label(scrollable_frame, text="(1.0 = 無折扣,0.6 = 6折,0.5 = 5折)", foreground="gray").grid(row=row, column=2, sticky="w", padx=5)
         row += 1
 
         def set_defaults():
@@ -5257,16 +5262,16 @@ class StrategyGUI(tk.Tk):
         try:
             while True:
                 msg = self.log_queue.get_nowait()
-                # v1.1 重構：GuiLogger 把 log 包成 (type, msg) tuple
+                # v1.1 重構:GuiLogger 把 log 包成 (type, msg) tuple
                 # 解構拿 msg_text
                 if isinstance(msg, tuple) and len(msg) == 2 and msg[0] == "log":
                     msg_text = msg[1]
                 else:
                     # backward compat: 舊版直接傳 str
                     msg_text = str(msg)
-                # 【V1.2.0 stage 6】console 可能還沒建好（pump loop 啟動比 _build_ui 早）
+                # 【V1.2.0 stage 6】console 可能還沒建好(pump loop 啟動比 _build_ui 早)
                 if not getattr(self, "console", None):
-                    # console 還沒 ready、訊息先寫 file（雙保險）
+                    # console 還沒 ready、訊息先寫 file(雙保險)
                     if getattr(self, "_console_log_file", None):
                         try:
                             ts = datetime.now().strftime("%H:%M:%S")
@@ -5287,8 +5292,8 @@ class StrategyGUI(tk.Tk):
                     except Exception:
                         pass  # 寫 file 失敗不影響 GUI
                 # 【v1.1.5-console-see-fix】強化 scroll: 強制 Tk 處理 pending insert 後再 see end
-                # 根因：background thread 快速累積 queue 時、單純 see("end") 有時不會同步生效
-                # 修法：update_idletasks() 把 pending 事件 flush 完、see 才會真的捲到底
+                # 根因:background thread 快速累積 queue 時、單純 see("end") 有時不會同步生效
+                # 修法:update_idletasks() 把 pending 事件 flush 完、see 才會真的捲到底
                 try:
                     self.console.update_idletasks()
                     self.console.see("end")
@@ -5302,7 +5307,7 @@ class StrategyGUI(tk.Tk):
         self.console.delete("1.0", "end")
 
     def _close_console_log(self):
-        """【v1.1.5-console-log-file】atexit 註冊：app 結束時關閉 log file"""
+        """【v1.1.5-console-log-file】atexit 註冊:app 結束時關閉 log file"""
         f = getattr(self, "_console_log_file", None)
         if f:
             try:
@@ -5314,12 +5319,12 @@ class StrategyGUI(tk.Tk):
 
     def _on_open_console_log(self):
         """【v1.1.5-console-log-file】用系統預設編輯器開 console log file
-        用途：若 console 視覺看不到某些訊息、可開 log file 看完整 trace"""
+        用途:若 console 視覺看不到某些訊息、可開 log file 看完整 trace"""
         import subprocess
         import platform
         path = getattr(self, "_console_log_path", None)
         if not path or not os.path.exists(path):
-            messagebox.showinfo("無 log 檔", "console log 檔不存在（可能今日還沒寫）")
+            messagebox.showinfo("無 log 檔", "console log 檔不存在(可能今日還沒寫)")
             return
         try:
             if platform.system() == "Windows":
@@ -5329,27 +5334,27 @@ class StrategyGUI(tk.Tk):
             else:
                 subprocess.Popen(["xdg-open", path])
         except Exception as e:
-            messagebox.showerror("開啟失敗", f"無法開啟：{e}\n路徑：{path}")
+            messagebox.showerror("開啟失敗", f"無法開啟:{e}\n路徑:{path}")
 
     # ==========================================================
-    # V0.9.4 買賣記錄 Tab（不動 V0.9.3 上面所有 method）
+    # V0.9.4 買賣記錄 Tab(不動 V0.9.3 上面所有 method)
     # ==========================================================
     def _on_tab_changed(self, event):
         """Tab 切換時自動 refresh 買賣記錄 + 抓持倉現價
 
-        【V1.2.0-keyboard-toggle-fix】2026-07-06 15:58 William 反映：
+        【V1.2.0-keyboard-toggle-fix】2026-07-06 15:58 William 反映:
           「etf / 手動選股 up/down/space bar 都不會動」
-          根因：切到 tab 時 tree 沒拿到 widget focus、↑/↓/Space 不送到 tree
-          修法：切到結果 tab 時 focus_set 到該 tree、並設 focus rectangle 到第一個 row
+          根因:切到 tab 時 tree 沒拿到 widget focus、↑/↓/Space 不送到 tree
+          修法:切到結果 tab 時 focus_set 到該 tree、並設 focus rectangle 到第一個 row
         """
         try:
             current = self.notebook.index(self.notebook.select())
             if current == 3:  # Tab 4 = 買賣記錄
                 self._refresh_portfolio_view()
-                # 背景執行抓現價（不 blocking GUI）
+                # 背景執行抓現價(不 blocking GUI)
                 self.after(100, self._auto_fetch_positions_prices)
-                # V0.9.5+ Phase 8（William 2026-06-15 11:02）：
-                # 開盤時段（09:00~13:30）每 30 秒 refresh 一次持倉現價
+                # V0.9.5+ Phase 8(William 2026-06-15 11:02):
+                # 開盤時段(09:00~13:30)每 30 秒 refresh 一次持倉現價
                 self._schedule_portfolio_refresh()
             else:
                 # 切離買賣記錄 Tab → 取消 refresh loop
@@ -5359,16 +5364,16 @@ class StrategyGUI(tk.Tk):
             # 讓 ↑/↓/Space 鍵能直接動、不需要先 click
             self._focus_tab_tree_on_change(current)
         except Exception as e:
-            self.logger.log(f"⚠️ Tab 切換 refresh 失敗：{e}")
+            self.logger.log(f"⚠️ Tab 切換 refresh 失敗:{e}")
 
     def _focus_tab_tree_on_change(self, current_tab_idx: int):
         """【V1.2.0-kb-focus-v5】2026-07-06 22:42 Tab 切換時、focus 該 tab 的結果 tree
 
-        v5 簡單設計：
+        v5 簡單設計:
           - tree.focus_set()       讓 key events 送到 tree
-          - tree.focus(c0)         設鍵盤 focus rectangle（讓 Up/Down 可以 scroll）
+          - tree.focus(c0)         設鍵盤 focus rectangle(讓 Up/Down 可以 scroll)
           - 設 hover_<price> tag   讓該 row 顯示黃色 highlight
-          - after_idle 再做一次（避免 notebook 內部事件覆蓋）
+          - after_idle 再做一次(避免 notebook 內部事件覆蓋)
         """
         tab_tree_map = {
             0: "select_tree",
@@ -5435,9 +5440,9 @@ class StrategyGUI(tk.Tk):
         """【V1.2.0-kb-focus-v7】tree 拿到 widget focus 時確保 keyboard focus 有 row
 
         William 2026-07-07 01:08 反映「要先 click 才能 Up/Down」
-        根因：Up/Down 需要 keyboard focus 在某個 row、但 widget focus 切到 tree 後
-              tree.focus() 可能還是空（browse mode click 會設、但鍵盤 tab 切換不會）
-        修法：<FocusIn> 自動 focus_set + focus(children[0])、確保 Up/Down 立刻有效
+        根因:Up/Down 需要 keyboard focus 在某個 row、但 widget focus 切到 tree 後
+              tree.focus() 可能還是空(browse mode click 會設、但鍵盤 tab 切換不會)
+        修法:<FocusIn> 自動 focus_set + focus(children[0])、確保 Up/Down 立刻有效
         """
         tree = event.widget
         try:
@@ -5452,18 +5457,18 @@ class StrategyGUI(tk.Tk):
     def _on_tree_enter_focus(self, event):
         """【V1.2.0-kb-focus-v5】2026-07-06 22:42 William 反映
 
-        William 22:42 反映：
+        William 22:42 反映:
           - 開機後仍要 mouse move + click 後 up/down 才能 scroll
           - mouse 移動時新位置有 highlight、舊位置 highlight 沒取消
           - down key 向下 scroll 沒辦法到達最後一個 item
 
-        根因 v4：
+        根因 v4:
           - selection_set(iid) 跟 Treeview 預設 selected state 衝突、舊的 selected
             還在、新的又被加上去、導致 highlight 跟 focus 不同步
           - Treeview <Up>/<Down> 預設會切 focus、但 focus 是空字串時不 scroll
           - 滑鼠 hover 進 Treeview 時、tree.focus() 沒設、鍵盤 focus 還在 notebook 上
 
-        v5 簡單修法：
+        v5 簡單修法:
           - bind <Enter> 時自動 focus_set() + 設 focus(children[0]) 確保 keyboard focus 在 tree
           - 樹子區內任一 row、且 focus 已經有值時、Treeview <Up>/<Down> 會自動 scroll + 切 focus
           - hover 回到 hover_<price> tag 系統、清楚離開舊 row、進新 row
@@ -5471,7 +5476,7 @@ class StrategyGUI(tk.Tk):
         tree = event.widget
         try:
             tree.focus_set()
-            # 如果 focus 還沒設、設到第一個 row（讓 Up/Down 能 scroll 從此開始）
+            # 如果 focus 還沒設、設到第一個 row(讓 Up/Down 能 scroll 從此開始)
             if not tree.focus():
                 children = tree.get_children()
                 if children:
@@ -5482,18 +5487,18 @@ class StrategyGUI(tk.Tk):
 
 
     def _ensure_focus_visible(self, tree, iid):
-        """【V1.2.0-kb-focus-v25】確保 focus row 完整可見 + sync highlight（單一 path、不重複 update_idletasks）
+        """【V1.2.0-kb-focus-v25】確保 focus row 完整可見 + sync highlight(單一 path、不重複 update_idletasks)
 
-        v25 改進：
-        1. v12 拿掉多個重複 tree.update_idletasks()（有 3 個、每個都是強制 Tk 重繪 2362 筆）
+        v25 改進:
+        1. v12 拿掉多個重複 tree.update_idletasks()(有 3 個、每個都是強制 Tk 重繪 2362 筆)
            → key-nav up/down 慢的 root cause 就是這個
-        2. 只保留 1 個 update_idletasks()（after tree.see(iid) 之前）、
+        2. 只保留 1 個 update_idletasks()(after tree.see(iid) 之前)、
            譲 bbox() 拿到正確座標
         3. tree.yview_scroll() 後不需要 update_idletasks()、它是同步生效
 
-        William 2026-07-07 15:03 反映 v10 最後 item 仍顯示不出來：
+        William 2026-07-07 15:03 反映 v10 最後 item 仍顯示不出來:
         - v10 只 scroll 1 row 不夠、focus rectangle 仍被 canvas edge 切
-        - v12 解法：多 scroll 2 次 (-2 units)、給 focus rectangle 充足 room
+        - v12 解法:多 scroll 2 次 (-2 units)、給 focus rectangle 充足 room
         - v25 拿掉 v12 的「多重保險」、測試證明單一 path 也可達同樣效果
         """
         try:
@@ -5505,7 +5510,7 @@ class StrategyGUI(tk.Tk):
             self._ensure_focus_padding_row(tree)
             if iid not in tree.get_children():
                 return
-            # 2. see + update_idletasks（唯一一個 update_idletasks、譲 bbox 拿到正確座標）
+            # 2. see + update_idletasks(唯一一個 update_idletasks、譲 bbox 拿到正確座標)
             tree.see(iid)
             tree.update_idletasks()
             # 3. 檢查是否需要 extra scroll
@@ -5513,7 +5518,7 @@ class StrategyGUI(tk.Tk):
             is_padded_last = (len(children) >= 2 and iid == children[-2])
             if is_padded_last:
                 # iid 是倒數第二、padding row 是最後
-                # v12：多 scroll 2 次 (-2 units)、比 v10 的 -1 更靠上
+                # v12:多 scroll 2 次 (-2 units)、比 v10 的 -1 更靠上
                 # v25 拿掉 v12 的 update_idletasks()、yview_scroll 同步生效
                 tree.yview_scroll(2, "units")
                 # v25 拿掉 v12 「多重保險」的 update_idletasks() + 重複 yview_scroll
@@ -5530,12 +5535,12 @@ class StrategyGUI(tk.Tk):
                             # v25 拿掉 v12 的 update_idletasks()、yview_scroll 同步生效
                     except (TypeError, ValueError):
                         pass
-            # 4. 視覺 highlight 同步到 focus row（v24 delta tracking、不掃整個 tree）
+            # 4. 視覺 highlight 同步到 focus row(v24 delta tracking、不掃整個 tree)
             self._apply_hover(tree, iid)
-            # 【V1.2.0-kb-focus-v23】v22 漏網：原本這裡會 call 動 OS cursor 的 helper
+            # 【V1.2.0-kb-focus-v23】v22 漏網:原本這裡會 call 動 OS cursor 的 helper
             # → X11 XSync block 0.5 秒、整個 KeyRelease handler 卡住
             # → up/down 移動 highlight 感覺慢、舊 hover 殘留 0.5 秒才消
-            # v23 修法：徹底不動 OS cursor、只做 hover 視覺同步
+            # v23 修法:徹底不動 OS cursor、只做 hover 視覺同步
             # v25 拿掉 v12 多重保險 + 用 v24 delta tracking → key-nav 順很多
         except tk.TclError:
             pass
@@ -5543,17 +5548,17 @@ class StrategyGUI(tk.Tk):
     def _on_tree_select_sync_hover(self, event):
         """【V1.2.0-kb-focus-v22】<<TreeviewSelect>> handler - do nothing
 
-        v22 改變：放手了。
+        v22 改變:放手了。
         v12 設計「_clear_all_hover 清空、靠 mouse motion handler 重設」造成 race condition
         → 200ms 內 hover 沒了、文字變黑、click 也有同樣問題
         → 之前我以為 XWarpPointer 動不了 cursor 是大問題
         → 實際上 hover 本身就是問題
 
-        最終設計：
+        最終設計:
         - <<TreeviewSelect>> 不動作、讓 hover 保留
-        - motion handler 自己處理 hover（mouse 移到哪就 hover 哪）
+        - motion handler 自己處理 hover(mouse 移到哪就 hover 哪)
         - key-nav (_on_tree_key_see_focus) 自己 _apply_hover
-        - click 不該有 hover 動作（但因為 mouse 動作有 motion、仍然 natural）
+        - click 不該有 hover 動作(但因為 mouse 動作有 motion、仍然 natural)
         """
         # 什麼都不做
         pass
@@ -5561,20 +5566,20 @@ class StrategyGUI(tk.Tk):
     def _clear_all_hover(self, tree):
         """【V1.2.0-kb-focus-v12】清空整個 tree 的所有 hover_<price> tag
 
-        v12 重設計：
+        v12 重設計:
         1. 依賴 _apply_hover 設的三重 tags、(checked, price_x, hover_<kind>)
         2. 掃每個 row 看 tags、如果有 hover_* 就重設為 (checked, price_x)
            → 完全不依賴 _set_row_tag_normal、避免 dict 跟 tree 不一致
         3. 包 try/except、個別 row 錯不中斷整個 loop
 
-        為什麼不用 tree.tag_remove？
+        為什麼不用 tree.tag_remove?
         - v11 用 tag_remove("hover_up") 等、但若 hover_<kind> tag 末註冊會 raise
-          （雖然包 try/except、但不雅）
+          (雖然包 try/except、但不雅)
         - 設為 (checked, price_x) 比較明顯、讓 mouse hover 不被一點 click 就拋出 exception
 
-        William 2026-07-07 15:03 反映 v11 mouse hover 完全不動作：
+        William 2026-07-07 15:03 反映 v11 mouse hover 完全不動作:
           - v11 _apply_hover 設三重 tags、加完後 motion handler 又設 → 可能有 race
-          - 簡化為二重：_apply_hover 只設 hover_<kind>、_clear_all_hover 只移除 hover_<kind>
+          - 簡化為二重:_apply_hover 只設 hover_<kind>、_clear_all_hover 只移除 hover_<kind>
         """
         if not tree or not tree.winfo_exists():
             return
@@ -5590,54 +5595,54 @@ class StrategyGUI(tk.Tk):
                     continue
 
     def _apply_hover(self, tree, iid):
-        """【V1.2.0-kb-focus-v24】把 iid 設成 hover_<price> tag（delta tracking）
+        """【V1.2.0-kb-focus-v24】把 iid 設成 hover_<price> tag(delta tracking)
 
-        v24 重設計：
+        v24 重設計:
         1. 用 self._hover_iid[tree] 追蹤每個 tree 當前的 hover iid
         2. 新呼叫時只清上一個 (prev_iid)、不掃整個 tree
-           → 從 O(N) 降到 O(1) — 2362 筆從 100ms → < 1ms
+           → 從 O(N) 降到 O(1) - 2362 筆從 100ms → < 1ms
         3. prev_iid 還在 tree 內 → 設回 (checked, price_x)
         4. prev_iid 已經不在 (tree 重建) → 跳過、不 raise
 
-        v23 之前問題：
-        1. 殘留：_clear_all_hover 在 _apply_hover 內呼叫、掃整個 tree
+        v23 之前問題:
+        1. 殘留:_clear_all_hover 在 _apply_hover 內呼叫、掃整個 tree
            → 在 race 條件下可能漏清、導致 up/down 後 mouse 一動就兩個 hover bar
-        2. 慢：掃 2362 筆每個都 tree.item(child, "tags") 是 Tcl IPC 呼叫
+        2. 慢:掃 2362 筆每個都 tree.item(child, "tags") 是 Tcl IPC 呼叫
            → 累積 100-150ms → up/down 移動 hilight 感覺延遲
 
-        v24 解法：
-        - 維持 _clear_all_hover 函式本身（其他地方會呼叫、例如 ETF rebuild tree）
+        v24 解法:
+        - 維持 _clear_all_hover 函式本身(其他地方會呼叫、例如 ETF rebuild tree)
         - 但 _apply_hover 不再呼叫 _clear_all_hover、改用 delta tracking
-        - 設 prev_iid 用 _set_row_tag_normal（單一操作、不掃 tree）
+        - 設 prev_iid 用 _set_row_tag_normal(單一操作、不掃 tree)
 
-        仍保留 v12 解耦設計：
+        仍保留 v12 解耦設計:
         - hover_<kind> 是視覺 tag、只負責 highlight bar 顏色
         - click 是另一個選股動作、不動 hover
         - 狀態 (checked, price_x) 保留在 checked_dict、不依賴 tree.tags
 
         單一真相 = 唯一會動 hover_<price> tag 的地方
-        - motion handler 呼叫：滑鼠移到新 row
-        - _ensure_focus_visible 呼叫：↑/↓ 鍵盤移動後（間接經 _on_tree_key_see_focus）
+        - motion handler 呼叫:滑鼠移到新 row
+        - _ensure_focus_visible 呼叫:↑/↓ 鍵盤移動後(間接經 _on_tree_key_see_focus)
         """
         if not tree or not tree.winfo_exists():
             self._v18_log(f"[v26 _apply_hover] early return: tree 失效 iid={iid}")
             return
-        # 1. 確保 _hover_iid dict 存在（lazy init 避免 __init__ 改動破壞向後相容）
+        # 1. 確保 _hover_iid dict 存在(lazy init 避免 __init__ 改動破壞向後相容)
         if not hasattr(self, "_hover_iid") or not isinstance(getattr(self, "_hover_iid", None), dict):
             self._hover_iid = {}
-        # 2. 取上一個 hover iid（可能 None 表示首次 hover）
+        # 2. 取上一個 hover iid(可能 None 表示首次 hover)
         prev_iid = self._hover_iid.get(id(tree))
         self._v18_log(f"[v26 _apply_hover] 進入 iid={iid} prev_iid={prev_iid}")
-        # 3. early return: 同 row 重複呼叫 → no-op（避免多餘 IPC）
+        # 3. early return: 同 row 重複呼叫 → no-op(避免多餘 IPC)
         if prev_iid == iid:
             self._v18_log(f"[v26 _apply_hover] no-op: 同 row")
             return
-        # 4. 驗證新 iid 有效（tree 已被重建 / 還沒 insert）
+        # 4. 驗證新 iid 有效(tree 已被重建 / 還沒 insert)
         if not iid or iid not in tree.get_children():
             self._v18_log(f"[v26 _apply_hover] early return: 新 iid 不在 tree iid={iid} children={tree.get_children()[:5]}...")
             return
-        # 5. 清舊 hover（單筆 O(1) 而非掃整個 tree）
-        #    edge case: prev_iid 不在 tree 內（rebuild） → 跳過、不嘗試清
+        # 5. 清舊 hover(單筆 O(1) 而非掃整個 tree)
+        #    edge case: prev_iid 不在 tree 內(rebuild) → 跳過、不嘗試清
         if prev_iid and prev_iid in tree.get_children():
             try:
                 # 清舊 hover 之前先記下原 tags、驗證清完後是否真的移除了 hover_<kind>
@@ -5673,10 +5678,10 @@ class StrategyGUI(tk.Tk):
     def _move_cursor_to_row(self, tree, iid):
         """【V1.2.0-kb-focus-v18】鍵盤 ↑/↓ 移動後、把 OS mouse cursor 移到該 row
 
-        v22 變更：
+        v22 變更:
         - 直接 self._apply_hover(tree, cur)、不依賴 mouse motion
-        - 不再 _move_cursor_to_row（X11 動 OS cursor 在 Tk 環境下 race）
-        - 不再 _v18_log（William 已確認不用再印）
+        - 不再 _move_cursor_to_row(X11 動 OS cursor 在 Tk 環境下 race)
+        - 不再 _v18_log(William 已確認不用再印)
         """
         self._v18_log(f"[v18 _move_cursor_to_row] 進入 iid={iid}")
         if not tree or not tree.winfo_exists():
@@ -5716,18 +5721,18 @@ class StrategyGUI(tk.Tk):
     def _move_os_cursor(self, target_x, target_y):
         """【V1.2.0-kb-focus-v16】跨平台 OS cursor 移動
 
-        William 2026-07-07 17:29 明確反應：
+        William 2026-07-07 17:29 明確反應:
         「這個 project 我是在 Ubuntu 不是 windows 環境下執行」
 
         v8-v15 都假設 Windows、用 ctypes.windll.user32 的 SetCursorPos
         → Linux 上 windll.user32 不存在 → 全部函式都 pass / 不執行
-        → 結果：up/down key 移動 highlight 但 cursor 停留原位
+        → 結果:up/down key 移動 highlight 但 cursor 停留原位
         → mouse 一動、出現兩個 highlight bar
 
-        v16 重寫、用 sys.platform 選擇對的 backend：
-        - Linux: X11 XWarpPointer（libX11.so.6、Ubuntu 預裝）
-        - macOS: CGWarpMouseCursorPosition（CoreGraphics）
-        - Windows: SetCursorPos（保留作為 fallback）
+        v16 重寫、用 sys.platform 選擇對的 backend:
+        - Linux: X11 XWarpPointer(libX11.so.6、Ubuntu 預裝)
+        - macOS: CGWarpMouseCursorPosition(CoreGraphics)
+        - Windows: SetCursorPos(保留作為 fallback)
         """
         import sys as _sys
         try:
@@ -5736,7 +5741,7 @@ class StrategyGUI(tk.Tk):
             elif _sys.platform == "darwin":
                 return self._mac_move_cursor_to(target_x, target_y)
             else:
-                # Windows fallback（用簡單的 ctypes.windll）
+                # Windows fallback(用簡單的 ctypes.windll)
                 try:
                     import ctypes
                     ctypes.windll.user32.SetCursorPos(int(target_x), int(target_y))
@@ -5749,15 +5754,15 @@ class StrategyGUI(tk.Tk):
     def _x11_move_cursor_to(self, target_x, target_y):
         """【V1.2.0-kb-focus-v17】Linux X11 cursor 移動 - XSync + xdotool 雙層丰豐
 
-        v16 失敗原因（William 18:12 報告：app 本機 Ubuntu 跑、XWarpPointer 卻沒動）：
+        v16 失敗原因(William 18:12 報告:app 本機 Ubuntu 跑、XWarpPointer 卻沒動):
         1. XFlush 只 flush event queue、不等 X server 真的處理完
            → 改成 XSync(display, False) block 直到 server 處理完
         2. 可能是 Tk grab / focus race
            → 重試 3 次 + 用不同的 XSync 選項
         3. ctypes 走 X protocol 在某些環境不可靠
-           → fallback 用 subprocess 走 xdotool mousemove（走 libxdo 內部的 XTest extension）
+           → fallback 用 subprocess 走 xdotool mousemove(走 libxdo 內部的 XTest extension)
 
-        優先序：
+        優先序:
         - Layer A: XWarpPointer + XSync ×3
         - Layer B: subprocess xdotool mousemove fallback
         每層 log 結果到 stderr 方便 debug
@@ -5778,7 +5783,7 @@ class StrategyGUI(tk.Tk):
                 ctypes.c_int, ctypes.c_int,
             ]
             lib.XWarpPointer.restype = ctypes.c_int
-            # XSync 不是 XFlush：XSync block 等 server 處理完
+            # XSync 不是 XFlush:XSync block 等 server 處理完
             lib.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
             lib.XSync.restype = ctypes.c_int
             lib.XFlush.argtypes = [ctypes.c_void_p]
@@ -5849,19 +5854,19 @@ class StrategyGUI(tk.Tk):
     def _ensure_focus_padding_row(self, tree):
         """【V1.2.0-kb-focus-v10】確保 tree 底部有一個 invisible padding row
 
-        為什麼需要？
+        為什麼需要?
         - tree.see(last) 把 last row 推到 widget 底部
         - focus rectangle 圍繞 last row、底部被 canvas 邊緣切掉
-        - 多 scroll 1 row (yview_scroll) 被 max bottom 卡住（沒 content 可滾）
-        - 解法：加一個 invisible padding row、讓 tree 有 scroll 空間
+        - 多 scroll 1 row (yview_scroll) 被 max bottom 卡住(沒 content 可滾)
+        - 解法:加一個 invisible padding row、讓 tree 有 scroll 空間
 
-        設計：
-        - iid: "__focus_padding__"（獨特 prefix、其他 code 不會讀到）
-        - tag: "focus_padding"（背景色設為 tree 背景、視覺上看不出來）
+        設計:
+        - iid: "__focus_padding__"(獨特 prefix、其他 code 不會讀到)
+        - tag: "focus_padding"(背景色設為 tree 背景、視覺上看不出來)
         - values: 設為空字串、不渲染任何文字
-        - reentrant（exists 檢查、這次有就不重加）
+        - reentrant(exists 檢查、這次有就不重加)
 
-        重幹選股時：
+        重幹選股時:
         - 使用者跑選股、tree.delete(*tree.get_children()) 清除所有 rows
         - padding row 也會被刪除
         - 下次 _ensure_focus_visible 會重新加
@@ -5889,7 +5894,7 @@ class StrategyGUI(tk.Tk):
         except (tk.TclError, TypeError):
             n_values = 1
 
-        # 設 tag 樣式（背景色 = tree 背景）
+        # 設 tag 樣式(背景色 = tree 背景)
         try:
             tree.tag_configure(
                 "focus_padding",
@@ -5906,14 +5911,20 @@ class StrategyGUI(tk.Tk):
         except tk.TclError:
             pass
     def _set_row_tag_normal(self, tree, iid):
-        """【V1.2.0-kb-focus-v26】把 row 從 hover_* tag 恢復成 checked/unchecked + price tag
+        """【V1.2.0-kb-focus-v26-fix2】把 row 從 hover_* tag 恢復成 checked/unchecked + price tag
 
-        v26 設計：
-        - v25 仍用 tree.item(iid, tags=(...)) 替換 tags、但 Linux ttk theme 緩存導致
-          視覺上 hover 殘留（v25 log 證明邏輯跑了、但截圖仍亮）
-        - 解法：明確呼叫 tree.tag_remove("hover_*", iid)、繞過 theme 緩存
-        - 即使 row 已經沒有 hover_* tag、tag_remove 也不會 raise、idempotent
+        v26-fix2 設計:
+        - v26 改用 tree.tag_remove(ht, iid) 但 tt.tk.Tk() 建立 tt.tk.Treeview 時
+          沒有 Python-level tag_remove method、需要 tree.tk.call(...)
+          William 2026-07-09 23:32 反映 v26 無效、log 顯示:
+            清舊 hover 失敗 e='Treeview' object has no attribute 'tag_remove'
+        - v26-fix2 改用 tree.tk.call(tree._w, "tag", "remove", ht, iid)
+          直接呼叫 Tcl level tag remove command
+        - 即使 row 已經沒有 hover_* tag、tag remove 也不會 raise、idempotent
         - 接著設 tags=(checked/unchecked, price_x) 維持原本語意
+
+        v26 原本設計:tree.tag_remove(ht, iid) -- Python API 缺失、不存在
+        v26-fix2 修正:tree.tk.call(tree._w, "tag", "remove", ht, iid) -- 直接走 Tcl
         """
         if iid not in tree.get_children():
             return
@@ -5932,14 +5943,15 @@ class StrategyGUI(tk.Tk):
         checked = checked_dict.get(iid, False)
         price_tag = self._get_price_tag_for_tree(tree, iid)
         try:
-            # v26：明確移除 hover_* 三個 tag、繞過 ttk theme 緩存
+            # v26-fix2:明確移除 hover_* 三個 tag、繞過 ttk theme 緩存
+            # ttk.Treeview 沒有 Python-level tag_remove method、用 tk.call 直接執行 Tcl
             for ht in ("hover_up", "hover_down", "hover_zero", "hover"):
                 try:
-                    tree.tag_remove(ht, iid)
-                except tk.TclError:
+                    tree.tk.call(tree._w, "tag", "remove", ht, iid)
+                except (tk.TclError, AttributeError, TypeError):
                     pass
             tree.item(iid, tags=("checked" if checked else "unchecked", price_tag))
-        except tk.TclError:
+        except (tk.TclError, AttributeError, TypeError):
             pass
 
     def _get_price_tag_for_tree(self, tree, iid):
@@ -5956,23 +5968,23 @@ class StrategyGUI(tk.Tk):
         return getattr(self, price_tags_attr, {}).get(iid, "price_zero")
 
     def _schedule_portfolio_refresh(self):
-        """V0.9.5+ Phase 8：盤中（09:00~13:30）每 30 秒 refresh 一次持倉現價
+        """V0.9.5+ Phase 8:盤中(09:00~13:30)每 30 秒 refresh 一次持倉現價
         收盤後、週末、切離 Tab 時自動停止
         """
-        # 取消上次的排程（避免重複）
+        # 取消上次的排程(避免重複)
         self._cancel_portfolio_refresh()
 
         # 檢查是否在盤中
         if not _is_market_hours():
-            self.logger.log("⏸️ 收盤時段、停止持倉現價自動 refresh（要 30 秒 refresh 請在 09:00~13:30 間瀠覽本 Tab）")
+            self.logger.log("⏸️ 收盤時段、停止持倉現價自動 refresh(要 30 秒 refresh 請在 09:00~13:30 間瀠覽本 Tab)")
             return
 
-        # 排程下一次 refresh（30 秒後）
+        # 排程下一次 refresh(30 秒後)
         self._portfolio_refresh_job_id = self.after(30000, self._portfolio_refresh_loop)
-        self.logger.log("🔄 盤中持倉現價自動 refresh 啟動（每 30 秒）")
+        self.logger.log("🔄 盤中持倉現價自動 refresh 啟動(每 30 秒)")
 
     def _cancel_portfolio_refresh(self):
-        """取消持倉現價 refresh 排程（無論是切離 Tab 或收盤）"""
+        """取消持倉現價 refresh 排程(無論是切離 Tab 或收盤)"""
         if getattr(self, '_portfolio_refresh_job_id', None):
             try:
                 self.after_cancel(self._portfolio_refresh_job_id)
@@ -5981,10 +5993,10 @@ class StrategyGUI(tk.Tk):
             self._portfolio_refresh_job_id = None
 
     def _portfolio_refresh_loop(self):
-        """refresh loop 本體：刷新一次持倉現價、判斷是否要排下一次
-        終止條件：
+        """refresh loop 本體:刷新一次持倉現價、判斷是否要排下一次
+        終止條件:
         1. 使用者切離買賣記錄 Tab
-        2. 收盤（_is_market_hours() = False）
+        2. 收盤(_is_market_hours() = False)
         """
         try:
             current = self.notebook.index(self.notebook.select())
@@ -5998,25 +6010,25 @@ class StrategyGUI(tk.Tk):
         # 抓一次現價
         self._auto_fetch_positions_prices()
 
-        # 排程下一次（內部會檢查 _is_market_hours、收盤就停）
+        # 排程下一次(內部會檢查 _is_market_hours、收盤就停)
         self._schedule_portfolio_refresh()
 
     def _auto_fetch_positions_prices(self):
-        """切到買賣記錄 Tab 時自動抓持倉所有股票現價（背景 thread）
-        V0.9.5+ Phase 10（William 11:39 反映）：加上動態進度顯示
-        - 起動：log 顯示「⏰ 下次 refresh HH:MM:SS」
-        - 抓取中：每一檔 log 「🔄 [3/8] 正在抓 2330...」
-        - 完成：log 顯示「✅ 11:30:15 refresh 完成、5 檔成功」
+        """切到買賣記錄 Tab 時自動抓持倉所有股票現價(背景 thread)
+        V0.9.5+ Phase 10(William 11:39 反映):加上動態進度顯示
+        - 起動:log 顯示「⏰ 下次 refresh HH:MM:SS」
+        - 抓取中:每一檔 log 「🔄 [3/8] 正在抓 2330...」
+        - 完成:log 顯示「✅ 11:30:15 refresh 完成、5 檔成功」
         """
         positions = self.portfolio.get_positions()
         if not positions:
             return
         stock_ids = [p.stock_id for p in positions if p.stock_id]
 
-        # 顯示「下次 refresh 預定時間」（給使用者信心 polling 有在跑）
+        # 顯示「下次 refresh 預定時間」(給使用者信心 polling 有在跑)
         next_refresh_time = (datetime.now() + timedelta(seconds=30)).strftime("%H:%M:%S")
         self.logger.log(
-            f"⏰ 下次持倉現價 refresh：{next_refresh_time}（30 秒後）"
+            f"⏰ 下次持倉現價 refresh:{next_refresh_time}(30 秒後)"
         )
 
         def worker():
@@ -6025,7 +6037,7 @@ class StrategyGUI(tk.Tk):
             self.after(0, lambda: self.logger.log(f"🔄 [{len(stock_ids)} 檔] 抓取中..."))
             try:
                 def _progress(idx, total, sid):
-                    # 每一檔動態 log（讓使用者看到 progress 不會以為卡住）
+                    # 每一檔動態 log(讓使用者看到 progress 不會以為卡住)
                     self.after(0, lambda: self.logger.log(
                         f"🔄 [{idx}/{total}] 抓 {sid} 中... ({int((idx/total)*100)}%)"
                     ))
@@ -6035,39 +6047,39 @@ class StrategyGUI(tk.Tk):
                 # 用 after 回主執行緒更新 GUI
                 self.after(0, lambda: self._apply_fetched_prices(results))
                 self.after(0, lambda: self.logger.log(
-                    f"✅ refresh 完成：{elapsed:.1f} 秒抓完 {len(stock_ids)} 檔"
+                    f"✅ refresh 完成:{elapsed:.1f} 秒抓完 {len(stock_ids)} 檔"
                 ))
             except Exception as e:
-                self.after(0, lambda: self.logger.log(f"⚠️ 自動抓現價失敗：{e}"))
+                self.after(0, lambda: self.logger.log(f"⚠️ 自動抓現價失敗:{e}"))
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _apply_fetched_prices(self, results: Dict[str, Dict[str, Any]]):
-        """把背景抓回來的現價套到 GUI（主執行緒）"""
+        """把背景抓回來的現價套到 GUI(主執行緒)"""
         fallback_count = 0
         for sid, info in results.items():
             if info.get("ok") and info.get("price", 0) > 0:
                 self._current_prices[sid] = info["price"]
-                # 同步快取股票名稱（fetch 回來時順便存）
+                # 同步快取股票名稱(fetch 回來時順便存)
                 if info.get("name"):
                     self._current_names[sid] = info["name"]
                     self._backfill_stock_name(sid, info["name"])
-                # 【V0.9.5+ Phase 9】fallback 提示：若 price 是用 mid 估算的、log 提示使用者
+                # 【V0.9.5+ Phase 9】fallback 提示:若 price 是用 mid 估算的、log 提示使用者
                 if info.get("price_fallback") == "mid":
                     fallback_count += 1
                     self.logger.log(
-                        f"⚠️ {sid} 無即時成交價、用今日高低价中點估算：{info['price']:.2f}（TWSE 記錄 z='-'）"
+                        f"⚠️ {sid} 無即時成交價、用今日高低价中點估算:{info['price']:.2f}(TWSE 記錄 z='-')"
                     )
                 elif info.get("price_fallback") == "prev_close":
                     fallback_count += 1
                     self.logger.log(
-                        f"⚠️ {sid} 無即時成交價、用昨收估算：{info['price']:.2f}（TWSE 連 h/l 也缺資料）"
+                        f"⚠️ {sid} 無即時成交價、用昨收估算:{info['price']:.2f}(TWSE 連 h/l 也缺資料)"
                     )
         self._refresh_portfolio_view()
         ok_count = sum(1 for v in results.values() if v.get("ok"))
-        msg = f"✅ 現價抓取完成：{ok_count}/{len(results)} 檔成功"
+        msg = f"✅ 現價抓取完成:{ok_count}/{len(results)} 檔成功"
         if fallback_count:
-            msg += f"（{fallback_count} 檔用估算價、缺即時成交）"
+            msg += f"({fallback_count} 檔用估算價、缺即時成交)"
         self.logger.log(msg)
 
     def _backfill_stock_name(self, stock_id: str, name: str):
@@ -6084,37 +6096,37 @@ class StrategyGUI(tk.Tk):
 
     def _build_portfolio_tab(self, parent):
         """建立「買賣記錄」Tab 的 UI"""
-        # 上方：8 個總覽 Label（2行×4欄）V0.9.4 phase2.3: 加手續費/證交稅/淨利潤
+        # 上方:8 個總覽 Label(2行×4欄)V0.9.4 phase2.3: 加手續費/證交稅/淨利潤
         summary_frame = ttk.LabelFrame(parent, text="📊 持倉總覽", padding=8)
         summary_frame.pack(fill="x", padx=8, pady=(8, 4))
         self._summary_labels = {}
 
-        # Row 0: 成本/市值/未實現/手續費/總報酬率（V0.9.5+ Phase 11 修正：加回 total_return_pct）
-        #   原因：之前 row1 加了「歷史累計已付稅」後變 4 個、total_return_pct 沒地方放 → KeyError
-        #   解法：row0 加 total_return_pct 變 5 個、row1 維持 4 個
+        # Row 0: 成本/市值/未實現/手續費/總報酬率(V0.9.5+ Phase 11 修正:加回 total_return_pct)
+        #   原因:之前 row1 加了「歷史累計已付稅」後變 4 個、total_return_pct 沒地方放 → KeyError
+        #   解法:row0 加 total_return_pct 變 5 個、row1 維持 4 個
         row0 = [
-            ("total_cost", "總成本（含費用）"),
+            ("total_cost", "總成本(含費用)"),
             ("total_market_value", "總市值"),
             ("total_unrealized_pl", "未實現損益"),
             ("total_fee", "累計手續費"),
-            ("total_return_pct", "總報酬率 %"),  # V0.9.5+ Phase 11：從 row1 移回 row0
+            ("total_return_pct", "總報酬率 %"),  # V0.9.5+ Phase 11:從 row1 移回 row0
         ]
         # Row 1: 現價累計證交稅/歷史累計已付稅/已實現淨/總損益
-        #   V0.9.5+ Phase 11（William 2026-06-15 19:15）：
+        #   V0.9.5+ Phase 11(William 2026-06-15 19:15):
         #   「累計證交稅」改成「以持股現價計算」= Σ(現價 × 股數 × 0.003)
         #   歷史已付稅另以小字顯示
         row1 = [
-            ("total_tax", "現價累計證交稅"),       # ← 顯示 current_tax（V0.9.5+ Phase 11）
-            ("historical_tax", "歷史累計已付稅"),   # ← 顯示 total_tax（保留歷史）
+            ("total_tax", "現價累計證交稅"),       # ← 顯示 current_tax(V0.9.5+ Phase 11)
+            ("historical_tax", "歷史累計已付稅"),   # ← 顯示 total_tax(保留歷史)
             ("net_realized_pl", "已實現淨損益"),
-            ("total_pl", "總損益（含現價稅）"),
+            ("total_pl", "總損益(含現價稅)"),
         ]
 
         for col, (key, label) in enumerate(row0):
             cell = ttk.Frame(summary_frame)
             cell.grid(row=0, column=col, padx=10, pady=2, sticky="w")
             ttk.Label(cell, text=label, font=("Segoe UI", 9), foreground="#666").pack(anchor="w")
-            val_lbl = ttk.Label(cell, text="—", font=("Segoe UI", 12, "bold"))
+            val_lbl = ttk.Label(cell, text="-", font=("Segoe UI", 12, "bold"))
             val_lbl.pack(anchor="w")
             self._summary_labels[key] = val_lbl
 
@@ -6122,11 +6134,11 @@ class StrategyGUI(tk.Tk):
             cell = ttk.Frame(summary_frame)
             cell.grid(row=1, column=col, padx=10, pady=2, sticky="w")
             ttk.Label(cell, text=label, font=("Segoe UI", 9), foreground="#666").pack(anchor="w")
-            val_lbl = ttk.Label(cell, text="—", font=("Segoe UI", 12, "bold"))
+            val_lbl = ttk.Label(cell, text="-", font=("Segoe UI", 12, "bold"))
             val_lbl.pack(anchor="w")
             self._summary_labels[key] = val_lbl
 
-        # 按鈕區：移至「持倉總攬」與「持倉明細」之間（William 2026-06-24 11:19 反映）
+        # 按鈕區:移至「持倉總攬」與「持倉明細」之間(William 2026-06-24 11:19 反映)
         btn_frame = ttk.Frame(parent)
         btn_frame.pack(fill="x", padx=8, pady=(4, 4))
         ttk.Button(btn_frame, text="➕ 新增買入", command=self._open_buy_dialog).pack(side="left", padx=2)
@@ -6137,7 +6149,7 @@ class StrategyGUI(tk.Tk):
         ttk.Button(btn_frame, text="✏️ 編輯", command=self._open_edit_tx_dialog).pack(side="left", padx=2)  # V0.9.4 phase2.3
         ttk.Button(btn_frame, text="📤 匯出 Excel", command=self._export_portfolio_excel).pack(side="right", padx=2)
 
-        # 中間：持倉明細 Treeview
+        # 中間:持倉明細 Treeview
         pos_frame = ttk.LabelFrame(parent, text="🌳 持倉明細", padding=4)
         pos_frame.pack(fill="both", expand=False, padx=8, pady=(0, 4))
         pos_cols = ("代號", "名稱", "股數", "均價", "現價", "市值", "未實現損益", "報酬率%", "已實現損益")
@@ -6149,13 +6161,13 @@ class StrategyGUI(tk.Tk):
         self._positions_tree.configure(yscrollcommand=pos_scroll.set)
         self._positions_tree.pack(side="left", fill="both", expand=True)
         pos_scroll.pack(side="right", fill="y")
-        # 【V1.1-portfolio-taiwan-color】台股慣例：正數（贖錢）= 紅、負數（虧錢）= 綠
+        # 【V1.1-portfolio-taiwan-color】台股慣例:正數(贖錢)= 紅、負數(虧錢)= 綠
         self._positions_tree.tag_configure("profit_pos", foreground=COLOR_PROFIT_POS)
         self._positions_tree.tag_configure("profit_neg", foreground=COLOR_PROFIT_NEG)
         self._positions_tree.tag_configure("profit_zero", foreground=COLOR_PROFIT_ZERO)
         self._positions_tree.bind("<<TreeviewSelect>>", self._on_position_selected)
 
-        # 下方：交易明細 Treeview
+        # 下方:交易明細 Treeview
         tx_frame = ttk.LabelFrame(parent, text="📋 交易明細", padding=4)
         tx_frame.pack(fill="both", expand=True, padx=8, pady=4)
         tx_cols = ("id", "日期", "代號", "名稱", "買/賣", "股數", "價格", "手續費", "證交稅", "備註")  # V0.9.4 phase2.3: 加證交稅欄
@@ -6174,13 +6186,13 @@ class StrategyGUI(tk.Tk):
 
     def _build_etf_tab(self, parent):
         """【V0.9.5-etf】建立「主動式 ETF」Tab 的 UI
-        - 左面板：篩選條件（最小 ETF 數、是否限定有收盤價） + 按鈕
-        - 右面板：Treeview（5 欄）+ 移到「ETF數」欄顯示 popup
+        - 左面板:篩選條件(最小 ETF 數、是否限定有收盤價) + 按鈕
+        - 右面板:Treeview(5 欄)+ 移到「ETF數」欄顯示 popup
         """
-        # ---- 上方：狀態列 ----
+        # ---- 上方:狀態列 ----
         status_frame = ttk.Frame(parent)
         status_frame.pack(fill="x", padx=8, pady=(6, 0))
-        self._etf_status = tk.StringVar(value="主動式 ETF 持股：首次進入會自動抓取（依 TWSE activeList 動態、當前 N 檔 × 前 10 大）")
+        self._etf_status = tk.StringVar(value="主動式 ETF 持股：首次進入會自動抓取(依 TWSE activeList 動態、當前 N 檔 × 前 10 大)")
         ttk.Label(status_frame, textvariable=self._etf_status,
                   foreground="#555555", font=("Helvetica", 9)).pack(anchor="w")
 
@@ -6189,11 +6201,11 @@ class StrategyGUI(tk.Tk):
         self._etf_progress.pack(anchor="w", pady=(2, 0))
         self._etf_progress.pack_forget()
 
-        # ---- 主區：左面板 + 右結果 ----
+        # ---- 主區:左面板 + 右結果 ----
         paned = ttk.PanedWindow(parent, orient="horizontal")
         paned.pack(fill="both", expand=True, padx=6, pady=6)
 
-        # ── 左面板：篩選條件 + 按鈕 ──
+        # ── 左面板:篩選條件 + 按鈕 ──
         left_container = ttk.Frame(paned)
         paned.add(left_container, weight=0)
 
@@ -6205,7 +6217,7 @@ class StrategyGUI(tk.Tk):
 
         def _on_mousewheel(event):
             left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        # Fix16 (2026-06-21): 用 Enter/Leave 動態 bind_all，避免跟其他 tab 衝突
+        # Fix16 (2026-06-21): 用 Enter/Leave 動態 bind_all,避免跟其他 tab 衝突
         def _on_canvas_enter(_e):
             left_canvas.bind_all("<MouseWheel>", lambda ev: left_canvas.yview_scroll(int(-1 * (ev.delta / 120)), "units"))
             left_canvas.bind_all("<Button-4>", lambda _ev: left_canvas.yview_scroll(-1, "units"))
@@ -6247,7 +6259,7 @@ class StrategyGUI(tk.Tk):
         # 結果上限
         row2 = ttk.Frame(left_frame)
         row2.pack(fill="x", pady=(6, 0))
-        ttk.Label(row2, text="結果上限：", width=22).pack(side="left")
+        ttk.Label(row2, text="結果上限:", width=22).pack(side="left")
         self._etf_limit_var = tk.IntVar(value=500)
         ttk.Entry(row2, textvariable=self._etf_limit_var, width=8).pack(side="left")
         ttk.Label(row2, text="檔", width=4).pack(side="left")
@@ -6262,22 +6274,22 @@ class StrategyGUI(tk.Tk):
         self._etf_data_status = tk.StringVar(value="ETF 持股：未抓取")
         ttk.Label(btn_row, textvariable=self._etf_data_status,
                   font=("Helvetica", 8), foreground="#666666").pack(anchor="w", pady=(0, 4))
-        # 【V0.9.5-tab-split-phase3-E】2026-06-22 William 反映：
+        # 【V0.9.5-tab-split-phase3-E】2026-06-22 William 反映:
         #   結果畫面勾選欄 header 已是 ☐/☑/▣ 動態 checkbox、可點全選/全不選
         #   參數區的全選/全不選按鈕重複、拿掉
-        #   （_etf_select_all / _etf_select_none methods 保留、header click 仍會叫）
-        # 【V0.9.5-tab-split-phase3-G】2026-06-22 William 反映：
+        #   (_etf_select_all / _etf_select_none methods 保留、header click 仍會叫)
+        # 【V0.9.5-tab-split-phase3-G】2026-06-22 William 反映:
         #   匯出按鈕從左邊參數區移到右上面板右邊、跟系統選股一致
         #   文字統一「💾 匯出股票清單」
 
-        # ── 右面板：title + export 按鈕 + Treeview（跟系統選股同結構）──
+        # ── 右面板:title + export 按鈕 + Treeview(跟系統選股同結構)──
         right_frame = ttk.Frame(paned)
         paned.add(right_frame, weight=1)
 
-        # 右上面板：title 左邊、export 按鈕右邊
+        # 右上面板:title 左邊、export 按鈕右邊
         right_top = ttk.Frame(right_frame)
         right_top.pack(fill="x", pady=(0, 5))
-        ttk.Label(right_top, text="📊 ETF 成份股持股統計（依 ETF 數排序）",
+        ttk.Label(right_top, text="📊 ETF 成份股持股統計(依 ETF 數排序)",
                   font=("Segoe UI", 11, "bold")).pack(side="left", anchor="w")
         # 【V0.9.5-tab-split-phase3-G】跟 select_tab 同名、同位置
         self.export_etf_btn = ttk.Button(
@@ -6301,17 +6313,17 @@ class StrategyGUI(tk.Tk):
         for col, w in zip(cols, col_widths):
             self._etf_tree.heading(col, text=col)
             self._etf_tree.column(col, width=w, anchor="center")
-        # 【V0.9.5-click-sort】click heading 切換升降冪（像 file explorer）
-        # skip「勾選」、「名稱」欄（William 2026-06-28 14:30 反映：
-        #  「勾選」是 toggle checkbox、「名稱」中文排序沒意義）
-        # 「今日異動」可排序（V0.9.5-click-sort-etf）：顯示 "+12.5" / "-3.2" / "--"
+        # 【V0.9.5-click-sort】click heading 切換升降冪(像 file explorer)
+        # skip「勾選」、「名稱」欄(William 2026-06-28 14:30 反映:
+        #  「勾選」是 toggle checkbox、「名稱」中文排序沒意義)
+        # 「今日異動」可排序(V0.9.5-click-sort-etf):顯示 "+12.5" / "-3.2" / "--"
         #   → _parse_sort_value 自動處理 + - prefix + missing 判斷
         self._etf_sort_state = _make_treeview_click_sort(
             self._etf_tree, cols, skip_cols={"勾選", "名稱"}
         )
 
 
-        # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐（看起來像個 checkbox）
+        # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐(看起來像個 checkbox)
         try:
             self._etf_tree.heading(cols[0], text="☐")
         except (IndexError, tk.TclError):
@@ -6332,18 +6344,18 @@ class StrategyGUI(tk.Tk):
         self._etf_tree.tag_configure("price_up", foreground=COLOR_PROFIT_POS)
         self._etf_tree.tag_configure("price_down", foreground=COLOR_PROFIT_NEG)
         self._etf_tree.tag_configure("price_zero", foreground=COLOR_PROFIT_ZERO)
-        # 【V1.1-price-color-fix2】hover × price 組合 tag（3 種、避免多 tag 組合 bug）
+        # 【V1.1-price-color-fix2】hover × price 組合 tag(3 種、避免多 tag 組合 bug)
         for ptag, fcolor in [("up", COLOR_PROFIT_POS), ("down", COLOR_PROFIT_NEG), ("zero", COLOR_PROFIT_ZERO)]:
             self._etf_tree.tag_configure(f"hover_{ptag}", background="#fff3a0", foreground=fcolor)
         self._etf_hover_iid = None  # 跟手動選股一樣機制
         # popup 變數
-        self._etf_popup = None  # Toplevel 視窗（若有）
+        self._etf_popup = None  # Toplevel 視窗(若有)
 
         # Bind events
-        # Fix12 (2026-06-21): 原本重複綁 <Motion>、<Leave>，
+        # Fix12 (2026-06-21): 原本重複綁 <Motion>、<Leave>,
         # 後綁定的 _etf_tree_hover_new / _leave_new 覆蓋了 _on_etf_tree_hover / _leave
         # → popup 邏輯 (顯示 ETF 持股) 永遠不會被觸發
-        # 修法：合併成一個 handler、保留新版的 highlight + 舊版的 popup 邏輯
+        # 修法:合併成一個 handler、保留新版的 highlight + 舊版的 popup 邏輯
         self._etf_tree.bind("<Motion>", self._etf_tree_hover_combined)
         self._etf_tree.bind("<Leave>", self._etf_tree_leave_combined)
         self._etf_tree.bind("<Enter>", self._on_tree_enter_focus)
@@ -6359,47 +6371,47 @@ class StrategyGUI(tk.Tk):
         # 【V1.2.0-kb-focus-v4】selectmode="browse" 下、↑/↓ 自動會切 focus + scroll
         self._etf_tree.bind("<space>", self._on_tree_space_toggle)
         # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單
-        # 原本：self._etf_tree.bind("<Button-3>", self._etf_tree_rclick_new)
-        # 為什麼拿：header 已是 ☐/☑/▣ 動態 checkbox、右鍵選單重複
+        # 原本:self._etf_tree.bind("<Button-3>", self._etf_tree_rclick_new)
+        # 為什麼拿:header 已是 ☐/☑/▣ 動態 checkbox、右鍵選單重複
 
-        # 資料儲存（長期持有的 DataFrame）
-        self._etf_long_df = None  # long-format raw（來自 build_etf_holdings_table）
-        self._etf_agg_df = None   # wide-format（來自 aggregate_etf_holdings）
-        self._etf_checked = {}    # iid -> bool（複用手動選股 _ms_checked 機制）
+        # 資料儲存(長期持有的 DataFrame)
+        self._etf_long_df = None  # long-format raw(來自 build_etf_holdings_table)
+        self._etf_agg_df = None   # wide-format(來自 aggregate_etf_holdings)
+        self._etf_checked = {}    # iid -> bool(複用手動選股 _ms_checked 機制)
     def _build_manual_select_tab(self, parent):
         """建立「手動選股」Tab 的 UI"""
-        # ---- 上方：狀態列 ----
+        # ---- 上方:狀態列 ----
         status_frame = ttk.Frame(parent)
         status_frame.pack(fill="x", padx=8, pady=(6, 0))
-        self._ms_status = tk.StringVar(value="請先執行一次「策略回測」以載入市場資料，或直接點「選股」從 FinMind 抓取最新資料")
+        self._ms_status = tk.StringVar(value="請先執行一次「策略回測」以載入市場資料,或直接點「選股」從 FinMind 抓取最新資料")
         ttk.Label(status_frame, textvariable=self._ms_status,
                   foreground="#555555", font=("Helvetica", 9)).pack(anchor="w")
 
-        # 進度條（默認隱藏，選股中才顯示）
+        # 進度條(默認隱藏,選股中才顯示)
         self._ms_progress = ttk.Progressbar(status_frame, mode='determinate', length=200)
         self._ms_progress.pack(anchor="w", pady=(2, 0))
         self._ms_progress.pack_forget()
 
-        # ---- 主區：左側條件 + 右側結果 ----
+        # ---- 主區:左側條件 + 右側結果 ----
         paned = ttk.PanedWindow(parent, orient="horizontal")
         paned.pack(fill="both", expand=True, padx=6, pady=6)
 
-        # ── 左面板：篩選條件 + Preset + 按鈕 ──
-        # 【v1.0-scrollfix 改】2026-06-19 22:12 William 反映：
+        # ── 左面板:篩選條件 + Preset + 按鈕 ──
+        # 【v1.0-scrollfix 改】2026-06-19 22:12 William 反映:
         # 「window size 不夠大、手動選股左邊欄位沒有全部顯示時請提供 scroll bar 可以 scroll」
         # 原實作 left_frame = ttk.LabelFrame(paned) → widget 比視窗高就被裁掉
-        # 改為：外層 left_container（含 Canvas + scrollbar）→ 內層 left_frame（LabelFrame）
+        # 改為:外層 left_container(含 Canvas + scrollbar)→ 內層 left_frame(LabelFrame)
         left_container = ttk.Frame(paned)
         paned.add(left_container, weight=0)
 
-        # Canvas + scrollbar（參考策略參數 Tab 的 scroll pattern）
+        # Canvas + scrollbar(參考策略參數 Tab 的 scroll pattern)
         left_canvas = tk.Canvas(left_container, width=380, highlightthickness=0)
         left_scrollbar = ttk.Scrollbar(left_container, orient="vertical", command=left_canvas.yview)
         left_canvas.configure(yscrollcommand=left_scrollbar.set)
         left_scrollbar.pack(side="right", fill="y")
         left_canvas.pack(side="left", fill="both", expand=True)
 
-        # 滑鼠滾輪支援（Fix16 2026-06-21: 用 Enter/Leave 動態 bind_all，避免跟其他 tab 的滾輪事件衝突）
+        # 滑鼠滾輪支援(Fix16 2026-06-21: 用 Enter/Leave 動態 bind_all,避免跟其他 tab 的滾輪事件衝突)
         def _on_canvas_enter(_e):
             left_canvas.bind_all("<MouseWheel>", lambda ev: left_canvas.yview_scroll(int(-1 * (ev.delta / 120)), "units"))
             left_canvas.bind_all("<Button-4>", lambda _ev: left_canvas.yview_scroll(-1, "units"))
@@ -6420,14 +6432,14 @@ class StrategyGUI(tk.Tk):
             "<Configure>",
             lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")),
         )
-        # left_frame 建好之後才 bind Enter/Leave（避免 UnboundLocalError）
+        # left_frame 建好之後才 bind Enter/Leave(避免 UnboundLocalError)
         left_frame.bind("<Enter>", _on_canvas_enter)
         left_frame.bind("<Leave>", _on_canvas_leave)
 
         # Preset 管理
         preset_top = ttk.Frame(left_frame)
         preset_top.pack(fill="x", pady=(0, 8))
-        ttk.Label(preset_top, text="Preset：", font=("Helvetica", 9, "bold")).pack(side="left")
+        ttk.Label(preset_top, text="Preset:", font=("Helvetica", 9, "bold")).pack(side="left")
         self._ms_preset_var = tk.StringVar(value="")
         self._ms_preset_combo = ttk.Combobox(preset_top, textvariable=self._ms_preset_var,
                                              state="readonly", width=14)
@@ -6438,8 +6450,8 @@ class StrategyGUI(tk.Tk):
         ttk.Button(preset_top, text="🗑 刪", width=4,
                    command=self._ms_delete_preset).pack(side="left", padx=1)
 
-        # 篩選條件 Entry（每列：[checkbox] [label] [Entry]）
-        # 格式：(label_text, config_key, default_value, skip_value, unit)
+        # 篩選條件 Entry(每列:[checkbox] [label] [Entry])
+        # 格式:(label_text, config_key, default_value, skip_value, unit)
         self._ms_filter_vars = {}
         self._ms_filter_defaults = {
             "min_rev_yoy":      (10.0,  None,  "% YoY"),
@@ -6480,7 +6492,7 @@ class StrategyGUI(tk.Tk):
         # 結果上限
         limit_row = ttk.Frame(left_frame)
         limit_row.pack(fill="x", pady=(6, 0))
-        ttk.Label(limit_row, text="結果上限：", width=20).pack(side="left")
+        ttk.Label(limit_row, text="結果上限:", width=20).pack(side="left")
         self._ms_limit_var = tk.IntVar(value=500)
         ttk.Entry(limit_row, textvariable=self._ms_limit_var, width=8).pack(side="left")
         ttk.Label(limit_row, text="檔", width=7).pack(side="left")
@@ -6490,40 +6502,40 @@ class StrategyGUI(tk.Tk):
         btn_row.pack(fill="x", pady=(12, 0))
         ttk.Button(btn_row, text="🔍 開始選股",
                    command=self._ms_run_selection).pack(fill="x", pady=1)
-        # 【v1.0-cleanup1】2026-06-19 William 決定：
+        # 【v1.0-cleanup1】2026-06-19 William 決定:
         #   手動選股一律用 cache 的收盤價、不需要「即時抓股價」checkbox
-        #   → 看即時 tick 改去「買賣紀錄」Tab（有 30 秒 polling）
+        #   → 看即時 tick 改去「買賣紀錄」Tab(有 30 秒 polling)
         #   → 想強制重抓 cache 用「🔄 重新抓股價」按鈕即可
-        #   連帶拿掉：TWSE 速率模式 radio（配 checkbox 用的、失去意義）
-        # V0.9.5: 手動重抓股價（背景跑中就跳過）
+        #   連帶拿掉:TWSE 速率模式 radio(配 checkbox 用的、失去意義)
+        # V0.9.5: 手動重抓股價(背景跑中就跳過)
         ttk.Button(btn_row, text="🔄 重新抓股價",
                    command=self._ms_force_refresh_price).pack(fill="x", pady=1)
         self._ms_price_status = tk.StringVar(value="股價未抓取")
         ttk.Label(btn_row, textvariable=self._ms_price_status,
                   font=("Helvetica", 8), foreground="#666666").pack(anchor="w", pady=(0, 4))
-        # V0.9.5+: 指定股補抓（Free tier 適用：手動輸入股號、只要用少數 API 額度）
-        # 順序放在 💰 上面（推薦用法：只抓關心的）
+        # V0.9.5+: 指定股補抓(Free tier 適用:手動輸入股號、只要用少數 API 額度)
+        # 順序放在 💰 上面(推薦用法:只抓關心的)
         ttk.Button(btn_row, text="🎯 指定股補抓 (推薦 Free tier)",
                    command=self._ms_fetch_specific_dividend).pack(fill="x", pady=1)
-        # V0.9.5+: 掃描全部股票 (100檔/次) — 一個月一個月慢慢補、按次分批避免 Free tier 爆 402
+        # V0.9.5+: 掃描全部股票 (100檔/次) - 一個月一個月慢慢補、按次分批避免 Free tier 爆 402
         ttk.Button(btn_row, text="💰 掃描全部股票 (100檔/次)",
                    command=self._ms_fetch_all_dividend).pack(fill="x", pady=1)
         self._ms_dividend_status = tk.StringVar(value="股利 DB: 計算中...")
         ttk.Label(btn_row, textvariable=self._ms_dividend_status,
                   font=("Helvetica", 8), foreground="#666666").pack(anchor="w", pady=(0, 4))
-        # 【V0.9.5-tab-split-phase3-E】2026-06-22 William 反映：
+        # 【V0.9.5-tab-split-phase3-E】2026-06-22 William 反映:
         #   結果畫面勾選欄 header 已是 ☐/☑/▣ 動態 checkbox、可點全選/全不選
         #   參數區的全選/全不選按鈕重複、拿掉
-        #   （_ms_select_all / _ms_select_none methods 保留、header click 仍會叫）
-        # 【V0.9.5-tab-split-phase3-G】2026-06-22 William 反映：
+        #   (_ms_select_all / _ms_select_none methods 保留、header click 仍會叫)
+        # 【V0.9.5-tab-split-phase3-G】2026-06-22 William 反映:
         #   匯出按鈕從左邊參數區移到右上面板右邊、跟系統選股一致
         #   文字統一「💾 匯出股票清單」
 
-        # ── 右面板：title + export 按鈕 + Treeview（跟系統選股同結構）──
+        # ── 右面板:title + export 按鈕 + Treeview(跟系統選股同結構)──
         right_frame = ttk.Frame(paned)
         paned.add(right_frame, weight=1)
 
-        # 右上面板：title 左邊、export 按鈕右邊
+        # 右上面板:title 左邊、export 按鈕右邊
         right_top = ttk.Frame(right_frame)
         right_top.pack(fill="x", pady=(0, 5))
         ttk.Label(right_top, text="📊 篩選結果",
@@ -6542,13 +6554,13 @@ class StrategyGUI(tk.Tk):
         tree_frame.pack(fill="both", expand=True)
 
         # Treeview with checkbox
-        # 【V0.9.5+ Phase 8 修 Bug】2026-06-15 William 反映：
+        # 【V0.9.5+ Phase 8 修 Bug】2026-06-15 William 反映:
         #   殖利率沒對照到原始股利金額、無法驗算是否正確
-        #   修法：加「今現金」/「去年現金」欄位（股利金額，原始股數）
-        #   並修正之前 key 錯位（找「今年股票股利(元)」但欄位是「今年股票股利」）
-        # 【V0.9.5-twser3 修 Bug】2026-06-18 William 反映：
-        #   1. 「今股票殖%」/「去年股票殖%」拿掉（不需要看股票殖利率）
-        # 【V0.9.5-goodinfo4+5 修 Bug】2026-06-18 18:12 William 反映：
+        #   修法:加「今現金」/「去年現金」欄位(股利金額,原始股數)
+        #   並修正之前 key 錯位(找「今年股票股利(元)」但欄位是「今年股票股利」)
+        # 【V0.9.5-twser3 修 Bug】2026-06-18 William 反映:
+        #   1. 「今股票殖%」/「去年股票殖%」拿掉(不需要看股票殖利率)
+        # 【V0.9.5-goodinfo4+5 修 Bug】2026-06-18 18:12 William 反映:
         #   1. 「成交量不是我要的今日成交量」→ 拿掉盤中/收盤後切換、直接顯示 price_df 的「成交量(張)」
         #   2. 「順便將篩選結果依照營收累計YoY由大到小排序」→ 主排序改為營收累計YoY 降序
         # 【V1.1-add-change-col】2026-06-29 13:57 William 反映
@@ -6561,7 +6573,7 @@ class StrategyGUI(tk.Tk):
                 "資料日期")
         self._ms_tree = ttk.Treeview(tree_frame, columns=cols, show="headings",
                                      selectmode="browse", height=25)
-        # 15 欄（V1.1-add-change-col 加「漲跌價」）：原本 14 欄 + 1 = 15 欄
+        # 15 欄(V1.1-add-change-col 加「漲跌價」):原本 14 欄 + 1 = 15 欄
         col_widths = (40, 60, 100, 70, 70, 70,  # 加一欄 70
                       60, 60, 80,
                       50, 80,
@@ -6570,15 +6582,15 @@ class StrategyGUI(tk.Tk):
         for col, w in zip(cols, col_widths):
             self._ms_tree.heading(col, text=col)
             self._ms_tree.column(col, width=w, anchor="center")
-        # 【V0.9.5-click-sort】click heading 切換升降冪（像 file explorer）
-        # skip「勾選」、「名稱」、「資料日期」欄（William 2026-06-28 14:30 反映：
-        #  「勾選」是 toggle checkbox、「名稱」中文排序沒意義、「資料日期」是合併日期字串排序不準）
+        # 【V0.9.5-click-sort】click heading 切換升降冪(像 file explorer)
+        # skip「勾選」、「名稱」、「資料日期」欄(William 2026-06-28 14:30 反映:
+        #  「勾選」是 toggle checkbox、「名稱」中文排序沒意義、「資料日期」是合併日期字串排序不準)
         self._ms_sort_state = _make_treeview_click_sort(
             self._ms_tree, cols, skip_cols={"勾選", "名稱", "資料日期"}
         )
 
 
-        # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐（看起來像個 checkbox）
+        # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐(看起來像個 checkbox)
         try:
             self._ms_tree.heading(cols[0], text="☐")
         except (IndexError, tk.TclError):
@@ -6591,12 +6603,12 @@ class StrategyGUI(tk.Tk):
         ms_scroll_y.pack(side="right", fill="y")
         ms_scroll_x.pack(side="bottom", fill="x")
 
-        # 【v1.0-hover 新增】2026-06-19 William 要求：
+        # 【v1.0-hover 新增】2026-06-19 William 要求:
         # 滑鼠移到某 row 時、整列黃色 highlight、移走取消
-        # 實現方式：建立 _hover iid 變數。
-        #   - Motion 進新 row 時：把 _hover 設為該 iid、用 item.configure(tag) 動態改 tag
-        #   - Leave 或 Motion 到別的 row：清掉 _hover、該 row 設回原本 tag
-        # 【V1.1-price-color】ttk.Treeview 多 tag 可組合：row tags=("checked","price_up")
+        # 實現方式:建立 _hover iid 變數。
+        #   - Motion 進新 row 時:把 _hover 設為該 iid、用 item.configure(tag) 動態改 tag
+        #   - Leave 或 Motion 到別的 row:清掉 _hover、該 row 設回原本 tag
+        # 【V1.1-price-color】ttk.Treeview 多 tag 可組合:row tags=("checked","price_up")
         #   checked/unchecked/hover 控 background、price_* 控 foreground、兩者不衝突
         self._ms_tree.tag_configure("checked", background="#d0e8ff")
         self._ms_tree.tag_configure("unchecked", background="#ffffff")
@@ -6604,10 +6616,10 @@ class StrategyGUI(tk.Tk):
         self._ms_tree.tag_configure("price_up", foreground=COLOR_PROFIT_POS)
         self._ms_tree.tag_configure("price_down", foreground=COLOR_PROFIT_NEG)
         self._ms_tree.tag_configure("price_zero", foreground=COLOR_PROFIT_ZERO)
-        # 【V1.1-price-color-fix2】hover × price 組合 tag（3 種）
+        # 【V1.1-price-color-fix2】hover × price 組合 tag(3 種)
         for ptag, fcolor in [("up", COLOR_PROFIT_POS), ("down", COLOR_PROFIT_NEG), ("zero", COLOR_PROFIT_ZERO)]:
             self._ms_tree.tag_configure(f"hover_{ptag}", background="#fff3a0", foreground=fcolor)
-        self._ms_hover_iid = None  # 記住目前 hover 的 row iid（若有、給 _ms_clear_hover 用）
+        self._ms_hover_iid = None  # 記住目前 hover 的 row iid(若有、給 _ms_clear_hover 用)
 
         # Click to toggle checkbox
         self._ms_tree.bind("<Button-1>", self._ms_toggle_check)
@@ -6630,23 +6642,23 @@ class StrategyGUI(tk.Tk):
         # 【V1.2.0-kb-focus-v4】selectmode="browse" 下、↑/↓ 自動會切 focus + scroll
         self._ms_tree.bind("<space>", self._on_tree_space_toggle)
         # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單
-        # 原本：
+        # 原本:
         #   self._ms_tree.bind("<Button-3>", self._ms_tree_rclick)  # 原本是 dead code、被下面那行覆蓋
         #   self._ms_tree.bind("<Button-3>", self._ms_show_context_menu)
-        # 為什麼拿：header 已是 ☐/☑/▣ 動態 checkbox、右鍵選單重複
+        # 為什麼拿:header 已是 ☐/☑/▣ 動態 checkbox、右鍵選單重複
 
-        # 初始化：先 refresh preset 下拉（自動選中上次的）、再載入
-        # 【V0.9.5+ Phase 7 修 Bug】2026-06-15 William 反映：
+        # 初始化:先 refresh preset 下拉(自動選中上次的)、再載入
+        # 【V0.9.5+ Phase 7 修 Bug】2026-06-15 William 反映:
         #   儲存 preset 後重開 App 找不到儲存資料
-        #   根因：_ms_preset_var 預設空字串、_ms_load_preset 拿空字串會早退
-        #   修法：先呼叫 _ms_refresh_preset_list 把 manual_select_last_preset 設進 var
+        #   根因:_ms_preset_var 預設空字串、_ms_load_preset 拿空字串會早退
+        #   修法:先呼叫 _ms_refresh_preset_list 把 manual_select_last_preset 設進 var
         self._ms_refresh_preset_list()
         self._ms_load_preset()
         self._ms_refresh_pipeline_status()
         self._ms_refresh_dividend_status()
 
     def _ms_refresh_pipeline_status(self):
-        """更新狀態列：顯示 pipeline 資料是否已載入"""
+        """更新狀態列:顯示 pipeline 資料是否已載入"""
         has_price = hasattr(self, '_price_df') and self._price_df is not None and not self._price_df.empty
         has_revenue = hasattr(self, '_revenue_df') and self._revenue_df is not None and not self._revenue_df.empty
         has_eps = hasattr(self, '_eps_df') and self._eps_df is not None and not self._eps_df.empty
@@ -6657,13 +6669,13 @@ class StrategyGUI(tk.Tk):
         if has_eps: status.append(f"EPS({len(self._eps_df)}筆)")
 
         if status:
-            self._ms_status.set("✅ Pipeline 資料已就緒：" + " / ".join(status) +
-                               "｜可直接選股，或點「選股」從 FinMind 實時抓取")
+            self._ms_status.set("✅ Pipeline 資料已就緒:" + " / ".join(status) +
+                               "|可直接選股,或點「選股」從 FinMind 實時抓取")
         else:
-            self._ms_status.set("⚠️ Pipeline 尚未執行｜點「選股」將從 FinMind 即時抓取市場資料")
+            self._ms_status.set("⚠️ Pipeline 尚未執行|點「選股」將從 FinMind 即時抓取市場資料")
 
     def _ms_get_filters(self) -> dict:
-        """從 UI 讀取目前的篩選條件，回傳 dict。"""
+        """從 UI 讀取目前的篩選條件,回傳 dict。"""
         f = {}
         for key, (cb_var, entry_var, skip_val) in self._ms_filter_vars.items():
             if cb_var.get():  # 有勾選
@@ -6674,19 +6686,19 @@ class StrategyGUI(tk.Tk):
         return f
 
     # ==========================================================
-    # V0.9.5: 背景重抓股價（啟動時 + 手動按鈕）
+    # V0.9.5: 背景重抓股價(啟動時 + 手動按鈕)
     # ==========================================================
     def _startup_bg_fetch_price(self):
-        """App 啟動 0.8s 後背景重抓股價（跳過選項：pipeline 剛抓過且是今天）
-        - 用 get_or_fetch：meta last_update == today → 用 cache、不抓
+        """App 啟動 0.8s 後背景重抓股價(跳過選項:pipeline 剛抓過且是今天)
+        - 用 get_or_fetch:meta last_update == today → 用 cache、不抓
         - 反之走 fetch_prices 重抓、寫回 cache
         - 重抓中使用者點「重新抓股價」按鈕 → 旗標判斷跳過
         """
         if self._bg_price_fetching:
             return
         self._bg_price_fetching = True
-        self._ms_price_status.set("🔄 背景抓取股價中（啟動時自動）...")
-        self._ms_status.set("🔄 背景重抓股價中（啟動時自動、跳過今天已抓的 cache）...")
+        self._ms_price_status.set("🔄 背景抓取股價中(啟動時自動)...")
+        self._ms_status.set("🔄 背景重抓股價中(啟動時自動、跳過今天已抓的 cache)...")
 
         def _bg_worker():
             try:
@@ -6700,29 +6712,29 @@ class StrategyGUI(tk.Tk):
         threading.Thread(target=_bg_worker, daemon=True).start()
 
     def _force_refresh_price(self, source_label: str = "重抓"):
-        """【v1.1.5c-force-refresh-shared】2026-07-02 22:14 William 要求：
+        """【v1.1.5c-force-refresh-shared】2026-07-02 22:14 William 要求:
         「系統選股 tab 的左欄也加「重新抓股價」按鈕」
 
-        共用邏輯：強制重抓股價（不走 cache、寫回 cache）
+        共用邏輯:強制重抓股價(不走 cache、寫回 cache)
         - 手動選股 tab 跟系統選股 tab 都呼叫這個
         - 行為一致、避免 code duplication
         - 背景 thread 抓、寫入 cache、不 block UI
         """
         if self._bg_price_fetching:
-            self._ms_status.set(f"⏳ 背景抓取股價中｜{source_label} 按鈕已跳過、請稍候...")
-            self.logger.log(f"⏳ 背景抓股價中、{source_label} 按鈕跳過（避免重複打 FinMind）")
+            self._ms_status.set(f"⏳ 背景抓取股價中|{source_label} 按鈕已跳過、請稍候...")
+            self.logger.log(f"⏳ 背景抓股價中、{source_label} 按鈕跳過(避免重複打 FinMind)")
             return
 
         self._bg_price_fetching = True
-        self._ms_status.set(f"🔄 {source_label}股價中（強制重抓、不走 cache）...")
+        self._ms_status.set(f"🔄 {source_label}股價中(強制重抓、不走 cache)...")
         self._ms_price_status.set("🔄 抓取中...")
 
         def _force_worker():
             try:
                 _s = build_session()
-                # 強制重抓：直接呼叫 fetch_prices（不查 cache）
+                # 強制重抓:直接呼叫 fetch_prices(不查 cache)
                 df = fetch_prices(_s, self.cfg, self.logger)
-                # 寫回 cache（更新 meta last_update = today）
+                # 寫回 cache(更新 meta last_update = today)
                 save_cache(get_cache_file("price"), df)
                 self.after(0, lambda: self._on_bg_price_done(df, source=source_label))
             except Exception as e:
@@ -6732,14 +6744,14 @@ class StrategyGUI(tk.Tk):
 
     def _ms_force_refresh_price(self):
         """手動選股 Tab「🔄 重新抓股價」按鈕
-        - 若背景正在抓 → 跳過、提示使用者（避免重複打 FinMind）
-        - 反之強制重抓（不走 cache）
+        - 若背景正在抓 → 跳過、提示使用者(避免重複打 FinMind)
+        - 反之強制重抓(不走 cache)
         - 【v1.1.5c-force-refresh-shared】呼叫共用 _force_refresh_price("手動重抓")
         """
         self._force_refresh_price("手動重抓")
 
     def _on_bg_price_done(self, df, source: str = ""):
-        """背景重抓股價完成（不論啟動或手動）→ 更新 GUI"""
+        """背景重抓股價完成(不論啟動或手動)→ 更新 GUI"""
         self._bg_price_fetching = False
         if df is not None and not df.empty:
             self._price_df = df
@@ -6748,8 +6760,8 @@ class StrategyGUI(tk.Tk):
             # 【v1.0-info】順手加股價更新時間到 status bar
             # 讓使用者不管在哪個 Tab 都看得到「最後更新時間」
             update_str = self._price_last_update.strftime("%Y-%m-%d %H:%M:%S")
-            # 【v1.0-info】順手顯示 cache 的 data_date（個股最後交易日）
-            # 若 df 有 data_date 欄位且有資料，顯示該日期
+            # 【v1.0-info】順手顯示 cache 的 data_date(個股最後交易日)
+            # 若 df 有 data_date 欄位且有資料,顯示該日期
             data_date_hint = ""
             try:
                 if "data_date" in df.columns:
@@ -6760,15 +6772,15 @@ class StrategyGUI(tk.Tk):
                         # 如果有多个不同日期、顯示範圍
                         _unique_dates = sorted(set(_dates.tolist()))
                         if len(_unique_dates) == 1:
-                            data_date_hint = f"｜資料日期：{_latest}"
+                            data_date_hint = f"|資料日期:{_latest}"
                         else:
-                            data_date_hint = f"｜資料日期：{_unique_dates[0]} ~ {_unique_dates[-1]}"
+                            data_date_hint = f"|資料日期:{_unique_dates[0]} ~ {_unique_dates[-1]}"
             except Exception:
                 pass
-            # 【v1.0-vol-fix】2026-06-19 18:50 William 反映：
-            # 手動重抓股價完成後、Treeview 不會自動更新（要按「選股」才會 refresh）
+            # 【v1.0-vol-fix】2026-06-19 18:50 William 反映:
+            # 手動重抓股價完成後、Treeview 不會自動更新(要按「選股」才會 refresh)
             # 看起來「什麼都沒變」、使用者誤以為重抓失敗。
-            # 修法：手動重抓完成時、如果 Treeview 已有結果 → 自動重跑選股 refresh Treeview。
+            # 修法:手動重抓完成時、如果 Treeview 已有結果 → 自動重跑選股 refresh Treeview。
             auto_rerun = (
                 source == "手動重抓"
                 and self._ms_tree is not None
@@ -6776,42 +6788,42 @@ class StrategyGUI(tk.Tk):
             )
             if auto_rerun:
                 self._ms_status.set(
-                    f"✅ {source}完成：{len(df)} 筆、股價更新：{update_str}{data_date_hint}"
-                    f"｜正在自動重跑選股以 refresh 結果..."
+                    f"✅ {source}完成:{len(df)} 筆、股價更新:{update_str}{data_date_hint}"
+                    f"|正在自動重跑選股以 refresh 結果..."
                 )
                 self.logger.log(
-                    f"✅ {source}完成：{len(df)} 筆、股價更新：{update_str}{data_date_hint}"
-                    f"｜自動重跑選股中..."
+                    f"✅ {source}完成:{len(df)} 筆、股價更新:{update_str}{data_date_hint}"
+                    f"|自動重跑選股中..."
                 )
                 self.after(100, self._ms_run_selection)
             else:
                 self._ms_status.set(
-                    f"✅ 股價資料就緒（{source}、{len(df)} 筆）｜股價更新：{update_str}{data_date_hint}｜可點「選股」"
+                    f"✅ 股價資料就緒({source}、{len(df)} 筆)|股價更新:{update_str}{data_date_hint}|可點「選股」"
                 )
-                self.logger.log(f"✅ {source}股價完成：{len(df)} 筆、股價更新：{update_str}{data_date_hint}")
+                self.logger.log(f"✅ {source}股價完成:{len(df)} 筆、股價更新:{update_str}{data_date_hint}")
         else:
             self._ms_status.set(f"⚠️ {source}股價完成但無資料")
             self.logger.log(f"⚠️ {source}股價完成但無資料")
 
     def _on_bg_price_err(self, err: str, source: str = ""):
-        """背景重抓股價失敗 → log + 更新狀態列（不阻擋使用者）"""
+        """背景重抓股價失敗 → log + 更新狀態列(不阻擋使用者)"""
         self._bg_price_fetching = False
-        self._ms_price_status.set(f"⚠️ {source}失敗：{err[:40]}")
-        self._ms_status.set(f"⚠️ {source}股價失敗：{err}（可手動重試）")
-        self.logger.log(f"⚠️ {source}股價失敗：{err}")
+        self._ms_price_status.set(f"⚠️ {source}失敗:{err[:40]}")
+        self._ms_status.set(f"⚠️ {source}股價失敗:{err}(可手動重試)")
+        self.logger.log(f"⚠️ {source}股價失敗:{err}")
 
     def _update_price_status_label(self):
         """更新手動選股 Tab 的「股價更新時間」label"""
         if self._price_last_update:
             self._ms_price_status.set(
-                f"股價更新：{self._price_last_update.strftime('%Y-%m-%d %H:%M:%S')}"
+                f"股價更新:{self._price_last_update.strftime('%Y-%m-%d %H:%M:%S')}"
             )
 
     # ==========================================================
-    # V0.9.5: 一次性補抓全部股利（避免每次選股都打 FinMind）
+    # V0.9.5: 一次性補抓全部股利(避免每次選股都打 FinMind)
     # ==========================================================
     def _ms_refresh_dividend_status(self):
-        """更新股利 DB 狀態 label：顯示「股利 DB: 351/2374 檔（缺漏 2023）」"""
+        """更新股利 DB 狀態 label:顯示「股利 DB: 351/2374 檔(缺漏 2023)」"""
         try:
             _init_div_history_db("dividend_history.db")
             price_df = getattr(self, "_price_df", None)
@@ -6825,7 +6837,7 @@ class StrategyGUI(tk.Tk):
                         except Exception:
                             pass
             if price_df is None or price_df.empty:
-                self._ms_dividend_status.set("股利 DB: 無法計算（未抓到股價名單）")
+                self._ms_dividend_status.set("股利 DB: 無法計算(未抓到股價名單)")
                 return
             all_codes = price_df["股票代號"].astype(str).str.strip().tolist()
             cached = _query_div_history("dividend_history.db", all_codes)
@@ -6843,34 +6855,34 @@ class StrategyGUI(tk.Tk):
                         with open(p) as f:
                             ts = f.read().strip()
                         if ts:
-                            # 格式化：只取 日期 和 時:分
+                            # 格式化:只取 日期 和 時:分
                             parts = ts.split()
                             if len(parts) >= 2:
-                                last_fetch = f"｜自動抓取 {parts[0]} {parts[1]}"
+                                last_fetch = f"|自動抓取 {parts[0]} {parts[1]}"
                             break
                     except Exception:
                         pass
 
             if missing == 0:
-                self._ms_dividend_status.set(f"股利 DB: ✅ {in_db}/{total} 檔（全部就絡）{last_fetch}")
+                self._ms_dividend_status.set(f"股利 DB: ✅ {in_db}/{total} 檔(全部就絡){last_fetch}")
             else:
-                self._ms_dividend_status.set(f"股利 DB: {in_db}/{total} 檔（缺漏 {missing}）{last_fetch}")
+                self._ms_dividend_status.set(f"股利 DB: {in_db}/{total} 檔(缺漏 {missing}){last_fetch}")
         except Exception as e:
             self._ms_dividend_status.set(f"股利 DB: 查詢失敗 {str(e)[:30]}")
 
     # V0.9.5+: 「💰 掃描全部股票」分批參數
-    _MS_SCAN_BATCH = 100  # 每批 100 檔（Free tier 300-1000 筆/月額度友善）
+    _MS_SCAN_BATCH = 100  # 每批 100 檔(Free tier 300-1000 筆/月額度友善)
 
     def _ms_fetch_all_dividend(self):
         """手動選股 Tab「💰 掃描全部股票 (100檔/次)」按鈕
         - 從 price_df 取所有股票代號
-        - 比對 DB，只補抓缺漏中的「前 100 檔」
-        - 一個月一個月慢慢補：跑完停、下次再按繼續抓下一批
+        - 比對 DB,只補抓缺漏中的「前 100 檔」
+        - 一個月一個月慢慢補:跑完停、下次再按繼續抓下一批
         - 全部抓完後股利 DB 完整、可發現關注清單外的標的
         """
         # 避免重複
         if getattr(self, "_ms_dividend_fetching", False):
-            self._ms_status.set("⏳ 掃描股利中，請稍候...")
+            self._ms_status.set("⏳ 掃描股利中,請稍候...")
             return
 
         # 計算缺漏數
@@ -6880,7 +6892,7 @@ class StrategyGUI(tk.Tk):
             self._ms_status.set("✅ 股利 DB 完整、無需補抓")
             return
 
-        # 解析缺漏數（從 status label 抓數字）
+        # 解析缺漏數(從 status label 抓數字)
         import re as _re_scan
         m = _re_scan.search(r"缺漏\s*(\d+)", cur)
         missing = int(m.group(1)) if m else 0
@@ -6897,18 +6909,18 @@ class StrategyGUI(tk.Tk):
         if not messagebox.askyesno(
             "確認掃描股利",
             f"這次會從 FinMind 掃描補抓 {this_batch} 檔股利寫入本地 DB。\n\n"
-            f"目前狀態：{cur}\n\n"
-            f"📦 分批設定：{batch} 檔/次\n"
+            f"目前狀態:{cur}\n\n"
+            f"📦 分批設定:{batch} 檔/次\n"
             f"⏱️ 預計 {int(this_batch * 0.4) + 1} 秒、{this_batch} 筆 API 額度\n"
-            f"🔁 全部補完約需再按 {runs_left_total} 次（可分散在不同天）\n\n"
-            f"💡 Free tier 額度 300-1000 筆/月，建議一天最多跑 1-2 次\n"
+            f"🔁 全部補完約需再按 {runs_left_total} 次(可分散在不同天)\n\n"
+            f"💡 Free tier 額度 300-1000 筆/月,建議一天最多跑 1-2 次\n"
             f"💡 想只抓關注個股可用「🎯 指定股補抓」更省額度\n\n"
-            f"按「Yes」開始，期間可按「取消」中斷。",
+            f"按「Yes」開始,期間可按「取消」中斷。",
         ):
             return
 
         self._ms_dividend_fetching = True
-        self._ms_status.set(f"🔄 掃描股利中（{this_batch}/{missing} 檔、請勿關 App）...")
+        self._ms_status.set(f"🔄 掃描股利中({this_batch}/{missing} 檔、請勿關 App)...")
 
         # 取得所有股票代號
         price_df = getattr(self, "_price_df", None)
@@ -6922,16 +6934,16 @@ class StrategyGUI(tk.Tk):
                         pass
         if price_df is None or price_df.empty:
             self._ms_dividend_fetching = False
-            self._ms_status.set("❌ 掃描失敗：未取得股價名單（請先點「重抓股價」）")
+            self._ms_status.set("❌ 掃描失敗:未取得股價名單(請先點「重抓股價」)")
             return
         all_codes = price_df["股票代號"].astype(str).str.strip().tolist()
 
         def _fetch_worker():
             try:
-                # 背景補抓：給 progress_callback 讓 UI 更新
+                # 背景補抓:給 progress_callback 讓 UI 更新
                 def _progress(done, total):
                     self.after(0, lambda d=done, t=total: self._ms_status.set(
-                        f"🔄 掃描股利中... {d}/{t}（{int(d/t*100)}%）"
+                        f"🔄 掃描股利中... {d}/{t}({int(d/t*100)}%)"
                     ))
 
                 # 【v1.1 重構】用模組存取取代直接名稱、避免 monkeypatch st_fetch_market 後找不到
@@ -6947,67 +6959,67 @@ class StrategyGUI(tk.Tk):
         threading.Thread(target=_fetch_worker, daemon=True).start()
 
     def _on_dividend_fetch_done(self, added: int):
-        """補抓股利完成（💰 掃描全部股票 / 🎯 指定股補抓 共用）
+        """補抓股利完成(💰 掃描全部股票 / 🎯 指定股補抓 共用)
         - 重新 refresh DB 狀態 → 算出剩餘缺漏
-        - 顯示「這次 +X 檔｜剩 Y 檔（再 N 次可補完）」
+        - 顯示「這次 +X 檔|剩 Y 檔(再 N 次可補完)」
         """
         self._ms_dividend_fetching = False
         self._ms_refresh_dividend_status()
         cur = self._ms_dividend_status.get()
         if added == -1:
-            # FinMind 額度用完（_background_fetch_all_dividend 回傳 -1）
+            # FinMind 額度用完(_background_fetch_all_dividend 回傳 -1)
             self._ms_status.set(
-                "❌ 補抓中斷：FinMind 額度用完（status 402）｜"
+                "❌ 補抓中斷:FinMind 額度用完(status 402)|"
                 "已補抓的資料已寫入 DB"
             )
-            self.logger.log("❌ 補抓股利中斷：FinMind 額度用完（status 402）")
+            self.logger.log("❌ 補抓股利中斷:FinMind 額度用完(status 402)")
             return
-        # 從 cur 抓剩餘缺漏（regex）
+        # 從 cur 抓剩餘缺漏(regex)
         import re as _re_done
         m = _re_done.search(r"缺漏\s*(\d+)", cur)
         remaining = int(m.group(1)) if m else 0
         if remaining == 0:
             # 全部完成
-            self._ms_status.set(f"✅ 補抓股利完成：新增 {added} 檔｜{cur}")
-            self.logger.log(f"✅ 補抓股利完成：新增 {added} 檔（全部就絡）")
+            self._ms_status.set(f"✅ 補抓股利完成:新增 {added} 檔|{cur}")
+            self.logger.log(f"✅ 補抓股利完成:新增 {added} 檔(全部就絡)")
         else:
             # 還有缺漏、告訴使用者還要按幾次
             batch = self._MS_SCAN_BATCH
             runs_left = (remaining + batch - 1) // batch
             self._ms_status.set(
-                f"✅ 這次補 {added} 檔｜剩 {remaining} 檔（再按 {runs_left} 次可補完）｜{cur}"
+                f"✅ 這次補 {added} 檔|剩 {remaining} 檔(再按 {runs_left} 次可補完)|{cur}"
             )
-            self.logger.log(f"✅ 補抓股利：這次 +{added}｜剩 {remaining} 檔（{runs_left} 次可補完）")
-        # 自動重跑選股（讓使用者直接看到補抓後的結果）
+            self.logger.log(f"✅ 補抓股利:這次 +{added}|剩 {remaining} 檔({runs_left} 次可補完)")
+        # 自動重跑選股(讓使用者直接看到補抓後的結果)
         self._ms_run_selection()
 
     def _on_dividend_fetch_err(self, err: str):
         """補抓股利失敗"""
         self._ms_dividend_fetching = False
-        self._ms_status.set(f"❌ 補抓股利失敗：{err}（可重試）")
-        self.logger.log(f"❌ 補抓股利失敗：{err}")
+        self._ms_status.set(f"❌ 補抓股利失敗:{err}(可重試)")
+        self.logger.log(f"❌ 補抓股利失敗:{err}")
 
     def _ms_fetch_specific_dividend(self):
         """手動選股 Tab「🎯 指定股補抓」按鈕
 
-        適用情境：FinMind Free tier 額度不夠一次抓全部
-        流程：
-          1. 跳出輸入框（多行、可貼上「2330, 2454, 2317」這類格式）
+        適用情境:FinMind Free tier 額度不夠一次抓全部
+        流程:
+          1. 跳出輸入框(多行、可貼上「2330, 2454, 2317」這類格式)
           2. 解析股號、只抓那些
           3. 寫入 DB、狀態列顯示進度
         """
         if getattr(self, "_ms_dividend_fetching", False):
-            self._ms_status.set("⏳ 補抓股利中，請稍候...")
+            self._ms_status.set("⏳ 補抓股利中,請稍候...")
             return
 
-        # 對話框：可輸入多行股號（逗號、空格、換行分隔）
+        # 對話框:可輸入多行股號(逗號、空格、換行分隔)
         from tkinter import simpledialog
         default = "2330, 2454, 2317"  # 台積電、聯發科、鴻海
         codes_raw = simpledialog.askstring(
             "指定股補抓股利",
-            "請輸入要補抓的股號（可貼上）：\n"
-            "格式：「2330, 2454, 2317」或一行一個\n"
-            "限 1-100 檔（超過 100 不收）",
+            "請輸入要補抓的股號(可貼上):\n"
+            "格式:「2330, 2454, 2317」或一行一個\n"
+            "限 1-100 檔(超過 100 不收)",
             initialvalue=default,
             parent=self.manual_select_tab,
         )
@@ -7016,10 +7028,10 @@ class StrategyGUI(tk.Tk):
 
         # 解析
         import re as _re_codes
-        codes = [c.strip() for c in _re_codes.split(r"[\s,，]+", codes_raw) if c.strip()]
+        codes = [c.strip() for c in _re_codes.split(r"[\s,,]+", codes_raw) if c.strip()]
         # 限 100 檔
         if len(codes) > 100:
-            messagebox.showwarning("超過限制", f"只取前 100 檔（你輸入 {len(codes)} 檔）")
+            messagebox.showwarning("超過限制", f"只取前 100 檔(你輸入 {len(codes)} 檔)")
             codes = codes[:100]
         if not codes:
             messagebox.showwarning("無股號", "請至少輸入 1 個股號")
@@ -7030,25 +7042,25 @@ class StrategyGUI(tk.Tk):
         cached = _query_div_history("dividend_history.db", codes)
         to_fetch = [c for c in codes if c not in cached]
         if not to_fetch:
-            messagebox.showinfo("無需補抓", f"這 {len(codes)} 檔都已在 DB 中，無需補抓")
+            messagebox.showinfo("無需補抓", f"這 {len(codes)} 檔都已在 DB 中,無需補抓")
             return
 
         if not messagebox.askyesno(
             "確認補抓",
             f"將補抓 {len(to_fetch)} 檔股利到本地 DB。\n"
-            f"（{len(codes) - len(to_fetch)} 檔已在 DB 跳過）\n\n"
+            f"({len(codes) - len(to_fetch)} 檔已在 DB 跳過)\n\n"
             f"預計需要 {int(len(to_fetch) * 0.4) + 1} 秒、{len(to_fetch)} 筆 API 額度。",
         ):
             return
 
         self._ms_dividend_fetching = True
-        self._ms_status.set(f"🔄 指定股補抓中（{len(to_fetch)} 檔）...")
+        self._ms_status.set(f"🔄 指定股補抓中({len(to_fetch)} 檔)...")
 
         def _fetch_worker():
             try:
                 def _progress(done, total):
                     self.after(0, lambda d=done, t=total: self._ms_status.set(
-                        f"🔄 指定股補抓中... {d}/{t}（{int(d/t*100)}%）"
+                        f"🔄 指定股補抓中... {d}/{t}({int(d/t*100)}%)"
                     ))
 
                 # 【v1.1 重構】用模組存取取代直接名稱、避免 monkeypatch st_fetch_market 後找不到
@@ -7063,16 +7075,16 @@ class StrategyGUI(tk.Tk):
         threading.Thread(target=_fetch_worker, daemon=True).start()
 
     def _ms_run_selection(self):
-        """點「選股」：抓取資料 → 篩選 → 顯示結果"""
+        """點「選股」:抓取資料 → 篩選 → 顯示結果"""
         # V0.9.5: 背景抓股價中→跳過避免重複打 FinMind
         if self._bg_price_fetching:
-            self._ms_status.set("⏳ 背景抓股價中，請稍候再點「選股」...")
-            self.logger.log("⏳ 背景抓股價中，「選股」跳過（避免重複打 FinMind）")
+            self._ms_status.set("⏳ 背景抓股價中,請稍候再點「選股」...")
+            self.logger.log("⏳ 背景抓股價中,「選股」跳過(避免重複打 FinMind)")
             return
         # V0.9.5: 背景補抓股利中→跳過
         if getattr(self, "_ms_dividend_fetching", False):
-            self._ms_status.set("⏳ 補抓股利中，請稍候再點「選股」...")
-            self.logger.log("⏳ 補抓股利中，「選股」跳過")
+            self._ms_status.set("⏳ 補抓股利中,請稍候再點「選股」...")
+            self.logger.log("⏳ 補抓股利中,「選股」跳過")
             return
 
         filters = self._ms_get_filters()
@@ -7081,7 +7093,7 @@ class StrategyGUI(tk.Tk):
         # 顯示進度條
         self._ms_progress.pack(anchor="w", pady=(2, 0))
         self._ms_progress["value"] = 0
-        self._ms_status.set("🔄 抓取資料中，請稍候...")
+        self._ms_status.set("🔄 抓取資料中,請稍候...")
         self._ms_tree.delete(*self._ms_tree.get_children())
         self.update_idletasks()
 
@@ -7096,16 +7108,16 @@ class StrategyGUI(tk.Tk):
                 revenue_df = getattr(self, '_revenue_df', None)
                 eps_df = getattr(self, '_eps_df', None)
 
-                # 【v1.0-cleanup1】2026-06-19 William 決定：
+                # 【v1.0-cleanup1】2026-06-19 William 決定:
                 #   手動選股一律用 cache 的收盤價、不再提供「即時抓股價」選項
-                #   → 拿掉舊的「即時抓股價」if 分支（原本用 TWSE 即時 API 抓）
-                #   → 仍保留「🔄 重新抓股價」按鈕（強制重抓 cache 用、走正常 fetch_prices）
+                #   → 拿掉舊的「即時抓股價」if 分支(原本用 TWSE 即時 API 抓)
+                #   → 仍保留「🔄 重新抓股價」按鈕(強制重抓 cache 用、走正常 fetch_prices)
                 # 詳見上方按鈕區註解
 
 
-                # fallback 1：若 GUI 沒記、但 cache/ 有 → 讀 cache
-                # 注：讀 cache 前先檢查 last_update；若 != today 就走 get_or_fetch 重抓
-                #     （避免六日不開盤下「last_update 是昨天 = today」就誤判過期）
+                # fallback 1:若 GUI 沒記、但 cache/ 有 → 讀 cache
+                # 注:讀 cache 前先檢查 last_update;若 != today 就走 get_or_fetch 重抓
+                #     (避免六日不開盤下「last_update 是昨天 = today」就誤判過期)
                 from datetime import datetime as _dt
                 _today = _dt.now().strftime("%Y-%m-%d")
                 def _is_cache_fresh(path):
@@ -7116,7 +7128,7 @@ class StrategyGUI(tk.Tk):
                     try:
                         _meta = pd.read_excel(path, sheet_name="meta", engine="openpyxl")
                         _last = str(_meta.loc[0, "last_update"])
-                        return _last >= _today   # 含今天（避免跨交易日誤判）
+                        return _last >= _today   # 含今天(避免跨交易日誤判)
                     except Exception:
                         # 舊 cache 沒 meta sheet → 視為剛抓的
                         return True
@@ -7131,14 +7143,14 @@ class StrategyGUI(tk.Tk):
                                 except Exception:
                                     pass
                             else:
-                                # cache 過期 → 走 get_or_fetch 重抓（會自動寫回 cache）
+                                # cache 過期 → 走 get_or_fetch 重抓(會自動寫回 cache)
                                 try:
                                     _s = build_session()
                                     price_df = get_or_fetch("price", lambda: fetch_prices(_s, self.cfg, self.logger), self.logger)
                                     self.logger.log(f"♻️ price cache 過期 → 重抓 {len(price_df)} 筆")
                                     break
                                 except Exception as _e:
-                                    self.logger.log(f"⚠️ price 重抓失敗：{_e} → fallback 讀舊 cache")
+                                    self.logger.log(f"⚠️ price 重抓失敗:{_e} → fallback 讀舊 cache")
                                     try:
                                         price_df = pd.read_excel(p, sheet_name="data", engine="openpyxl")
                                         self.logger.log(f"✅ 讀 price cache (舊): {len(price_df)} 筆")
@@ -7177,9 +7189,9 @@ class StrategyGUI(tk.Tk):
             except Exception as e:
                 import traceback
                 tb = traceback.format_exc()
-                # 完整訊息寫到主 console（背景 thread 也能輸出）
+                # 完整訊息寫到主 console(背景 thread 也能輸出)
                 self.logger.error(f"❌ [手動選股失敗] {e}\n{tb}")
-                err_msg = f"❌ 選股失敗：{e}\n{tb.splitlines()[-1] if tb else ''}"
+                err_msg = f"❌ 選股失敗:{e}\n{tb.splitlines()[-1] if tb else ''}"
                 self._ms_poll_running = False
                 self.after(0, lambda msg=err_msg: self._ms_status.set(msg))
 
@@ -7198,8 +7210,8 @@ class StrategyGUI(tk.Tk):
             # V0.9.5+ 強化 402 額度提示
             if "402" in err or "額度" in err:
                 self._ms_status.set(
-                    f"❌ FinMind 額度用完（status 402）｜已完成 {done}/{total} 檔｜"
-                    f"已寫入的資料已保存｜💡 請下月重置後再跑或升級 plan"
+                    f"❌ FinMind 額度用完(status 402)|已完成 {done}/{total} 檔|"
+                    f"已寫入的資料已保存|💡 請下月重置後再跑或升級 plan"
                 )
             else:
                 self._ms_status.set(f"❌ {err[:80]}")
@@ -7215,89 +7227,89 @@ class StrategyGUI(tk.Tk):
         """把 DataFrame 顯示在 Treeview 上"""
         self._ms_tree.delete(*self._ms_tree.get_children())
         if result.empty:
-            # V0.9.5+ 强化提示：可能原因
+            # V0.9.5+ 强化提示:可能原因
             self._ms_status.set(
-                "❌ 這次篩選沒有合格股票｜可能原因："
-                "(1) 條件太嚴格、(2) DB 缺漏（殖利率/股利為 None 的股票已被排除）、"
+                "❌ 這次篩選沒有合格股票|可能原因:"
+                "(1) 條件太嚴格、(2) DB 缺漏(殖利率/股利為 None 的股票已被排除)、"
                 "(3) 可按「💰 掃描全部股票 (100檔/次)」補抓股利"
             )
-            self.logger.log("❌ 篩選無結果（可能條件太嚴格或 DB 缺漏）")
+            self.logger.log("❌ 篩選無結果(可能條件太嚴格或 DB 缺漏)")
             return
 
-        # 快取勾選狀態（股票代號 → 是否勾選）
+        # 快取勾選狀態(股票代號 → 是否勾選)
         self._ms_checked = {}
 
         for _, row in result.iterrows():
             code = str(row.get("股票代號", "")).strip()
             name = str(row.get("股票名稱", "")).strip()
             price_str = _fmt_float(row.get("現價"))
-            # 【V1.1-add-change-col】顀跌：scoring.py final_cols 已加這欄
+            # 【V1.1-add-change-col】顀跌:scoring.py final_cols 已加這欄
             change_str = _fmt_change(row.get("漲跌", 0))
             rev_str = _fmt_float(row.get("累計營收YoY(%)"))
-            # 【V0.9.5+ Phase 8】key 保留「(元)」：_run_manual_selection final rename
+            # 【V0.9.5+ Phase 8】key 保留「(元)」:_run_manual_selection final rename
             # 把「今年股票股利」→「今年股票股利(元)」、這裡要跟著帶「(元)」
-            # 【V0.9.5-goodinfo4+5】改 3 位小數：cash/stock 可能小於 0.5、2 位會看不出
-            # (ex: 2442 2025 現金 0.237、股票 0.158；4114 2026 現金 0.85)
+            # 【V0.9.5-goodinfo4+5】改 3 位小數:cash/stock 可能小於 0.5、2 位會看不出
+            # (ex: 2442 2025 現金 0.237、股票 0.158;4114 2026 現金 0.85)
             stock_str = _fmt_float(row.get("今年股票股利(元)"), decimals=3)
-            # 【V0.9.5+ Phase 8 新增】今年現金股利金額（原本 _ms_display_results 完全沒讀這個欄位）
+            # 【V0.9.5+ Phase 8 新增】今年現金股利金額(原本 _ms_display_results 完全沒讀這個欄位)
             cash_div_str = _fmt_float(row.get("今年現金股利(元)"), decimals=3)
             cash_str = _fmt_float(row.get("今年現金殖利率(%)"))
             pe_str = _fmt_float(row.get("PE"))
             # 【V0.9.5-twser3 原始】盤中 → 收盤後總量
-            # 【V0.9.5-goodinfo4+5 修正】2026-06-18 18:12 William 反映：
-            #   「成交量不是我要的今日成交量！」
-            #   → 拿掉盤中/收盤後切換邏輯、直接顯示 price_df 的「成交量(張)」（今日成交量）
+            # 【V0.9.5-goodinfo4+5 修正】2026-06-18 18:12 William 反映:
+            #   「成交量不是我要的今日成交量!」
+            #   → 拿掉盤中/收盤後切換邏輯、直接顯示 price_df 的「成交量(張)」(今日成交量)
             #   → 盤中雖然是累積量、但 William 就是要看今日即時量
-            # 【V0.9.5-goodinfo4+5 (vol+cache) 修正】2026-06-18 18:34 William 反映：
+            # 【V0.9.5-goodinfo4+5 (vol+cache) 修正】2026-06-18 18:34 William 反映:
             #   「成交量依舊不是今日總成交量」→ 根因是 v 欄位是「股」、原本 int() 丟失小數
-            #   例：4016 股 → 原本 int(4.016) = 4 張、數字偏小 1000 倍
-            #   修法：vol 已經是「張」（v/1000）、用 f"{vol:,.3f}" 顯示 4.016 張
+            #   例:4016 股 → 原本 int(4.016) = 4 張、數字偏小 1000 倍
+            #   修法:vol 已經是「張」(v/1000)、用 f"{vol:,.3f}" 顯示 4.016 張
             vol = row.get("成交量(張)")
             try:
                 # 【V0.9.5-goodinfo4+5 (vol-int) 修正】2026-06-18 20:05 William 反映
                 # 「每日總成交量不會有小數點」→ 顯示為整數張
-                # vol=0 表示「沒抓到」、顯示 "—"（不是 0）
+                # vol=0 表示「沒抓到」、顯示 "-"(不是 0)
                 if pd.isna(vol) or (isinstance(vol, (int, float)) and vol == 0):
-                    vol_str = "—"
+                    vol_str = "-"
                 else:
-                    # 【V0.9.5-vol-int-revert】2026-06-28 21:04 William 提醒：
-                    # 「台股成交都是 1000 股（一張）為單位不會有四捨五入的問題！」
-                    # 原始成交股數整數（例：1,830,000 股）/1000 = 1830.0 張
+                    # 【V0.9.5-vol-int-revert】2026-06-28 21:04 William 提醒:
+                    # 「台股成交都是 1000 股(一張)為單位不會有四捨五入的問題!」
+                    # 原始成交股數整數(例:1,830,000 股)/1000 = 1830.0 張
                     # 理論上不會出現 1830.999 這類小數 → round() 跟 int() 結果一樣
-                    # 用 int() truncate 比 round() 安全（banker's rounding 在 .5 邊界）
+                    # 用 int() truncate 比 round() 安全(banker's rounding 在 .5 邊界)
                     # 【V0.9.5-goodinfo4+5】Tkinter Treeview 會把千分位逗號轉成小數點
                     # → 直接用 str()、不做千分位格式化
-                    # 註：2548 華固 6/26 顯示 1830 vs 元大 1831 差 1 是另一個問題
-                    #   （資料 source 不同：MIS 盤中 vs STOCK_DAY 盤後 vs FinMind cache）
+                    # 註:2548 華固 6/26 顯示 1830 vs 元大 1831 差 1 是另一個問題
+                    #   (資料 source 不同:MIS 盤中 vs STOCK_DAY 盤後 vs FinMind cache)
                     #   不是顯示邏輯問題、需要從 source 追
                     vol_str = str(int(vol))
             except (TypeError, ValueError):
-                vol_str = "—"
-            # 【V1.1-remove-after-hour】2026-06-29 13:46 William 反映：
-            # 「手動選股結果盤後量都沒資料、取消顯示！」
-            # 原因：TWSE BFT41U API 只有個位數筆有資料、TPEx 上櫃無 API
-            # 絕大多數個股都顯示 '—'、欄位沒實質用處
-            # 修法：拿掉欄位、同時拿掉底層 fetch_after_hour_volumes / Step 6 整合
+                vol_str = "-"
+            # 【V1.1-remove-after-hour】2026-06-29 13:46 William 反映:
+            # 「手動選股結果盤後量都沒資料、取消顯示!」
+            # 原因:TWSE BFT41U API 只有個位數筆有資料、TPEx 上櫃無 API
+            # 絕大多數個股都顯示 '-'、欄位沒實質用處
+            # 修法:拿掉欄位、同時拿掉底層 fetch_after_hour_volumes / Step 6 整合
             last_stock_str = _fmt_float(row.get("去年股票股利(元)"), decimals=3)
             # 【V0.9.5+ Phase 8 新增】去年現金股利金額
             # 【V0.9.5-goodinfo4+5】改 3 位小數
             last_cash_div_str = _fmt_float(row.get("去年現金股利(元)"), decimals=3)
             last_cash_str = _fmt_float(row.get("去年現金殖利率(%)"))
-            # 【V0.9.5-twser3 拿掉】股票殖利率欄位（William 不需要看）
+            # 【V0.9.5-twser3 拿掉】股票殖利率欄位(William 不需要看)
             # stock_yld_this_str = _fmt_float(row.get("今年股票殖利率(%)"))
             # stock_yld_last_str = _fmt_float(row.get("去年股票殖利率(%)"))
 
             tag = "checked" if self._ms_checked.get(code, False) else "unchecked"
-            # 【v1.0-info】加「資料日期」欄位（從 price_df.data_date）
+            # 【v1.0-info】加「資料日期」欄位(從 price_df.data_date)
             # 顯示個股本身的「最後交易日」、不是 cache 抓取日
-            # 例：週五 13:35 抓的 cache、某些股週五暫停交易 → 顯示「2026-06-18」而不是「2026-06-19」
+            # 例:週五 13:35 抓的 cache、某些股週五暫停交易 → 顯示「2026-06-18」而不是「2026-06-19」
             data_date = str(row.get("data_date", "")).strip()
-            data_date_str = data_date if data_date else "—"
-            # 【V0.9.5-twser3】Treeview 從 15 欄變 13 欄（拿掉 2 個股票殖利率）
+            data_date_str = data_date if data_date else "-"
+            # 【V0.9.5-twser3】Treeview 從 15 欄變 13 欄(拿掉 2 個股票殖利率)
             # 【v1.0-info】再加 1 欄「資料日期」變 14 欄
             # 【V1.1-remove-after-hour】再拿掉「盤後量(張)」變 14 欄 - 1 = 13 欄
-            # 【V1.1-add-change-col】加「漲跌價」變 13 欄 + 1 = 14 欄（但現價之後）
-            # 【V1.1-price-color】加 price_* tag（漲跌色）
+            # 【V1.1-add-change-col】加「漲跌價」變 13 欄 + 1 = 14 欄(但現價之後)
+            # 【V1.1-price-color】加 price_* tag(漲跌色)
             price_tag = _price_tag_for(row.get("漲跌", 0))
             if not hasattr(self, "_ms_price_tags"):
                 self._ms_price_tags = {}
@@ -7311,40 +7323,40 @@ class StrategyGUI(tk.Tk):
                 data_date_str
             ), tags=(tag, price_tag))
 
-        self._ms_status.set(f"✅ 符合條件：{len(result)} 檔（上限 {self._ms_limit_var.get()} 檔）｜排序：營收YoY > 今年股票 > 今年現金殖% > PE")
-        # 【V0.9.5-tab-split-phase3-D】動態更新 checkbox header（新資料剛填、預設全未勾 → ☐）
+        self._ms_status.set(f"✅ 符合條件:{len(result)} 檔(上限 {self._ms_limit_var.get()} 檔)|排序:營收YoY > 今年股票 > 今年現金殖% > PE")
+        # 【V0.9.5-tab-split-phase3-D】動態更新 checkbox header(新資料剛填、預設全未勾 → ☐)
         self._update_checkbox_header(self._ms_tree, self._ms_checked)
-        # 【V0.9.5-tab-split-phase3-G】enable 匯出按鈕（跟 select_tab 一致）
+        # 【V0.9.5-tab-split-phase3-G】enable 匯出按鈕(跟 select_tab 一致)
         if hasattr(self, "export_ms_btn"):
             self.export_ms_btn.config(state="normal")
 
-        # 【V0.9.5-alpha Phase 6】2026-06-15：偵測 FinMind 402 額度錯誤
-        # 情境：_fetch_finmind_dividend 中途被 402 中斷（已抓 X 筆寫入 DB），
-        # _run_manual_selection 仍會完成並回傳部分結果（殖利率欄位一堆 None），
-        # 使用者會困惑「為什麼殖利率都沒有？」→ 主動提示額度問題。
+        # 【V0.9.5-alpha Phase 6】2026-06-15:偵測 FinMind 402 額度錯誤
+        # 情境:_fetch_finmind_dividend 中途被 402 中斷(已抓 X 筆寫入 DB),
+        # _run_manual_selection 仍會完成並回傳部分結果(殖利率欄位一堆 None),
+        # 使用者會困惑「為什麼殖利率都沒有?」→ 主動提示額度問題。
         quota_err = _MS_PROGRESS.get("error", "")
         if quota_err and ("402" in quota_err or "額度" in quota_err):
             done = _MS_PROGRESS.get("done", 0)
             total = _MS_PROGRESS.get("total", 0)
             self._ms_status.set(
-                f"✅ 符合條件：{len(result)} 檔｜"
-                f"⚠️ FinMind 額度用完（已抓 {done}/{total} 檔、已寫入 DB）｜"
-                f"部分股票殖利率/股利欄位為 None｜"
-                f"💡 可改用「🎯 指定股補抓」補關注股，或等下月重置"
+                f"✅ 符合條件:{len(result)} 檔|"
+                f"⚠️ FinMind 額度用完(已抓 {done}/{total} 檔、已寫入 DB)|"
+                f"部分股票殖利率/股利欄位為 None|"
+                f"💡 可改用「🎯 指定股補抓」補關注股,或等下月重置"
             )
             self.logger.log(
-                f"⚠️ FinMind 額度用完（已抓 {done}/{total} 檔），"
-                f"已用 DB 資料顯示部分結果（殖利率欄位可能為 None）"
+                f"⚠️ FinMind 額度用完(已抓 {done}/{total} 檔),"
+                f"已用 DB 資料顯示部分結果(殖利率欄位可能為 None)"
             )
 
     def _on_tree_hover(self, event):
         """【v1.0-hover】滑鼠移到 Treeview 任一列時
         - 若不是 cell (在捲軸/header) → 清除 hover
         - 若進入同一列 → 不動
-        - 若進入新列 → 離開舊列 hover、進入新列 hover（黃色）
-        - 注意：勾選狀態 (checked/unchecked) 不能被覆蓋。
-          解法：現在用「只設一個 tag」、hover 時設為「hover」、離開時讀 _ms_checked 恢復。
-        - 【V1.1-price-color】hover 仍保留 price_* tag（顫跌色）、背景仍可控
+        - 若進入新列 → 離開舊列 hover、進入新列 hover(黃色)
+        - 注意:勾選狀態 (checked/unchecked) 不能被覆蓋。
+          解法:現在用「只設一個 tag」、hover 時設為「hover」、離開時讀 _ms_checked 恢復。
+        - 【V1.1-price-color】hover 仍保留 price_* tag(顫跌色)、背景仍可控
         """
         region = self._ms_tree.identify("region", event.x, event.y)
         if region != "cell":
@@ -7357,7 +7369,7 @@ class StrategyGUI(tk.Tk):
             return
         if iid == self._ms_hover_iid:
             return
-        # 離開舊列（如果還在 hover）
+        # 離開舊列(如果還在 hover)
         self._clear_hover()
         # 進新列
         self._ms_hover_iid = iid
@@ -7375,7 +7387,7 @@ class StrategyGUI(tk.Tk):
             return
         old_iid = self._ms_hover_iid
         self._ms_hover_iid = None
-        # 若該列已被刪除（重跑選股）→ tree.item() 會例外、跳過
+        # 若該列已被刪除(重跑選股)→ tree.item() 會例外、跳過
         try:
             if old_iid in self._ms_tree.get_children():
                 checked = self._ms_checked.get(old_iid, False)
@@ -7389,7 +7401,7 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _ms_toggle_check(self, event):
-        """點勾選欄 header → 全選/全不選；點任一列 → toggle"""
+        """點勾選欄 header → 全選/全不選;點任一列 → toggle"""
         region = self._ms_tree.identify("region", event.x, event.y)
         column = self._ms_tree.identify_column(event.x)
 
@@ -7441,7 +7453,7 @@ class StrategyGUI(tk.Tk):
 
     def _ms_tree_leave(self, event):
         """【V1.2.0-kb-focus-v6】離開 Treeview 時不清 hover、保留已選 row 的高亮"""
-        # v6：browse mode 下 selection row 本身就有 hover_<price> tag
+        # v6:browse mode 下 selection row 本身就有 hover_<price> tag
         #     離開時不清、讓使用者仍能看到選中的位置
         pass
 
@@ -7482,7 +7494,7 @@ class StrategyGUI(tk.Tk):
         self._update_checkbox_header(self._ms_tree, self._ms_checked)
 
     # ==========================================================
-    # 【V0.9.5-etf】主動式 ETF Tab — Hover / Toggle / Filter / Refresh / Export
+    # 【V0.9.5-etf】主動式 ETF Tab - Hover / Toggle / Filter / Refresh / Export
     # ==========================================================
 
 
@@ -7491,11 +7503,11 @@ class StrategyGUI(tk.Tk):
 
     def _etf_tree_hover_combined(self, event):
         """【V0.9.5-tab-split-phase3-C Fix12 + V1.2.0-kb-focus-v16】
-        ETF Treeview hover：
-        - 移到 cell（任意欄） → 該列 highlight（_apply_hover 設 hover_<price> tag）
-        - 移到「ETF數」欄（column #6） → popup 顯示包含此股的 ETF 列表
-        - 移到「今日異動」欄（column #7） → popup 顯示異動明細
-        - 移到非 cell 區（捲軸/header） → 關 popup + 清 hover
+        ETF Treeview hover:
+        - 移到 cell(任意欄) → 該列 highlight(_apply_hover 設 hover_<price> tag)
+        - 移到「ETF數」欄(column #6) → popup 顯示包含此股的 ETF 列表
+        - 移到「今日異動」欄(column #7) → popup 顯示異動明細
+        - 移到非 cell 區(捲軸/header) → 關 popup + 清 hover
 
         v16 取消 v15 sticky 邏輯
         """
@@ -7523,7 +7535,7 @@ class StrategyGUI(tk.Tk):
         self._etf_hover_iid = iid
 
         column = tree.identify_column(event.x)
-        # Popup（v5 改 column：加「漲跌價」欄後往右移一欄）
+        # Popup(v5 改 column:加「漲跌價」欄後往右移一欄)
         if column == "#6":
             self._show_etf_popup(iid, event.x_root, event.y_root, mode="etf_list")
         elif column == "#7":
@@ -7563,19 +7575,19 @@ class StrategyGUI(tk.Tk):
                 checked = self._etf_checked.get(iid, False)
                 # 【V1.1-price-color-fix3】原本寫 (\"checked\"/\"unchecked\",) 沒前景色
                 # → 會把 price_tag 色彩蓋掉、整列變黑
-                # 修法：加 price_tag、恢復紅/綠/灰前景
+                # 修法:加 price_tag、恢復紅/綠/灰前景
                 price_tag = getattr(self, "_etf_price_tags", {}).get(iid, "price_zero")
                 self._etf_tree.item(iid, tags=("checked" if checked else "unchecked", price_tag))
         except Exception:
             pass
 
-    # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單（_etf_tree_rclick_new）
+    # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單(_etf_tree_rclick_new)
 
     def _on_etf_tree_hover(self, event):
-        """【V0.9.5-etf】ETF Treeview hover：
-        - 移到 cell（任意欄） → 該列 highlight 黃色
-        - 移到「ETF數」欄（column #5） → 顯示 popup 顯示包含此股的 ETF 列表
-        - 移到非 cell 區（捲軸/header） → 清除 hover + 關 popup
+        """【V0.9.5-etf】ETF Treeview hover:
+        - 移到 cell(任意欄) → 該列 highlight 黃色
+        - 移到「ETF數」欄(column #5) → 顯示 popup 顯示包含此股的 ETF 列表
+        - 移到非 cell 區(捲軸/header) → 清除 hover + 關 popup
         """
         region = self._etf_tree.identify("region", event.x, event.y)
         if region != "cell":
@@ -7598,10 +7610,10 @@ class StrategyGUI(tk.Tk):
             price_tag = getattr(self, "_etf_price_tags", {}).get(iid, "price_zero")
             self._etf_tree.item(iid, tags=(f'hover_{price_tag[6:]}',))
 
-        # 在「ETF數」欄（第 5 欄 = #5）上才顯示 popup
+        # 在「ETF數」欄(第 5 欄 = #5)上才顯示 popup
         # 【V1.1-popup-col-shift】加「漲跌價」欄後、column 往右移一欄
-        #   原本：#5 = ETF數、#6 = 今日異動
-        #   現在：#5 = 漲跌價、#6 = ETF數、#7 = 今日異動
+        #   原本:#5 = ETF數、#6 = 今日異動
+        #   現在:#5 = 漲跌價、#6 = ETF數、#7 = 今日異動
         if column == "#6":
             self._show_etf_popup(iid, event.x_root, event.y_root, mode="etf_list")
         elif column == "#7":
@@ -7633,9 +7645,9 @@ class StrategyGUI(tk.Tk):
 
     def _show_etf_popup(self, iid, x_root, y_root, mode="etf_list"):
         """【V0.9.5-etf】在滑鼠位置顯示 Toplevel 視窗
-        mode="etf_list"：顯示持有此股的 ETF 列表
-        mode="changes"：【V0.9.5-etf-history】顯示各 ETF 對該股的異動明細
-        - 重複呼叫不重建視窗，只更新內容
+        mode="etf_list":顯示持有此股的 ETF 列表
+        mode="changes":【V0.9.5-etf-history】顯示各 ETF 對該股的異動明細
+        - 重複呼叫不重建視窗,只更新內容
         """
         if self._etf_agg_df is None or self._etf_agg_df.empty:
             return
@@ -7646,7 +7658,7 @@ class StrategyGUI(tk.Tk):
         if match.empty:
             self._close_etf_popup()
             return
-        # 【V0.9.5-etf-history】mode="changes"：顯示各 ETF 異動明細
+        # 【V0.9.5-etf-history】mode="changes":顯示各 ETF 異動明細
         if mode == "changes":
             change_df = getattr(self, "_etf_change_df", None)
             if change_df is None or change_df.empty:
@@ -7657,14 +7669,14 @@ class StrategyGUI(tk.Tk):
                 self._close_etf_popup()
                 return
 
-            # 【V0.9.5-etf-popup-detail】2026-06-29 09:47 William 反映：
+            # 【V0.9.5-etf-popup-detail】2026-06-29 09:47 William 反映:
             # 移到「今日異動」欄時、popup 只顯示一行總和、看不出每檔 ETF 的異動數
-            # 根因：_compute_etf_changes 回傳的 stock-level row 沒有 etf_code/etf_name 欄
-            #      per-ETF 異動在 etf_changes_json 內（JSON string）
+            # 根因:_compute_etf_changes 回傳的 stock-level row 沒有 etf_code/etf_name 欄
+            #      per-ETF 異動在 etf_changes_json 內(JSON string)
             #      之前用 cr.get("etf_code", "") 拿到空字串、etf_name 也是空
             #      today_change_lots 是「總和」、不是 per-ETF → 只能顯示一行
-            # 修法：parse etf_changes_json 拿 per-ETF list
-            #      從 _etf_agg_df 的 etf_list 補 etf_name（json 內是空字串）
+            # 修法:parse etf_changes_json 拿 per-ETF list
+            #      從 _etf_agg_df 的 etf_list 補 etf_name(json 內是空字串)
             cr = stock_changes.iloc[0]
             raw_json = cr.get("etf_changes_json", "")
             if not raw_json:
@@ -7679,8 +7691,8 @@ class StrategyGUI(tk.Tk):
                 self._close_etf_popup()
                 return
 
-            # 從 agg_df 的 etf_list 補上 etf_name（json 內 etf_name=""）
-            # etf_list 格式："0050 元大台灣50(9.37%)\n006208 富邦台50(8.71%)\n..."
+            # 從 agg_df 的 etf_list 補上 etf_name(json 內 etf_name="")
+            # etf_list 格式:"0050 元大台灣50(9.37%)\n006208 富邦台50(8.71%)\n..."
             etf_name_map = {}
             etf_list_str = match.iloc[0].get("etf_list", "")
             if etf_list_str:
@@ -7692,7 +7704,7 @@ class StrategyGUI(tk.Tk):
                     if m:
                         etf_name_map[m.group(1).strip()] = m.group(2).strip()
 
-            # 整理 entries：跳過 ~0、補 etf_name
+            # 整理 entries:跳過 ~0、補 etf_name
             entries = []
             for ec_entry in etf_changes:
                 cl = float(ec_entry.get("change_lots", 0) or 0)
@@ -7713,9 +7725,9 @@ class StrategyGUI(tk.Tk):
             etf_count = int(cr.get("etf_count", 0) or 0)
             change_lines = []
             if stock_name:
-                change_lines.append(f"{stock_code} {stock_name}（{etf_count} 檔 ETF、今日 {len(entries)} 檔異動）")
+                change_lines.append(f"{stock_code} {stock_name}({etf_count} 檔 ETF、今日 {len(entries)} 檔異動)")
             else:
-                change_lines.append(f"{stock_code}（{etf_count} 檔 ETF、今日 {len(entries)} 檔異動）")
+                change_lines.append(f"{stock_code}({etf_count} 檔 ETF、今日 {len(entries)} 檔異動)")
             change_lines.append("─" * 20)
             total = 0.0
             for cl, ec, en in entries:
@@ -7727,14 +7739,14 @@ class StrategyGUI(tk.Tk):
             change_lines.append(f"總和  {sign}{total:,.1f}  張")
             popup_text = "\n".join(change_lines)
         else:
-            # etf_list mode：顯示持有此股的 ETF 列表
+            # etf_list mode:顯示持有此股的 ETF 列表
             etf_list_str = match.iloc[0].get("etf_list", "")
             if not etf_list_str:
                 self._close_etf_popup()
                 return
-            popup_title = f"{stock_code} {match.iloc[0].get("股票名稱", "")} 被 {match.iloc[0].get("etf_count", 0)} 檔 ETF 持有："
+            popup_title = f"{stock_code} {match.iloc[0].get("股票名稱", "")} 被 {match.iloc[0].get("etf_count", 0)} 檔 ETF 持有:"
             popup_text = popup_title + "\n" + etf_list_str
-        # 建立 popup（一次一個）
+        # 建立 popup(一次一個)
         if self._etf_popup is None or not self._etf_popup.winfo_exists():
             self._etf_popup = tk.Toplevel(self)
             self._etf_popup.wm_overrideredirect(True)
@@ -7761,8 +7773,8 @@ class StrategyGUI(tk.Tk):
         # 【V0.9.5-etf-history】all_text 在 mode block 中已設定
         all_text = popup_text
 
-        # 計算最長行（用於設定 Text widget 寬度）
-        # 【V0.9.5-etf-popup-width】中文字算 2、其他算 1（Text widget width 是平均字元寬度）
+        # 計算最長行(用於設定 Text widget 寬度)
+        # 【V0.9.5-etf-popup-width】中文字算 2、其他算 1(Text widget width 是平均字元寬度)
         lines = all_text.split("\n")
         max_line_len = max(_display_width(line) for line in lines) if lines else 30
         total_lines = len(lines)
@@ -7770,14 +7782,14 @@ class StrategyGUI(tk.Tk):
         self._etf_popup_text.config(state="normal")
         self._etf_popup_text.delete("1.0", "end")
         self._etf_popup_text.insert("1.0", all_text)
-        # 寬度 = 最長行字元數、高度 = 行數（最多 25 行避免超出螢幕）
+        # 寬度 = 最長行字元數、高度 = 行數(最多 25 行避免超出螢幕)
         self._etf_popup_text.config(
             width=max_line_len,
             height=min(total_lines, 25),
             state="disabled",
         )
 
-        # 位置（滑鼠右邊一點點）
+        # 位置(滑鼠右邊一點點)
         # 計算 popup 大小、避免超出螢幕
         self._etf_popup.update_idletasks()
         w = self._etf_popup.winfo_reqwidth()
@@ -7799,7 +7811,7 @@ class StrategyGUI(tk.Tk):
 
     def _etf_toggle_check(self, event):
         """【V0.9.5-etf】點 ETF Treeview → toggle 勾選
-        【V0.9.5-tab-split-phase3-D】header 點下去 → 全選/全不選（與 select_tree / ms_tree 一致）
+        【V0.9.5-tab-split-phase3-D】header 點下去 → 全選/全不選(與 select_tree / ms_tree 一致)
         """
         region = self._etf_tree.identify("region", event.x, event.y)
         column = self._etf_tree.identify_column(event.x)
@@ -7863,9 +7875,9 @@ class StrategyGUI(tk.Tk):
         self._update_checkbox_header(self._etf_tree, self._etf_checked)
 
 
-    # ── ETF 持股歷史庫（V0.9.5-etf-history）────────────────────────────────
+    # ── ETF 持股歷史庫(V0.9.5-etf-history)────────────────────────────────
     def _init_etf_history(self):
-        """【V0.9.5-etf-history】ETF 持股歷史庫初始化（App 起動時呼叫一次）"""
+        """【V0.9.5-etf-history】ETF 持股歷史庫初始化(App 起動時呼叫一次)"""
         db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "etf_history.db")
         _init_etf_history_db(db_path)
         self._etf_history_db = db_path
@@ -7897,7 +7909,7 @@ class StrategyGUI(tk.Tk):
                         date_str=date_str,
                     )
         except Exception as e:
-            self.logger.log(f"⚠️ [ETF] 寫入 etf_history.db 失敗：{e}")
+            self.logger.log(f"⚠️ [ETF] 寫入 etf_history.db 失敗:{e}")
 
     def _compute_etf_changes_from_db(self):
         """【V0.9.5-etf-history】從 DB 拿今日 vs 昨日異動"""
@@ -7907,7 +7919,7 @@ class StrategyGUI(tk.Tk):
         try:
             return _compute_etf_changes(db_path)
         except Exception as e:
-            self.logger.log(f"⚠️ [ETF] 計算 ETF 異動失敗：{e}")
+            self.logger.log(f"⚠️ [ETF] 計算 ETF 異動失敗:{e}")
             return pd.DataFrame()
 
     def _etf_apply_filter(self):
@@ -7920,7 +7932,7 @@ class StrategyGUI(tk.Tk):
         self._etf_display_results(self._etf_agg_df)
 
     def _etf_refresh_holdings(self):
-        """【V0.9.5-etf】重新抓取全部 domestic 主動式 ETF（依 TWSE activeList 動態）的
+        """【V0.9.5-etf】重新抓取全部 domestic 主動式 ETF(依 TWSE activeList 動態)的
         前 10 大持股 → merge price cache → 重新顯示。用 threading 避免凍結 UI
         """
         if hasattr(self, '_bg_price_fetching') and self._bg_price_fetching:
@@ -7934,21 +7946,21 @@ class StrategyGUI(tk.Tk):
 
         def _worker():
             try:
-                # 1) 抓 ETF 列表 + 持股（【V0.9.5-etf-session-fix】修正 self.session 不存在的 bug）
+                # 1) 抓 ETF 列表 + 持股(【V0.9.5-etf-session-fix】修正 self.session 不存在的 bug)
                 _s = build_session()
                 long_df = build_etf_holdings_table(_s, self.cfg, self.logger)
                 if long_df.empty:
                     self.after(0, lambda: self._etf_refresh_done(None, "ETF 持股抓取失敗"))
                     return
 
-                # 2) merge 股價（從 cache）
+                # 2) merge 股價(從 cache)
                 price_df = self._load_price_df()
                 agg_df = aggregate_etf_holdings(long_df, price_df)
 
-                # 【V0.9.5-etf-gui fix 2026-06-19】避免 closure trap：agg_df/long_df 用 default arg 鎖住
+                # 【V0.9.5-etf-gui fix 2026-06-19】避免 closure trap:agg_df/long_df 用 default arg 鎖住
                 self.after(0, lambda a=agg_df, l=long_df: self._etf_refresh_done(a, None, long_df=l))
             except Exception as e:
-                self.logger.log(f"❌ ETF 持股抓取例外：{e}")
+                self.logger.log(f"❌ ETF 持股抓取例外:{e}")
                 # 【V0.9.5-etf-gui fix 2026-06-19】用 default arg 鎖住 e
                 self.after(0, lambda err=str(e): self._etf_refresh_done(None, err))
 
@@ -7958,7 +7970,7 @@ class StrategyGUI(tk.Tk):
         self._etf_progress.stop()
         self._etf_progress.pack_forget()
         if err or agg_df is None or agg_df.empty:
-            self._etf_status.set(f"❌ ETF 持股抓取失敗：{err or '空資料'}")
+            self._etf_status.set(f"❌ ETF 持股抓取失敗:{err or '空資料'}")
             return
 
         self._etf_agg_df = agg_df
@@ -7972,17 +7984,17 @@ class StrategyGUI(tk.Tk):
         # 【V1.1-etf-data-status-multiline】2026-06-29 10:33 William 反映
         # 「etf選股左欄說明太長了請拆成多行」
         # 之前一行 50+ 字元塞 200px 左欄被裁切
-        # 改成 3 行：標題列 / 更新時間 / (有昨日才加指示)
-        # 同時修：之前 strftime('%%Y-%%m-%%d') 印出字面 '%Y-%m-%d'（不是真正時間）
+        # 改成 3 行:標題列 / 更新時間 / (有昨日才加指示)
+        # 同時修:之前 strftime('%%Y-%%m-%%d') 印出字面 '%Y-%m-%d'(不是真正時間)
         etf_count = long_df["etf_code"].nunique() if (long_df is not None and not long_df.empty) else 0
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        # 動態組裝 (v1.1.1-etf-data-status)：header + timestamp、可選補上「有/無昨日」
+        # 動態組裝 (v1.1.1-etf-data-status):header + timestamp、可選補上「有/無昨日」
         status_lines = [
             f"ETF 持股：{len(agg_df)} 檔個股、{etf_count} 檔 ETF",
             f"最後更新 {now_str}",
         ]
         self._etf_data_status.set("\n".join(status_lines))
-        self._etf_status.set(f"✅ ETF 持股抓取完成：從 {etf_count} 檔主動式 ETF 抓到 {len(agg_df)} 檔個股")
+        self._etf_status.set(f"✅ ETF 持股抓取完成:從 {etf_count} 檔主動式 ETF 抓到 {len(agg_df)} 檔個股")
         # 自動套用一次篩選
         self._etf_display_results(agg_df, self._etf_change_df)
 
@@ -7997,7 +8009,7 @@ class StrategyGUI(tk.Tk):
             # 【V0.9.5-tab-split-phase3-H FixA2】2026-06-23 12:12 William 反映
             # KeyError: 'Column not found: change_lots'
             # _compute_etf_changes 回傳的欄位是 today_change_lots、不是 change_lots
-            # 這個 bug 之前測試沒抓到、是因為：
+            # 這個 bug 之前測試沒抓到、是因為:
             # - 過去 DB shares 全 0 → _compute_etf_changes 回傳空 DataFrame
             # - 走 else 分支 df["total_change_lots"] = 0.0、不觸發 groupby
             # - 今早 migration 補 shares → _compute_etf_changes 回傳有資料 → 才爆
@@ -8016,20 +8028,20 @@ class StrategyGUI(tk.Tk):
         else:
             df["total_change_lots"] = 0.0
 
-        # 篩選：最小 ETF 數
+        # 篩選:最小 ETF 數
         min_count = self._etf_min_count_var.get()
         df = df[df["etf_count"] >= min_count]
 
-        # 篩選：是否限定有收盤價
+        # 篩選:是否限定有收盤價
         if self._etf_only_with_price_var.get():
             df = df[df["收盤價"].notna()]
 
-        # 【v1.1.1 ETF sort】William 2026-06-24 10:39 反映：
-        # 排序邏輯：
-        # 1. 今日有異動的股票優先（total_change_lots != 0）
-        # 2. 有異動者：依 total_change_lots 降序（由大到小）
-        # 3. 無異動者：依 total_change_lots 升序（由小到大，all 0，保持原有 etf_count 順序）
-        # 實作：today_mover 作為第一 key（True > False → movers first）
+        # 【v1.1.1 ETF sort】William 2026-06-24 10:39 反映:
+        # 排序邏輯:
+        # 1. 今日有異動的股票優先(total_change_lots != 0)
+        # 2. 有異動者:依 total_change_lots 降序(由大到小)
+        # 3. 無異動者:依 total_change_lots 升序(由小到大,all 0,保持原有 etf_count 順序)
+        # 實作:today_mover 作為第一 key(True > False → movers first)
         df["today_mover"] = df["total_change_lots"] != 0
         df = df.sort_values(
             ["today_mover", "total_change_lots"],
@@ -8049,7 +8061,7 @@ class StrategyGUI(tk.Tk):
             self._etf_tree.delete(item)
         self._etf_checked = {}
 
-        # 插入資料（iid = 股票代號、讓 popup 用 iid 直接查 etf_list）
+        # 插入資料(iid = 股票代號、讓 popup 用 iid 直接查 etf_list)
         for _, row in df.iterrows():
             iid = str(row["股票代號"]).strip()
             price = row.get("收盤價", None)
@@ -8071,24 +8083,24 @@ class StrategyGUI(tk.Tk):
                         int(row["etf_count"]), change_str),
                 tags=("unchecked", _price_tag_for(row.get("漲跌", 0))),
             )
-            # 【V1.1-price-color】記下 price_* tag（hover/select 時要帶走）
+            # 【V1.1-price-color】記下 price_* tag(hover/select 時要帶走)
             if not hasattr(self, "_etf_price_tags"):
                 self._etf_price_tags = {}
             self._etf_price_tags[iid] = _price_tag_for(row.get("漲跌", 0))
 
         self._etf_status.set(
-            f"✅ 顯示 {len(df)} 檔個股（總資料 {len(agg_df)} 檔）"
+            f"✅ 顯示 {len(df)} 檔個股(總資料 {len(agg_df)} 檔)"
         )
-        # 【V0.9.5-tab-split-phase3-D】動態更新 checkbox header（新資料剛填、預設全未勾 → ☐）
+        # 【V0.9.5-tab-split-phase3-D】動態更新 checkbox header(新資料剛填、預設全未勾 → ☐)
         self._update_checkbox_header(self._etf_tree, self._etf_checked)
-        # 【V0.9.5-tab-split-phase3-G】enable 匯出按鈕（跟 select_tab 一致）
+        # 【V0.9.5-tab-split-phase3-G】enable 匯出按鈕(跟 select_tab 一致)
         if hasattr(self, "export_etf_btn"):
             self.export_etf_btn.config(state="normal")
 
     def _etf_export_excel(self):
         """【V0.9.5-etf】匯出 ETF 成份股持股到 Excel
         - 同手動選股的格式、可被策略參數 Tab 讀回
-        - 包含完整欄位（代號、名稱、收盤價、ETF 數、ETF 列表、權重）
+        - 包含完整欄位(代號、名稱、收盤價、ETF 數、ETF 列表、權重)
         """
         if self._etf_agg_df is None or self._etf_agg_df.empty:
             messagebox.showwarning("無資料", "請先按「🔄 重新抓 ETF 持股」")
@@ -8104,7 +8116,7 @@ class StrategyGUI(tk.Tk):
 
         filename = simpledialog.askstring(
             "儲存名稱設定",
-            "請輸入檔案名稱（不含副檔名）:",
+            "請輸入檔案名稱(不含副檔名):",
             initialvalue=f"ETF成份股_{datetime.now().strftime('%Y%m%d_%H%M')}"
         )
         if not filename:
@@ -8145,18 +8157,18 @@ class StrategyGUI(tk.Tk):
             wb.save(filepath)
             messagebox.showinfo(
                 "匯出成功",
-                f"已匯出 {len(result)} 檔 ETF 成份股到：\n{filepath}\n\n"
+                f"已匯出 {len(result)} 檔 ETF 成份股到:\n{filepath}\n\n"
                 f"📌 此檔可餵給「⚙️ 策略參數」的股票清單載入功能。"
             )
             self.logger.log(f"📤 [ETF] 匯出 {len(result)} 檔到 {filepath}")
         except Exception as e:
             messagebox.showerror("匯出失敗", str(e))
-            self.logger.log(f"❌ [ETF] 匯出失敗：{e}")
+            self.logger.log(f"❌ [ETF] 匯出失敗:{e}")
 
     def _etf_auto_startup_fetch(self):
-        """【V0.9.5-etf】App 開機 2.5 秒後自動抓 ETF 持股（背景跑、不跳 popup）
-        - 重複 fetch 會跳過（用 _etf_fetching flag）
-        - 抓完就會 populate ETF Tab（就算使用者還沒切到該 Tab）
+        """【V0.9.5-etf】App 開機 2.5 秒後自動抓 ETF 持股(背景跑、不跳 popup)
+        - 重複 fetch 會跳過(用 _etf_fetching flag)
+        - 抓完就會 populate ETF Tab(就算使用者還沒切到該 Tab)
         """
         if self._etf_fetching:
             return
@@ -8174,11 +8186,11 @@ class StrategyGUI(tk.Tk):
                     return
                 price_df = self._load_price_df()
                 agg_df = aggregate_etf_holdings(long_df, price_df)
-                # 【V0.9.5-etf-gui fix 2026-06-19】避免 closure trap：agg_df/long_df 用 default arg 鎖住
+                # 【V0.9.5-etf-gui fix 2026-06-19】避免 closure trap:agg_df/long_df 用 default arg 鎖住
                 self.after(0, lambda a=agg_df, l=long_df: self._etf_auto_startup_done(a, None, long_df=l))
             except Exception as e:
-                self.logger.log(f"❌ [ETF] 開機抓取例外：{e}")
-                # 【V0.9.5-etf-gui fix 2026-06-19】用 default arg 鎖住 e（except 離開後 e 會被釋放）
+                self.logger.log(f"❌ [ETF] 開機抓取例外:{e}")
+                # 【V0.9.5-etf-gui fix 2026-06-19】用 default arg 鎖住 e(except 離開後 e 會被釋放)
                 self.after(0, lambda err=str(e): self._etf_auto_startup_done(None, err))
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -8186,7 +8198,7 @@ class StrategyGUI(tk.Tk):
     def _etf_auto_startup_done(self, agg_df, err, long_df=None):
         self._etf_fetching = False
         if err or agg_df is None or agg_df.empty:
-            self._etf_status.set(f"❌ ETF 開機抓取失敗：{err or '空資料'}")
+            self._etf_status.set(f"❌ ETF 開機抓取失敗:{err or '空資料'}")
             return
         self._etf_agg_df = agg_df
         if long_df is not None:
@@ -8208,15 +8220,15 @@ class StrategyGUI(tk.Tk):
         self._etf_data_status.set("\n".join(status_lines))
     def _load_price_df(self):
         """【V0.9.5-etf】讀取 price 快取 DataFrame、若不存在就 try fetch_prices 一次
-        回傳的 df 至少含欄位：股票代號、股價
+        回傳的 df 至少含欄位:股票代號、股價
         """
         try:
             df, _, _ = load_cache(get_cache_file("price"))
             if df is not None and not df.empty and "股票代號" in df.columns:
                 return df
         except Exception as e:
-            self.logger.log(f"⚠️ [ETF] 讀取 price cache 失敗：{e}")
-        # cache 沒資料 → try fetch_prices 抓一次（【V0.9.5-etf-session-fix】改用 build_session()）
+            self.logger.log(f"⚠️ [ETF] 讀取 price cache 失敗:{e}")
+        # cache 沒資料 → try fetch_prices 抓一次(【V0.9.5-etf-session-fix】改用 build_session())
         try:
             _s = build_session()
             df = fetch_prices(_s, self.cfg, self.logger)
@@ -8224,7 +8236,7 @@ class StrategyGUI(tk.Tk):
                 save_cache(get_cache_file("price"), df)
             return df if df is not None else pd.DataFrame()
         except Exception as e:
-            self.logger.log(f"⚠️ [ETF] fetch_prices 也失敗：{e}")
+            self.logger.log(f"⚠️ [ETF] fetch_prices 也失敗:{e}")
             return pd.DataFrame()
 
     def _ms_export_excel(self):
@@ -8261,7 +8273,7 @@ class StrategyGUI(tk.Tk):
 
         filename = simpledialog.askstring(
             "儲存名稱設定",
-            "請輸入檔案名稱（不含副檔名）:",
+            "請輸入檔案名稱(不含副檔名):",
             initialvalue=f"手動選股_{datetime.now().strftime('%Y%m%d_%H%M')}"
         )
         if not filename:
@@ -8299,17 +8311,17 @@ class StrategyGUI(tk.Tk):
                 ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 30)
 
             wb.save(filepath)
-            # 【v1.0-savelist-fix2】2026-06-19 22:15 William 反映：
-            # 「匯出 excel 可以餵回策略參數中的選股來源嗎？可以就只要這個功能」
-            # 是的：load_stock_list_from_excel 只要「股票代號」欄（find_col 找「股票/code」）
+            # 【v1.0-savelist-fix2】2026-06-19 22:15 William 反映:
+            # 「匯出 excel 可以餵回策略參數中的選股來源嗎?可以就只要這個功能」
+            # 是的:load_stock_list_from_excel 只要「股票代號」欄(find_col 找「股票/code」)
             # 這個檔案包含「股票代號」+「股票名稱」+ 其他欄位 → load 只讀代號、其它忽略
             # 所以不需要額外加「存成 Excel 股票清單」按鈕、這個檔案直接就能用。
             messagebox.showinfo(
                 "匯出成功",
                 f"已匯出 {len(result)} 檔\n→ {filepath}\n\n"
                 f"💡 這個檔案可以直接給「策略參數 → 使用 Excel 股票清單」讀取使用\n"
-                f"   （只取「股票代號」欄、其他欄位會被忽略）\n\n"
-                f"📊 已勾選 {len(result)} 檔，自動套用「▶ 執行回測模擬」",
+                f"   (只取「股票代號」欄、其他欄位會被忽略)\n\n"
+                f"📊 已勾選 {len(result)} 檔,自動套用「▶ 執行回測模擬」",
             )
         except Exception as e:
             messagebox.showerror("匯出失敗", str(e))
@@ -8320,8 +8332,8 @@ class StrategyGUI(tk.Tk):
         return raw if isinstance(raw, dict) else {}
 
     def _ms_save_preset(self):
-        """彈出對話框，輸入 preset 名稱，儲存當前條件"""
-        name = simpledialog.askstring("儲存 Preset", "請輸入Preset名稱：",
+        """彈出對話框,輸入 preset 名稱,儲存當前條件"""
+        name = simpledialog.askstring("儲存 Preset", "請輸入Preset名稱:",
                                       initialvalue="我的篩選")
         if not name:
             return
@@ -8337,7 +8349,7 @@ class StrategyGUI(tk.Tk):
         messagebox.showinfo("已儲存", f"Preset「{name}」已儲存")
 
     def _ms_load_preset(self):
-        """根據目前選中的 preset 名稱，載入條件到 UI"""
+        """根據目前選中的 preset 名稱,載入條件到 UI"""
         name = self._ms_preset_var.get().strip()
         presets = self._ms_get_presets()
         data = presets.get(name, {})
@@ -8348,7 +8360,7 @@ class StrategyGUI(tk.Tk):
         if "top_n" in data:
             self._ms_limit_var.set(int(data["top_n"]))
 
-        # 還原各 filter（跳過 top_n key）
+        # 還原各 filter(跳過 top_n key)
         for key, val in data.items():
             if key == "top_n":
                 continue
@@ -8362,7 +8374,7 @@ class StrategyGUI(tk.Tk):
         name = self._ms_preset_var.get().strip()
         if not name:
             return
-        if not messagebox.askyesno("確認刪除", f"刪除 Preset「{name}」？"):
+        if not messagebox.askyesno("確認刪除", f"刪除 Preset「{name}」?"):
             return
         presets = self._ms_get_presets()
         presets.pop(name, None)
@@ -8376,7 +8388,7 @@ class StrategyGUI(tk.Tk):
         messagebox.showinfo("已刪除", f"Preset「{name}」已刪除")
 
     def _ms_refresh_preset_list(self):
-        """重新整理 preset 下拉選項，並自動選中上次"""
+        """重新整理 preset 下拉選項,並自動選中上次"""
         presets = list(self._ms_get_presets().keys())
         self._ms_preset_combo["values"] = presets
         last = self.cfg.to_dict().get("manual_select_last_preset")
@@ -8397,13 +8409,13 @@ class StrategyGUI(tk.Tk):
         self._show_position_detail(stock_id)
 
     def _show_position_detail(self, stock_id: str):
-        """顯示指定股票的完整統計視窗（V0.9.4 phase2.3：可滾動 + 預估賣出成本）"""
+        """顯示指定股票的完整統計視窗(V0.9.4 phase2.3:可滾動 + 預估賣出成本)"""
         txs = self.portfolio.list_transactions()
         stock_txs = [t for t in txs if t.stock_id == stock_id]
         if not stock_txs:
             return
 
-        # 顯示名稱：優先用 fetch 到的最新名稱，其次用 DB 儲存的名稱
+        # 顯示名稱:優先用 fetch 到的最新名稱,其次用 DB 儲存的名稱
         stored_name = stock_txs[0].stock_name or ""
         stock_name = self._current_names.get(stock_id, stored_name) or stored_name or stock_id
         buys = [t for t in stock_txs if t.action == "BUY"]
@@ -8420,7 +8432,7 @@ class StrategyGUI(tk.Tk):
         cur_price = self._current_prices.get(stock_id, 0.0)
         cur_mv = total_shares * cur_price
 
-        # 預估賣出（以現價）
+        # 預估賣出(以現價)
         est_fee = max(20, cur_mv * 0.001425 * self.portfolio.broker_discount)
         est_tax = cur_mv * 0.003
         est_net = cur_mv - est_fee - est_tax
@@ -8428,7 +8440,7 @@ class StrategyGUI(tk.Tk):
 
         # 建立可滾動視窗
         win = tk.Toplevel(self)
-        win.title(f"📊 {stock_id} {stock_name} — 統計明細")
+        win.title(f"📊 {stock_id} {stock_name} - 統計明細")
         win.geometry("540x500")
         win.transient(self)
 
@@ -8471,22 +8483,22 @@ class StrategyGUI(tk.Tk):
         hdr_f.pack(fill="x")
         tk.Label(hdr_f, text=f"{stock_id}  {stock_name}",
                 font=("Segoe UI", 13, "bold"), fg="white", bg="#0055a5").pack(pady=(0, 2))
-        tk.Label(hdr_f, text=f"共 {len(stock_txs)} 筆交易（買入 {len(buys)} 筆 / 賣出 {len(sells)} 筆）",
+        tk.Label(hdr_f, text=f"共 {len(stock_txs)} 筆交易(買入 {len(buys)} 筆 / 賣出 {len(sells)} 筆)",
                 font=("Segoe UI", 9), fg="#cce0ff", bg="#0055a5").pack()
 
         # ── 持有概況 ──
         section_hdr(cf, "【持有概況】")
         stat(cf, "目前持有股數", f"{total_shares:,.0f} 股")
-        stat(cf, "平均成本（不含費用）", f"{avg_cost:,.4f} 元")
+        stat(cf, "平均成本(不含費用)", f"{avg_cost:,.4f} 元")
         stat(cf, "目前現價", f"{cur_price:,.2f} 元")
         stat(cf, "市值", f"{cur_mv:,.2f} 元")
         stat(cf, "未實現損益", f"{unrealized_pl:+,.2f} 元",
              COLOR_PROFIT_POS if unrealized_pl >= 0 else COLOR_PROFIT_NEG)
 
-        # ── 預估賣出（以現價）──
-        section_hdr(cf, "【預估賣出（以現價）】")
-        stat(cf, "預估手續費", f"{est_fee:,.2f} 元（費率 {self.portfolio.broker_discount*0.1425:.4f}%）")
-        stat(cf, "預估證交稅", f"{est_tax:,.2f} 元（0.3%）")
+        # ── 預估賣出(以現價)──
+        section_hdr(cf, "【預估賣出(以現價)】")
+        stat(cf, "預估手續費", f"{est_fee:,.2f} 元(費率 {self.portfolio.broker_discount*0.1425:.4f}%)")
+        stat(cf, "預估證交稅", f"{est_tax:,.2f} 元(0.3%)")
         stat(cf, "預估淨收入", f"{est_net:,.2f} 元",
              COLOR_PROFIT_POS if est_net >= cur_mv - cur_mv * 0.004425 else COLOR_PROFIT_NEG)
         stat(cf, "含費總成本", f"{(total_fee + sum(t.shares*t.price+t.fee for t in buys)):,.2f} 元")
@@ -8495,14 +8507,14 @@ class StrategyGUI(tk.Tk):
         section_hdr(cf, "【費用累計】")
         stat(cf, "總手續費", f"{total_fee:,.2f} 元")
         stat(cf, "總證交稅", f"{total_tax:,.2f} 元")
-        stat(cf, "總買入成本（含費）", f"{sum(t.shares*t.price+t.fee for t in buys):,.2f} 元")
+        stat(cf, "總買入成本(含費)", f"{sum(t.shares*t.price+t.fee for t in buys):,.2f} 元")
 
         # ── 已實現損益 ──
         if sells:
             section_hdr(cf, "【已實現損益】")
             stat(cf, "總賣出淨收入", f"{sell_net:,.2f} 元")
             stat(cf, "含費總成本", f"{buy_cost_excl_fee + total_fee:,.2f} 元")
-            stat(cf, "已實現損益（扣費稅）", f"{realized_pl:+,.2f} 元",
+            stat(cf, "已實現損益(扣費稅)", f"{realized_pl:+,.2f} 元",
                  COLOR_PROFIT_POS if realized_pl >= 0 else COLOR_PROFIT_NEG)
 
         # ── 交易明細 mini table ──
@@ -8536,28 +8548,28 @@ class StrategyGUI(tk.Tk):
         tk.Button(cf, text="關閉", font=("Segoe UI", 10),
                  command=win.destroy).pack(pady=(0, 16))
 
-        # 啟動滾輪（Linux 用 MouseWheel）
+        # 啟動滾輪(Linux 用 MouseWheel)
         def _on_mousewheel(e):
             canvas.yview_scroll(int(-1*(e.delta/120)), "units")
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
         win.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
     def _refresh_portfolio_view(self):
-        """重新查詢 DB，更新總覽 + 兩個 Treeview"""
+        """重新查詢 DB,更新總覽 + 兩個 Treeview"""
         try:
             positions = self.portfolio.get_positions(self._current_prices)
             summary = self.portfolio.get_summary(self._current_prices)
             txs = self.portfolio.list_transactions()
 
-            # 總覽（8 個 label）V0.9.4 phase2.3
+            # 總覽(8 個 label)V0.9.4 phase2.3
             self._summary_labels["total_cost"].config(text=f"{summary.total_cost:,.0f}")
             self._summary_labels["total_market_value"].config(text=f"{summary.total_market_value:,.0f}")
-            # 【V1.1-portfolio-taiwan-color】台股慣例：+ 紅、- 綠（之前是西方慣例 0a7d2c 綠 / c00000 紅）
+            # 【V1.1-portfolio-taiwan-color】台股慣例:+ 紅、- 綠(之前是西方慣例 0a7d2c 綠 / c00000 紅)
             pl_color = COLOR_PROFIT_POS if summary.total_unrealized_pl >= 0 else COLOR_PROFIT_NEG
             self._summary_labels["total_unrealized_pl"].config(text=f"{summary.total_unrealized_pl:+,.0f}", foreground=pl_color)
             self._summary_labels["total_fee"].config(text=f"{summary.total_fee:,.0f}")
-            # V0.9.5+ Phase 11：累計證交稅 = 持倉現價累計（current_tax）
-            #   「歷史累計已付稅」另外顯示（historical_tax = summary.total_tax）
+            # V0.9.5+ Phase 11:累計證交稅 = 持倉現價累計(current_tax)
+            #   「歷史累計已付稅」另外顯示(historical_tax = summary.total_tax)
             self._summary_labels["total_tax"].config(text=f"{summary.current_tax:,.0f}")
             self._summary_labels["historical_tax"].config(text=f"{summary.total_tax:,.0f}")
             net_color = COLOR_PROFIT_POS if summary.net_realized_pl >= 0 else COLOR_PROFIT_NEG
@@ -8571,10 +8583,10 @@ class StrategyGUI(tk.Tk):
             for item in self._positions_tree.get_children():
                 self._positions_tree.delete(item)
             for p in positions:
-                # 顯示名稱：優先用 fetch 到的最新名稱，其次用 DB 儲存的名稱
+                # 顯示名稱:優先用 fetch 到的最新名稱,其次用 DB 儲存的名稱
                 display_name = self._current_names.get(p.stock_id, p.stock_name) or p.stock_name
-                # 【V1.1-portfolio-taiwan-color】台股慣例：未實現損益為主
-                #   顏色：+ 紅、- 綠、未實現=0（無現價）則用已實現、未實現跟已實現都 0 默認色
+                # 【V1.1-portfolio-taiwan-color】台股慣例:未實現損益為主
+                #   顏色:+ 紅、- 綠、未實現=0(無現價)則用已實現、未實現跟已實現都 0 默認色
                 #   ttk.Treeview tag 只能套整列、不能每儲存格不同色、以主指標為準
                 if p.current_price > 0:
                     primary_pl = p.unrealized_pl
@@ -8592,10 +8604,10 @@ class StrategyGUI(tk.Tk):
                     # 【V0.9.5-shares-int】股數顯示整數、避免 float 的 .0
                     str(int(p.shares)),
                     f"{p.avg_cost:.2f}",
-                    f"{p.current_price:.2f}" if p.current_price > 0 else "—",
-                    f"{p.market_value:.0f}" if p.current_price > 0 else "—",
-                    f"{p.unrealized_pl:+.0f}" if p.current_price > 0 else "—",
-                    f"{p.unrealized_pl_pct:+.2f}%" if p.current_price > 0 else "—",
+                    f"{p.current_price:.2f}" if p.current_price > 0 else "-",
+                    f"{p.market_value:.0f}" if p.current_price > 0 else "-",
+                    f"{p.unrealized_pl:+.0f}" if p.current_price > 0 else "-",
+                    f"{p.unrealized_pl_pct:+.2f}%" if p.current_price > 0 else "-",
                     f"{p.realized_pl:+.0f}",
                 ), tags=(row_tag,))
 
@@ -8611,7 +8623,7 @@ class StrategyGUI(tk.Tk):
                     str(int(t.shares)),
                     f"{t.price:.2f}",
                     f"{t.fee:.0f}",
-                    f"{t.tax:.0f}",   # V0.9.4 phase2.3: 顯示證交稅（買入為 0）
+                    f"{t.tax:.0f}",   # V0.9.4 phase2.3: 顯示證交稅(買入為 0)
                     t.note,
                 ))
 
@@ -8620,7 +8632,7 @@ class StrategyGUI(tk.Tk):
 
     # ── V0.9.4 phase2.3: 萬年曆挑選日期 ──
     def _pick_date(self, win: tk.Toplevel, var: tk.StringVar, entry: ttk.Entry):
-        """打開萬年曆，選中後把 YYYY-MM-DD 寫入 StringVar + Entry"""
+        """打開萬年曆,選中後把 YYYY-MM-DD 寫入 StringVar + Entry"""
         initial = var.get().strip()
         chosen = _CalendarDialog.pick(win, initial)
         if chosen:
@@ -8628,7 +8640,7 @@ class StrategyGUI(tk.Tk):
             pass  # date written to var by var.set(chosen) above
 
     def _open_buy_dialog(self):
-        """新增買入對話框（V0.9.4 phase2.3：支援股利配發 price=0、萬年曆選日期）"""
+        """新增買入對話框(V0.9.4 phase2.3:支援股利配發 price=0、萬年曆選日期)"""
         win = tk.Toplevel(self)
         win.title("新增買入")
         win.geometry("460x420")
@@ -8644,14 +8656,14 @@ class StrategyGUI(tk.Tk):
         e.grid(row=0, column=1, padx=8, pady=4, sticky="w")
         fields["stock_id"] = v
 
-        # Row 1: 股票名稱（自動帶出，設為 readonly）
+        # Row 1: 股票名稱(自動帶出,設為 readonly)
         ttk.Label(win, text="股票名稱", width=10, anchor="e").grid(row=1, column=0, padx=8, pady=4, sticky="e")
-        v = tk.StringVar(value="（輸入代號後自動帶出）")
+        v = tk.StringVar(value="(輸入代號後自動帶出)")
         ttk.Label(win, textvariable=v, foreground="#555", font=("Segoe UI", 9)
                    ).grid(row=1, column=1, padx=8, pady=4, sticky="w")
         fields["stock_name"] = v
 
-        # Row 2: 買入日期（entry + 萬年曆按鈕）V0.9.4 phase2.3
+        # Row 2: 買入日期(entry + 萬年曆按鈕)V0.9.4 phase2.3
         ttk.Label(win, text="買入日期", width=10, anchor="e").grid(row=2, column=0, padx=8, pady=4, sticky="e")
         date_frame = ttk.Frame(win)
         date_frame.grid(row=2, column=1, padx=8, pady=4, sticky="w")
@@ -8669,7 +8681,7 @@ class StrategyGUI(tk.Tk):
         ttk.Entry(win, textvariable=v, width=22).grid(row=3, column=1, padx=8, pady=4, sticky="w")
         fields["shares"] = v
 
-        # Row 4: 買入價格（支援 price=0 股利配發）V0.9.4 phase2.3
+        # Row 4: 買入價格(支援 price=0 股利配發)V0.9.4 phase2.3
         ttk.Label(win, text="買入價格", width=10, anchor="e").grid(row=4, column=0, padx=8, pady=4, sticky="e")
         v = tk.StringVar(value="0")
         price_entry = ttk.Entry(win, textvariable=v, width=22)
@@ -8682,8 +8694,8 @@ class StrategyGUI(tk.Tk):
         ttk.Entry(win, textvariable=v, width=22).grid(row=5, column=1, padx=8, pady=4, sticky="w")
         fields["note"] = v
 
-        # Row 6: 預估手續費 label（V0.9.4 phase2.3: 支援 price=0 股利）
-        est_label = ttk.Label(win, text="預估手續費：—（股利配發請設 price=0，手續費為 0）",
+        # Row 6: 預估手續費 label(V0.9.4 phase2.3: 支援 price=0 股利)
+        est_label = ttk.Label(win, text="預估手續費:-(股利配發請設 price=0,手續費為 0)",
                               foreground="#444", font=("Segoe UI", 9, "bold"))
         est_label.grid(row=6, column=0, columnspan=2, padx=8, pady=(10, 4), sticky="w")
 
@@ -8706,7 +8718,7 @@ class StrategyGUI(tk.Tk):
                         self._update_fee_estimate(fields, "BUY", est_label, win)
                         self.logger.log(f"📡 {sid} {info.get('name', '')} 現價 {info.get('price', 0):.2f}")
                     else:
-                        self.logger.log(f"⚠️ {sid} 抓不到現價：{info.get('error', '')}")
+                        self.logger.log(f"⚠️ {sid} 抓不到現價:{info.get('error', '')}")
                 win.after(0, update_ui)
             threading.Thread(target=worker, daemon=True).start()
 
@@ -8733,7 +8745,7 @@ class StrategyGUI(tk.Tk):
                     stock_name=fields["stock_name"].get().strip(),
                     note=fields["note"].get().strip(),
                 )
-                self.logger.log(f"✅ 買入新增成功：{fields['stock_id'].get()} {fields['stock_name'].get()}")
+                self.logger.log(f"✅ 買入新增成功:{fields['stock_id'].get()} {fields['stock_name'].get()}")
                 win.destroy()
                 self._refresh_portfolio_view()
             except Exception as e:
@@ -8743,7 +8755,7 @@ class StrategyGUI(tk.Tk):
         ttk.Button(win, text="取消", command=win.destroy).grid(row=7, column=1, padx=8, pady=12, sticky="w")
 
     def _open_sell_dialog(self):
-        """新增賣出對話框（V0.9.4 phase2.3：萬年曆選日期、手續費+證交稅自動算）"""
+        """新增賣出對話框(V0.9.4 phase2.3:萬年曆選日期、手續費+證交稅自動算)"""
         win = tk.Toplevel(self)
         win.title("新增賣出")
         win.geometry("460x400")
@@ -8761,12 +8773,12 @@ class StrategyGUI(tk.Tk):
 
         # Row 1: 股票名稱
         ttk.Label(win, text="股票名稱", width=10, anchor="e").grid(row=1, column=0, padx=8, pady=4, sticky="e")
-        v = tk.StringVar(value="（輸入代號後自動帶出）")
+        v = tk.StringVar(value="(輸入代號後自動帶出)")
         ttk.Label(win, textvariable=v, foreground="#555", font=("Segoe UI", 9)
                    ).grid(row=1, column=1, padx=8, pady=4, sticky="w")
         fields["stock_name"] = v
 
-        # Row 2: 賣出日期（entry + 萬年曆按鈕）V0.9.4 phase2.3
+        # Row 2: 賣出日期(entry + 萬年曆按鈕)V0.9.4 phase2.3
         ttk.Label(win, text="賣出日期", width=10, anchor="e").grid(row=2, column=0, padx=8, pady=4, sticky="e")
         date_frame = ttk.Frame(win)
         date_frame.grid(row=2, column=1, padx=8, pady=4, sticky="w")
@@ -8796,8 +8808,8 @@ class StrategyGUI(tk.Tk):
         ttk.Entry(win, textvariable=v, width=22).grid(row=5, column=1, padx=8, pady=4, sticky="w")
         fields["note"] = v
 
-        # Row 6: 預估成本（手續費 + 證交稅）V0.9.4 phase2.3
-        est_label = ttk.Label(win, text="預估成本：—（賣出需繳手續費 + 0.3% 證交稅）",
+        # Row 6: 預估成本(手續費 + 證交稅)V0.9.4 phase2.3
+        est_label = ttk.Label(win, text="預估成本:-(賣出需繳手續費 + 0.3% 證交稅)",
                               foreground="#444", font=("Segoe UI", 9, "bold"))
         est_label.grid(row=6, column=0, columnspan=2, padx=8, pady=(10, 4), sticky="w")
 
@@ -8820,7 +8832,7 @@ class StrategyGUI(tk.Tk):
                         self._update_fee_estimate(fields, "SELL", est_label, win)
                         self.logger.log(f"📡 {sid} {info.get('name', '')} 現價 {info.get('price', 0):.2f}")
                     else:
-                        self.logger.log(f"⚠️ {sid} 抓不到現價：{info.get('error', '')}")
+                        self.logger.log(f"⚠️ {sid} 抓不到現價:{info.get('error', '')}")
                 win.after(0, update_ui)
             threading.Thread(target=worker, daemon=True).start()
 
@@ -8846,7 +8858,7 @@ class StrategyGUI(tk.Tk):
                     price=float(fields["price"].get()),
                     note=fields["note"].get().strip(),
                 )
-                self.logger.log(f"✅ 賣出新增成功：{fields['stock_id'].get()}")
+                self.logger.log(f"✅ 賣出新增成功:{fields['stock_id'].get()}")
                 win.destroy()
                 self._refresh_portfolio_view()
             except Exception as e:
@@ -8856,45 +8868,45 @@ class StrategyGUI(tk.Tk):
         ttk.Button(win, text="取消", command=win.destroy).grid(row=7, column=1, padx=8, pady=12, sticky="w")
 
     def _update_fee_estimate(self, fields: Dict[str, tk.StringVar], action: str, label: ttk.Label, win: tk.Toplevel):
-        """即時更新對話框的『預估手續費 / 成本』label（V0.9.4 phase2.3: 支援 price=0 股利配發）"""
+        """即時更新對話框的『預估手續費 / 成本』label(V0.9.4 phase2.3: 支援 price=0 股利配發)"""
         try:
             shares = float(fields["shares"].get() or 0)
             price = float(fields["price"].get() or 0)
             if shares <= 0:
-                label.config(text="預估手續費：—（請輸入股數）")
+                label.config(text="預估手續費:-(請輸入股數)")
                 return
             if price == 0:
-                # V0.9.4 phase2.3: 股利配發（price=0）時不收手續費
+                # V0.9.4 phase2.3: 股利配發(price=0)時不收手續費
                 if action == "BUY":
-                    label.config(text="股利配發：手續費 0 元（無需填價格）")
+                    label.config(text="股利配發:手續費 0 元(無需填價格)")
                 else:
-                    label.config(text="預估成本：—（請輸入賣出價格）")
+                    label.config(text="預估成本:-(請輸入賣出價格)")
                 return
             from portfolio import estimate_total_cost
             est = estimate_total_cost(action, shares, price, self.portfolio.broker_discount)
             if action == "BUY":
-                label.config(text=f"預估手續費：{est['fee']:,.2f} 元（買入不收證交稅）")
+                label.config(text=f"預估手續費:{est['fee']:,.2f} 元(買入不收證交稅)")
             else:
-                label.config(text=f"預估成本：手續費 {est['fee']:,.2f} + 證交稅 {est['tax']:,.2f} = 共 {est['total']:,.2f} 元")
+                label.config(text=f"預估成本:手續費 {est['fee']:,.2f} + 證交稅 {est['tax']:,.2f} = 共 {est['total']:,.2f} 元")
         except (ValueError, tk.TclError):
-            label.config(text="預估手續費：—")
+            label.config(text="預估手續費:-")
 
     def _update_prices_dialog(self):
-        """V0.9.4：批次從 TWSE 抓現價（可手動覆寫）"""
+        """V0.9.4:批次從 TWSE 抓現價(可手動覆寫)"""
         positions = self.portfolio.get_positions()
         if not positions:
             messagebox.showinfo("無持倉", "目前沒有持倉股票可更新現價")
             return
 
         win = tk.Toplevel(self)
-        win.title("更新現價（TWSE 自動抓）")
+        win.title("更新現價(TWSE 自動抓)")
         win.geometry("420x460")
         win.transient(self)
         win.grab_set()
 
-        ttk.Label(win, text="從 TWSE / TPEx 抓取每檔現價（可手動修改）",
+        ttk.Label(win, text="從 TWSE / TPEx 抓取每檔現價(可手動修改)",
                   font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=10, pady=(10, 4))
-        ttk.Label(win, text="按「自動抓 TWSE」按鈕一次抓全部，個別欄位可手動覆寫",
+        ttk.Label(win, text="按「自動抓 TWSE」按鈕一次抓全部,個別欄位可手動覆寫",
                   foreground="#666", font=("Segoe UI", 9)).pack(anchor="w", padx=10, pady=(0, 8))
 
         price_vars = {}
@@ -8924,7 +8936,7 @@ class StrategyGUI(tk.Tk):
                             price_vars[sid].set(f"{info['price']:.2f}")
                             if info.get("name"):
                                 self._backfill_stock_name(sid, info["name"])
-                    self.logger.log(f"📡 自動抓取完成：{sum(1 for v in results.values() if v.get('ok'))}/{len(results)} 檔")
+                    self.logger.log(f"📡 自動抓取完成:{sum(1 for v in results.values() if v.get('ok'))}/{len(results)} 檔")
                 win.after(0, apply)
             threading.Thread(target=worker, daemon=True).start()
 
@@ -8941,19 +8953,19 @@ class StrategyGUI(tk.Tk):
                     try:
                         self._current_prices[sid] = float(txt)
                     except ValueError:
-                        messagebox.showerror("格式錯誤", f"{sid} 現價格式錯誤：{txt!r}", parent=win)
+                        messagebox.showerror("格式錯誤", f"{sid} 現價格式錯誤:{txt!r}", parent=win)
                         return
             self.logger.log(f"✅ 已更新 {len(price_vars)} 檔現價")
             win.destroy()
             self._refresh_portfolio_view()
 
     def _delete_selected_tx(self):
-        """刪除選中的交易（從交易明細 Treeview）"""
+        """刪除選中的交易(從交易明細 Treeview)"""
         sel = self._tx_tree.selection()
         if not sel:
             messagebox.showinfo("未選取", "請先在「交易明細」表格中選取要刪除的紀錄")
             return
-        if not messagebox.askyesno("確認刪除", f"確定要刪除 {len(sel)} 筆交易紀錄？此操作無法復原。"):
+        if not messagebox.askyesno("確認刪除", f"確定要刪除 {len(sel)} 筆交易紀錄?此操作無法復原。"):
             return
         try:
             for item in sel:
@@ -8967,7 +8979,7 @@ class StrategyGUI(tk.Tk):
 
     # V0.9.4 phase2.3: 編輯交易明細
     def _open_edit_tx_dialog(self):
-        """編輯選中的交易（支援 BUY/SELL 修改，fee/tax 自動重算）V0.9.4 phase2.3 修復：action 可編輯"""
+        """編輯選中的交易(支援 BUY/SELL 修改,fee/tax 自動重算)V0.9.4 phase2.3 修復:action 可編輯"""
         sel = self._tx_tree.selection()
         if not sel:
             messagebox.showinfo("未選取", "請先在「交易明細」表格中選取要編輯的紀錄")
@@ -8977,7 +8989,7 @@ class StrategyGUI(tk.Tk):
         tx_id = int(vals[0])
         tx = self.portfolio.get_transaction(tx_id)
         if not tx:
-            messagebox.showerror("錯誤", "找不到這筆交易，請重新整理後再試")
+            messagebox.showerror("錯誤", "找不到這筆交易,請重新整理後再試")
             return
 
         win = tk.Toplevel(self)
@@ -8988,12 +9000,12 @@ class StrategyGUI(tk.Tk):
 
         fields = {}
 
-        # Row 0: 股票代號（readonly）
+        # Row 0: 股票代號(readonly)
         ttk.Label(win, text="股票代號", width=10, anchor="e").grid(row=0, column=0, padx=8, pady=4, sticky="e")
         ttk.Label(win, text=f"{tx.stock_id} {tx.stock_name}", foreground="#555", font=("Segoe UI", 9, "bold")
                   ).grid(row=0, column=1, padx=8, pady=4, sticky="w")
 
-        # Row 1: 買/賣（可切換 BUY↔SELL）V0.9.4 phase2.3 fix: 改為 Combobox
+        # Row 1: 買/賣(可切換 BUY↔SELL)V0.9.4 phase2.3 fix: 改為 Combobox
         ttk.Label(win, text="買/賣", width=10, anchor="e").grid(row=1, column=0, padx=8, pady=4, sticky="e")
         v = tk.StringVar(value=tx.action)  # "BUY" or "SELL"
         action_cbox = ttk.Combobox(win, textvariable=v, values=["BUY", "SELL"],
@@ -9001,7 +9013,7 @@ class StrategyGUI(tk.Tk):
         action_cbox.grid(row=1, column=1, padx=8, pady=4, sticky="w")
         fields["action"] = v
 
-        # Row 2: 交易日期（entry + 萬年曆按鈕）
+        # Row 2: 交易日期(entry + 萬年曆按鈕)
         ttk.Label(win, text="交易日期", width=10, anchor="e").grid(row=2, column=0, padx=8, pady=4, sticky="e")
         date_frame = ttk.Frame(win)
         date_frame.grid(row=2, column=1, padx=8, pady=4, sticky="w")
@@ -9019,7 +9031,7 @@ class StrategyGUI(tk.Tk):
         ttk.Entry(win, textvariable=v, width=22).grid(row=3, column=1, padx=8, pady=4, sticky="w")
         fields["shares"] = v
 
-        # Row 4: 價格（支援 price=0 股利配發 BUY）
+        # Row 4: 價格(支援 price=0 股利配發 BUY)
         ttk.Label(win, text="價格", width=10, anchor="e").grid(row=4, column=0, padx=8, pady=4, sticky="e")
         v = tk.StringVar(value=str(tx.price))
         ttk.Entry(win, textvariable=v, width=22).grid(row=4, column=1, padx=8, pady=4, sticky="w")
@@ -9032,30 +9044,30 @@ class StrategyGUI(tk.Tk):
         fields["note"] = v
 
         # Row 6: 預估訊息 label
-        est_label = ttk.Label(win, text="（ fee / 證交稅將自動重算）",
+        est_label = ttk.Label(win, text="( fee / 證交稅將自動重算)",
                               foreground="#444", font=("Segoe UI", 9))
         est_label.grid(row=6, column=0, columnspan=2, padx=8, pady=(10, 4), sticky="w")
 
-        # fee/tax 自動重算（當 action / shares / price 改變時）V0.9.4 phase2.3
+        # fee/tax 自動重算(當 action / shares / price 改變時)V0.9.4 phase2.3
         def _recalc(action, shares, price, label):
             try:
                 if shares <= 0:
-                    label.config(text="（ fee / 證交稅將自動重算）")
+                    label.config(text="( fee / 證交稅將自動重算)")
                     return
                 if price == 0 and action == "BUY":
-                    label.config(text="股利配發：手續費 0 元（fee/tax 將自動更新）")
+                    label.config(text="股利配發:手續費 0 元(fee/tax 將自動更新)")
                     return
                 if price <= 0:
-                    label.config(text="（ fee / 證交稅將自動重算）")
+                    label.config(text="( fee / 證交稅將自動重算)")
                     return
                 from portfolio import estimate_total_cost
                 est = estimate_total_cost(action, shares, price, self.portfolio.broker_discount)
                 if action == "BUY":
-                    label.config(text=f"預估手續費：{est['fee']:,.2f} 元（fee/tax 將自動更新）")
+                    label.config(text=f"預估手續費:{est['fee']:,.2f} 元(fee/tax 將自動更新)")
                 else:
-                    label.config(text=f"預估成本：手續費 {est['fee']:,.2f} + 證交稅 {est['tax']:,.2f} = 共 {est['total']:,.2f} 元")
+                    label.config(text=f"預估成本:手續費 {est['fee']:,.2f} + 證交稅 {est['tax']:,.2f} = 共 {est['total']:,.2f} 元")
             except ValueError:
-                label.config(text="（ fee / 證交稅將自動重算）")
+                label.config(text="( fee / 證交稅將自動重算)")
 
         def on_change(*_):
             action = fields["action"].get()
@@ -9077,7 +9089,7 @@ class StrategyGUI(tk.Tk):
                 tx.shares = float(fields["shares"].get())
                 tx.price = float(fields["price"].get())
                 tx.note = fields["note"].get().strip()
-                # fee / tax 自動重算（以新的 action 為準）
+                # fee / tax 自動重算(以新的 action 為準)
                 if tx.action == "BUY":
                     from portfolio import calc_fee
                     tx.fee = calc_fee(tx.shares, tx.price, self.portfolio.broker_discount)
@@ -9087,7 +9099,7 @@ class StrategyGUI(tk.Tk):
                     tx.fee = calc_fee(tx.shares, tx.price, self.portfolio.broker_discount)
                     tx.tax = calc_tax(tx.shares, tx.price)
                 self.portfolio.update_transaction(tx)
-                self.logger.log(f"✏️ 交易 #{tx_id} 已更新（{tx.action}）")
+                self.logger.log(f"✏️ 交易 #{tx_id} 已更新({tx.action})")
                 win.destroy()
                 self._refresh_portfolio_view()
             except Exception as e:
@@ -9097,7 +9109,7 @@ class StrategyGUI(tk.Tk):
         ttk.Button(win, text="取消", command=win.destroy).grid(row=7, column=1, padx=8, pady=12, sticky="w")
 
     def _export_portfolio_excel(self):
-        """匯出 4 sheet Excel（讓使用者選存檔位置）"""
+        """匯出 4 sheet Excel(讓使用者選存檔位置)"""
         default_name = f"portfolio_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
         out = filedialog.asksaveasfilename(
             title="匯出買賣記錄",
@@ -9109,8 +9121,8 @@ class StrategyGUI(tk.Tk):
             return
         try:
             self.portfolio.export_excel(out, current_prices=self._current_prices)
-            self.logger.log(f"📤 已匯出：{out}")
-            messagebox.showinfo("匯出成功", f"已寫入：\n{out}")
+            self.logger.log(f"📤 已匯出:{out}")
+            messagebox.showinfo("匯出成功", f"已寫入:\n{out}")
         except Exception as e:
             messagebox.showerror("匯出失敗", str(e))
 
@@ -9127,19 +9139,19 @@ class StrategyGUI(tk.Tk):
 
         def worker():
             try:
-                # V0.9.5-tab-split-phase3 B-1：接收 result
-                # 【V0.9.5-tab-split-phase3-C Fix2】只跑篩選（不回測）
+                # V0.9.5-tab-split-phase3 B-1:接收 result
+                # 【V0.9.5-tab-split-phase3-C Fix2】只跑篩選(不回測)
                 df_sel = _run_selection_only(cfg, self.logger)
                 self._last_select_df = df_sel
                 self._select_checked = {}
                 self.after(0, lambda df=df_sel: self._display_select_results(df))
                 self.after(0, lambda: self.logger.log(
-                    f"✅ 篩選完成，共 {len(df_sel)} 檔｜"
+                    f"✅ 篩選完成,共 {len(df_sel)} 檔|"
                     f"勾選後按「💾 匯出股票清單」可匯出至 Excel\n"
                     f"→ 餵入「策略參數 → 使用 Excel 股票清單」執行回測"
                 ))
             except Exception as e:
-                self.logger.log(f"❌ 執行失敗：{e}")
+                self.logger.log(f"❌ 執行失敗:{e}")
                 import traceback
                 self.logger.log(traceback.format_exc())
             finally:
@@ -9149,23 +9161,23 @@ class StrategyGUI(tk.Tk):
 
     def _on_bt_run(self):
         """【V0.9.5-tab-split-phase3-C】回測 Tab 的「▶ 執行回測模擬」按鈕"""
-        # Fix4：回測是獨立功能，直接從 excel_file_var 讀取，不依賴系統選股勾選
+        # Fix4:回測是獨立功能,直接從 excel_file_var 讀取,不依賴系統選股勾選
         excel_file = self.excel_file_var.get().strip()
         if not excel_file:
-            messagebox.showwarning("無檔案", "請先選擇 Excel 股票清單檔案，再執行回測")
+            messagebox.showwarning("無檔案", "請先選擇 Excel 股票清單檔案,再執行回測")
             return
 
-        # 複製一份 cfg，強制使用 Excel 清單模式
+        # 複製一份 cfg,強制使用 Excel 清單模式
         import copy
         cfg = copy.copy(self.cfg)
         cfg.use_excel_stock_list = True
         cfg.excel_stock_file = excel_file
         cfg.excel_force_buy = self.excel_force_buy_var.get()
-        cfg.use_top10_backtest = False  # Fix3：永遠不用 Top10 模式
+        cfg.use_top10_backtest = False  # Fix3:永遠不用 Top10 模式
 
         self.bt_run_btn.config(state="disabled")
         self.console.insert("end", "\n" + "=" * 60 + "\n")
-        self.console.insert("end", "📊 執行回測模擬（" + excel_file + ")\n")
+        self.console.insert("end", "📊 執行回測模擬(" + excel_file + ")\n")
         self.console.insert("end", "=" * 60 + "\n")
         self.console.see("end")
 
@@ -9175,7 +9187,7 @@ class StrategyGUI(tk.Tk):
                 if result and "df_sel" in result:
                     self.after(0, lambda: self._display_bt_results(result))
             except Exception as e:
-                self.logger.log(f"❌ 回測失敗：{e}")
+                self.logger.log(f"❌ 回測失敗:{e}")
                 import traceback
                 self.logger.log(traceback.format_exc())
             finally:
@@ -9305,7 +9317,7 @@ class StrategyGUI(tk.Tk):
     def _display_select_results(self, df_sel):
         """【V0.9.5-tab-split-phase3 B-1】把選股結果顯示在 select_tree
 
-        顯示欄位：代號、名稱、股價、漲跌價、Score、營收YoY、EPSYoY、PE、殖利率
+        顯示欄位:代號、名稱、股價、漲跌價、Score、營收YoY、EPSYoY、PE、殖利率
         【V1.1-add-change-col】2026-06-29 13:57 William 反映
         「所有的選股結果增加漲跌價欄位、一樣要有 sorting 功能」
         """
@@ -9317,7 +9329,7 @@ class StrategyGUI(tk.Tk):
         for item in self.select_tree.get_children():
             self.select_tree.delete(item)
 
-        # 設定欄位（如果還沒設定）
+        # 設定欄位(如果還沒設定)
         if not self.select_tree["columns"]:
             # 【V1.1-add-change-col】加「漲跌價」在「股價」之後
             cols = ("☑", "代號", "名稱", "股價", "漲跌價", "Score", "營收YoY(%)", "EPSYoY(%)", "PE", "殖利率(%)")
@@ -9326,24 +9338,24 @@ class StrategyGUI(tk.Tk):
             for col, w in zip(cols, col_widths):
                 self.select_tree.heading(col, text=col)
                 self.select_tree.column(col, width=w, anchor="center")
-            # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐（看起來像個 checkbox）
+            # 【V0.9.5-tab-split-phase3-D】初始 header 設為 ☐(看起來像個 checkbox)
             try:
                 self.select_tree.heading(cols[0], text="☐")
             except (IndexError, tk.TclError):
                 pass
             # 【V0.9.5-click-sort】click heading 切換升降冪
-            # skip「☑」、「名稱」（William 2026-06-28 14:30 反映：
-            #  「☑」是 toggle checkbox、「名稱」中文排序沒意義）
+            # skip「☑」、「名稱」(William 2026-06-28 14:30 反映:
+            #  「☑」是 toggle checkbox、「名稱」中文排序沒意義)
             self._select_sort_state = _make_treeview_click_sort(
                 self.select_tree, cols, skip_cols={"☑", "名稱"}
             )
 
-        # 【V0.9.5-goodinfo6+】William 2026-06-26 13:56 反映：
+        # 【V0.9.5-goodinfo6+】William 2026-06-26 13:56 反映:
         #  系統選股結果 9946 殖利率顯示 0.07 (應為 0)、
         #                4973 殖利率顯示 0.015 (應為 1.28%)
-        # 根因：Treeview 用 _fmt(yld) = 0.069 → 顯示 0.07
+        # 根因:Treeview 用 _fmt(yld) = 0.069 → 顯示 0.07
         #       但 yld 是小數 (0.069 = 6.9%)、應該 * 100 變成 %
-        # 修法：殖利率用 _fmt_pct(yld)、×100 變成 %
+        # 修法:殖利率用 _fmt_pct(yld)、×100 變成 %
         def _fmt_pct(v, fmt=".2f", na="--"):
             try:
                 if pd.isna(v) or v is None:
@@ -9352,7 +9364,7 @@ class StrategyGUI(tk.Tk):
             except Exception:
                 return na
 
-        # 填資料（取前 60 筆、避免太慢）
+        # 填資料(取前 60 筆、避免太慢)
         display_count = 0
         for idx, row in df_sel.head(60).iterrows():
             code = str(row.get("股票代號", "")).strip()
@@ -9360,7 +9372,7 @@ class StrategyGUI(tk.Tk):
                 continue
             name = str(row.get("公司名稱_來源", row.get("股票名稱", "")))
             price = row.get("股價", row.get("收盤價", 0))
-            # 【V1.1-add-change-col】顀跌價：price_df 已合進 df_sel、有「顀跌」欄
+            # 【V1.1-add-change-col】顀跌價:price_df 已合進 df_sel、有「顀跌」欄
             change = row.get("漲跌", 0)
             score = row.get("Score", 0)
             rev_yoy = row.get("營收YoY(%)", 0)
@@ -9369,7 +9381,7 @@ class StrategyGUI(tk.Tk):
             pe = row.get("PE", 0)
             yld = row.get("殖利率(估)", row.get("殖利率(%)", 0))
 
-            # 顯示：股價用 .2f、PE 用 .2f（無千分位避免 locale bug）
+            # 顯示:股價用 .2f、PE 用 .2f(無千分位避免 locale bug)
             def _fmt(v, fmt=".2f", na="--"):
                 try:
                     if pd.isna(v) or v is None:
@@ -9379,7 +9391,7 @@ class StrategyGUI(tk.Tk):
                     return na
 
             tag = "checked" if self._select_checked.get(code, False) else "unchecked"
-            # 【V1.1-price-color】顀跌染色：price_* tag 只設 foreground、跟 checked/unchecked 背景不衝突
+            # 【V1.1-price-color】顀跌染色:price_* tag 只設 foreground、跟 checked/unchecked 背景不衝突
             price_tag = _price_tag_for(change)
             if not hasattr(self, "_select_price_tags"):
                 self._select_price_tags = {}
@@ -9398,8 +9410,8 @@ class StrategyGUI(tk.Tk):
             ), tags=(tag, price_tag))
             display_count += 1
 
-        self.logger.log(f"📋 已顯示 {display_count} 筆選股結果（總共 {len(df_sel)} 筆）")
-        # 【V0.9.5-tab-split-phase3-D】動態更新 checkbox header（新資料剛填、預設全未勾 → ☐）
+        self.logger.log(f"📋 已顯示 {display_count} 筆選股結果(總共 {len(df_sel)} 筆)")
+        # 【V0.9.5-tab-split-phase3-D】動態更新 checkbox header(新資料剛填、預設全未勾 → ☐)
         self._update_checkbox_header(self.select_tree, self._select_checked)
         # 【V0.9.5-tab-split-phase3-C】enable 匯出按鈕
         if hasattr(self, "export_select_btn"):
@@ -9409,11 +9421,11 @@ class StrategyGUI(tk.Tk):
     def _export_select_results_excel(self):
         """【V0.9.5-tab-split-phase3-C】匯出系統選股結果到 Excel
 
-        跟手動選股 / ETF 的匯出邏輯類似：
+        跟手動選股 / ETF 的匯出邏輯類似:
         - 沒資料 → 跳 warning
         - 詢問存檔位置、預設檔名 系統選股_YYYYMMDD_HHMM.xlsx
-        - 寫 xlsx（openpyxl）+ 標題列高亮 + 自動欄寬 + NaN 處理
-        - 提示：可直接餵回「使用 Excel 股票清單」
+        - 寫 xlsx(openpyxl)+ 標題列高亮 + 自動欄寬 + NaN 處理
+        - 提示:可直接餵回「使用 Excel 股票清單」
         """
         if not hasattr(self, "_last_select_df") or self._last_select_df is None or self._last_select_df.empty:
             messagebox.showwarning("無資料", "請先按「▶ 執行系統選股」產生結果")
@@ -9424,16 +9436,16 @@ class StrategyGUI(tk.Tk):
         # 【V0.9.5-tab-split-phase3-C】只匯出勾選檔
         checked_codes = [k for k, v in self._select_checked.items() if v]
         if not checked_codes:
-            messagebox.showwarning("無勾選", "請先在系統選股結果中勾選要匯出的股票\n（點擊左側☑/☐欄位切換勾選狀態）")
+            messagebox.showwarning("無勾選", "請先在系統選股結果中勾選要匯出的股票\n(點擊左側☑/☐欄位切換勾選狀態)")
             return
         result = result[result["股票代號"].astype(str).str.strip().isin(checked_codes)]
         if result.empty:
-            messagebox.showwarning("無勾選", "選股結果中找不到已勾選的股票代號，請重新勾選")
+            messagebox.showwarning("無勾選", "選股結果中找不到已勾選的股票代號,請重新勾選")
             return
 
         filename = simpledialog.askstring(
             "儲存名稱設定",
-            "請輸入檔案名稱（不含副檔名）:",
+            "請輸入檔案名稱(不含副檔名):",
             initialvalue=f"系統選股_{datetime.now().strftime('%Y%m%d_%H%M')}"
         )
         if not filename:
@@ -9481,7 +9493,7 @@ class StrategyGUI(tk.Tk):
             )
         except Exception as e:
             messagebox.showerror("匯出失敗", str(e))
-            self.logger.log(f"❌ 匯出失敗：{e}")
+            self.logger.log(f"❌ 匯出失敗:{e}")
 
 
     # ══════════════════════════════════════════════════════════════
@@ -9491,7 +9503,7 @@ class StrategyGUI(tk.Tk):
     def _on_select_tree_hover(self, event):
         """【V1.2.0-kb-focus-v16】系統選股 / 回測 Treeview hover
 
-        v16 變更（William 2026-07-07 17:29 反映他在 Ubuntu 跑）：
+        v16 變更(William 2026-07-07 17:29 反映他在 Ubuntu 跑):
         - v15 sticky 邏輯是為了「OS cursor 移不動」的環境設計的
         - v16 確認 Linux X11 可以用 XWarpPointer 真的移 cursor 後、
           取消 sticky 邏輯、回到 v8 標準 motion handler
@@ -9519,20 +9531,20 @@ class StrategyGUI(tk.Tk):
     def _on_tree_key_see_focus(self, event):
         """【V1.2.0-kb-focus-v23】Down/Up/Home/End/Prior/Next key release 時主動 hover + scroll
 
-        v23 簡化設計（最終）：
+        v23 簡化設計(最終):
         1. 不再自己呼叫 _apply_hover(tree, cur)、改由 _ensure_focus_visible 統一處理
-           - v22 bug：_on_tree_key_see_focus 自己 _apply_hover 一次
+           - v22 bug:_on_tree_key_see_focus 自己 _apply_hover 一次
                      + _ensure_focus_visible 內又 _apply_hover 一次 + _move_cursor_to_row 一次
                      → 重複呼叫 + X11 XSync block 0.5 秒 → handler 卡 0.5 秒
-           - v23 修法：_on_tree_key_see_focus 只呼叫 _ensure_focus_visible
+           - v23 修法:_on_tree_key_see_focus 只呼叫 _ensure_focus_visible
                        由 _ensure_focus_visible 統一管 hover + scroll
-        2. 不動 OS cursor（v23 拿掉 _move_cursor_to_row 呼叫）
+        2. 不動 OS cursor(v23 拿掉 _move_cursor_to_row 呼叫)
            - v17 XWarpPointer 在 Linux 上 race 複雜、放棄
-           - v22 docstring 說要拿掉、但程式碼漏網沒拿（_ensure_focus_visible 內）
+           - v22 docstring 說要拿掉、但程式碼漏網沒拿(_ensure_focus_visible 內)
            - v23 徹底拿掉
         3. _kbd_nav_guard 200ms 防 motion handler 覆蓋
            - 200ms 內 motion handler 不 _apply_hover
-           - 但 _ensure_focus_visible 內的 _apply_hover 不受 guard 影響（sync 立即生效）
+           - 但 _ensure_focus_visible 內的 _apply_hover 不受 guard 影響(sync 立即生效)
         """
         tree = event.widget
         try:
@@ -9554,22 +9566,22 @@ class StrategyGUI(tk.Tk):
             pass
 
     def _kbd_nav_guard_should_block(self, tree):
-        """v25：50ms 短 guard、避免 motion handler 速率覆蓋 key nav 剛設的 hover
+        """v25:50ms 短 guard、避免 motion handler 速率覆蓋 key nav 剛設的 hover
 
-        v16 → v25 變更：
-        - 200ms → 50ms（user 覺得慢、50ms 內肉眼看不到殘留）
-        - mouse 位置移動超 5px → 2px（更快解除 guard）
+        v16 → v25 變更:
+        - 200ms → 50ms(user 覺得慢、50ms 內肉眼看不到殘留)
+        - mouse 位置移動超 5px → 2px(更快解除 guard)
 
-        guard 解除條件（任一）：
+        guard 解除條件(任一):
         - 50ms 過期
-        - mouse 位置移動超過 2px（user 明確動了 mouse）
+        - mouse 位置移動超過 2px(user 明確動了 mouse)
         """
         try:
             import time as _t
             now_ms = int(_t.time() * 1000)
             if now_ms > self._kbd_nav_guard_until_ms:
                 return False  # guard 過期
-            # mouse 移動判斷（5px tolerance）
+            # mouse 移動判斷(5px tolerance)
             try:
                 mx, my = tree.winfo_pointerxy()
                 gx, gy = self._kbd_nav_mouse_pos_at_guard
@@ -9583,15 +9595,15 @@ class StrategyGUI(tk.Tk):
     def _on_select_tree_leave(self, event):
         """【V1.2.0-kb-focus-v23】離開 Treeview 時不清 hover、讓 selected row 保持高亮
 
-        v22 重複定義 bug：原本 v4 pass 版本、加上 _clear_select_hover 版本
+        v22 重複定義 bug:原本 v4 pass 版本、加上 _clear_select_hover 版本
         → Python 後者覆蓋前者 → bind 行為不直觀
-        v23 修法：只留 v4 pass 版本（與 v22 docstring「放手了、不清 hover」一致）
+        v23 修法:只留 v4 pass 版本(與 v22 docstring「放手了、不清 hover」一致)
         """
-        # v4 設計：不要清 hover、讓使用者離開 Treeview 後仍能看到選中的 row
+        # v4 設計:不要清 hover、讓使用者離開 Treeview 後仍能看到選中的 row
         pass
 
     def _clear_select_hover(self, tree):
-        """清除 hover highlight、restore 該列原本 tag（供外部呼叫）"""
+        """清除 hover highlight、restore 該列原本 tag(供外部呼叫)"""
         if not hasattr(self, "_select_hover_iids"):
             return
         iid = self._select_hover_iids.get(id(tree))
@@ -9604,7 +9616,7 @@ class StrategyGUI(tk.Tk):
         self._select_hover_iids.pop(id(tree), None)
 
     def _on_select_tree_click(self, event):
-        """點勾選欄 header → 全選/全不選；點任一列 → toggle"""
+        """點勾選欄 header → 全選/全不選;點任一列 → toggle"""
         tree = event.widget
         region = tree.identify("region", event.x, event.y)
         column = tree.identify_column(event.x)
@@ -9630,10 +9642,10 @@ class StrategyGUI(tk.Tk):
         iid = tree.identify_row(event.y)
         if not iid:
             return
-        # 【V1.2.0-keyboard-toggle-fix】2026-07-06 15:58 William 反映：
+        # 【V1.2.0-keyboard-toggle-fix】2026-07-06 15:58 William 反映:
         # 「↑/↓ 鍵要先 click 在某個 item 才會動作、space bar 不能 toggle」
-        # 根因：Treeview 預設 click 不會設鍵盤焦點到 row、tree.focus() 永遠回空字串
-        # 修法：click cell 時設 tree.focus(iid)、後續 ↑/↓/Space 才能動
+        # 根因:Treeview 預設 click 不會設鍵盤焦點到 row、tree.focus() 永遠回空字串
+        # 修法:click cell 時設 tree.focus(iid)、後續 ↑/↓/Space 才能動
         tree.focus(iid)
         # 【V1.2.0-kb-focus-v5】Treeview browse mode click 自動 selection_set、
         # 觸發 <<TreeviewSelect>>、我們在那個 handler 同步 hover_<price> tag
@@ -9650,10 +9662,10 @@ class StrategyGUI(tk.Tk):
         # 【V1.1-price-color】保留 price_* tag
         price_tag = getattr(self, "_select_price_tags", {}).get(iid, "price_zero")
         tree.item(iid, values=vals, tags=("checked" if not current else "unchecked", price_tag))
-        # 【V0.9.5-tab-split-phase3-D】動態更新 header（個別 toggle 也會影響整體狀態）
+        # 【V0.9.5-tab-split-phase3-D】動態更新 header(個別 toggle 也會影響整體狀態)
         self._update_checkbox_header(tree, checked_dict)
 
-    # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單（_on_select_tree_rclick）
+    # 【V0.9.5-tab-split-phase3-F】拿掉右鍵「全選/全不選」選單(_on_select_tree_rclick)
 
     def _select_all(self, tree=None):
         tree = tree or self.select_tree
@@ -9684,18 +9696,18 @@ class StrategyGUI(tk.Tk):
     def _on_tree_space_toggle(self, event):
         """【V1.2.0-keyboard-toggle】Space 鍵 toggle 當前 focus row 的第一欄勾選
 
-        William 2026-07-06 15:32 反映：
-          - 系統選股 / 手動選股 / ETF 選股 / 回測，除了滑鼠點勾選外
+        William 2026-07-06 15:32 反映:
+          - 系統選股 / 手動選股 / ETF 選股 / 回測,除了滑鼠點勾選外
           - 希望用 ↑/↓ 鍵移動 highlight、Space 鍵 toggle 勾選
 
-        設計：
+        設計:
           - ↑/↓ 鍵移動 focus 是 Tkinter Treeview 內建、不需額外 binding
           - 本函式只負責「focus row 的第一欄 toggle」
           - 支援 select_tree / backtest_tree / ms_tree / etf_tree 四個 Treeview
           - return "break" 避免 Space 鍵被當成 button activate 事件跳出去
 
         Args:
-            event: Tkinter event（event.widget = tree）
+            event: Tkinter event(event.widget = tree)
         """
         tree = event.widget
         iid = tree.focus()
@@ -9710,7 +9722,7 @@ class StrategyGUI(tk.Tk):
             checked_dict = self._etf_checked
             price_tags_attr = "_etf_price_tags"
         else:
-            # select_tree / backtest_tree（兩者共用 _on_select_tree_click）
+            # select_tree / backtest_tree(兩者共用 _on_select_tree_click)
             if tree is self.select_tree:
                 checked_dict = self._select_checked
             else:
@@ -9729,7 +9741,7 @@ class StrategyGUI(tk.Tk):
             iid, values=vals,
             tags=("checked" if not current else "unchecked", price_tag),
         )
-        # 動態更新 header（全選/部分/全不選 狀態）
+        # 動態更新 header(全選/部分/全不選 狀態)
         self._update_checkbox_header(tree, checked_dict)
         return "break"
 
@@ -9738,15 +9750,15 @@ class StrategyGUI(tk.Tk):
 
         - 0 個 rows 或 0 個 checked → ☐
         - 全部 checked → ☑
-        - 部分 checked → ▣（混和狀態）
+        - 部分 checked → ▣(混和狀態)
 
-        為什麼要動態更新？
+        為什麼要動態更新?
         - 原本 header 永遠是「勾選」字樣、不管全選/全不選都長一樣
         - 使用者點 header 後 rows 都勾起來了、但 header 沒反饋、看不出點成功
         - 動態切 ☑/☐/▣ 可以明確表達「目前整體狀態」
 
         Args:
-            tree: ttk.Treeview（select_tree / backtest_tree / ms_tree / etf_tree 都可用）
+            tree: ttk.Treeview(select_tree / backtest_tree / ms_tree / etf_tree 都可用)
             checked_dict: dict[iid -> bool]
         """
         try:
