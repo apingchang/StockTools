@@ -621,3 +621,129 @@ def test_v23_on_tree_key_see_focus_doc_says_no_move_cursor():
         "v23 _on_tree_key_see_focus docstring 必明確說「不再呼叫 _move_cursor_to_row」\n"
         "或「放棄動 OS cursor」"
     )
+
+
+def test_v24_apply_hover_no_longer_clears_all():
+    """v24：_apply_hover 不再呼叫 _clear_all_hover（delta tracking）
+
+    v23 之前：_apply_hover 內「self._clear_all_hover(tree)」會掃整個 tree 2362 筆
+    → 100+ms 延遲 + 在 race 條件下可能漏清 → up/down 後 mouse 一動就兩個 hilight
+
+    v24 修法：用 self._hover_iid[tree] 追蹤上一個 hover iid
+    新呼叫時只清上一個、不掃整個 tree
+    """
+    content = _read()
+    idx = content.find("def _apply_hover(self, tree, iid):")
+    assert idx != -1, "找不到 _apply_hover 函式"
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "self._clear_all_hover(tree)" not in body, (
+        "v24 _apply_hover 必不再呼叫 self._clear_all_hover(tree)\n"
+        "v23 race 是 _clear_all_hover 漏清 + 掃整個 tree 慢 → delta tracking 取代"
+    )
+    # 必仍呼叫 _set_row_tag_normal（清上一個 iid）
+    assert "self._set_row_tag_normal(tree, prev_iid)" in body, (
+        "v24 必須呼叫 _set_row_tag_normal 清上一個 hover iid"
+    )
+
+
+def test_v24_apply_hover_uses_hover_iid_dict():
+    """v24：_apply_hover 用 self._hover_iid dict 追蹤當前 hover iid
+
+    3 個檢查點：
+    1. 有 hasattr 守衛避免 __init__ 中需要顯式 init
+    2. 用 dict[id(tree)] 作為 key
+    3. 呼叫結尾更新 dict
+    """
+    content = _read()
+    idx = content.find("def _apply_hover(self, tree, iid):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    # hasattr 守護
+    assert 'hasattr(self, "_hover_iid")' in body, (
+        "v24 _apply_hover 必檢查 hasattr(self, '_hover_iid') 避免 __init__ 改動破壞向後相容"
+    )
+    # 用 id(tree) 作為 key（多個 tree 區分）
+    assert "self._hover_iid.get(id(tree))" in body, (
+        "v24 _apply_hover 必用 self._hover_iid.get(id(tree)) 讀上一個 hover"
+    )
+    # 結尾更新
+    assert "self._hover_iid[id(tree)] = iid" in body, (
+        "v24 _apply_hover 結尾必更新 self._hover_iid[id(tree)] = iid"
+    )
+
+
+def test_v24_apply_hover_no_op_when_same_iid():
+    """v24：_apply_hover 重複呼叫同 iid → no-op、不重複設 tag
+
+    root cause：v24 前後 mouse 連續觸發 motion、可能呼叫多次 _apply_hover
+    加 early return 避免多餘 tree.item 呼叫（每次 IPC 都幾 ms）
+    """
+    content = _read()
+    idx = content.find("def _apply_hover(self, tree, iid):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "if prev_iid == iid:" in body, (
+        "v24 _apply_hover 必檢查 prev_iid == iid → early return no-op"
+    )
+    assert "return" in body, (
+        "v24 no-op 分支必 return（不繼續執行清/設邏輯）"
+    )
+
+
+def test_v24_apply_hover_handles_stale_prev_iid():
+    """v24：_apply_hover 處理 prev_iid 不在 tree 內的 edge case
+
+    edge case：tree 被重建（呼叫 insert 重新填充）後、_hover_iid 內還有舊 iid
+    → 嘗試 _set_row_tag_normal(old_iid) 會 fail（iid 已不存在）
+
+    v24 解法：先檢查 prev_iid in tree.get_children()、不在就跳過
+    """
+    content = _read()
+    idx = content.find("def _apply_hover(self, tree, iid):")
+    assert idx != -1
+    end = content.find("\n    def ", idx + 50)
+    if end == -1:
+        end = len(content)
+    body = content[idx:end]
+    if '"""' in body:
+        parts = body.split('"""')
+        body = '"""'.join(parts[2:])
+    assert "prev_iid in tree.get_children()" in body, (
+        "v24 _apply_hover 清舊 hover 必檢查 prev_iid in tree.get_children()"
+        "（避免 stale iid 設到不存在的 row）"
+    )
+
+
+def test_v24_apply_hover_doc_mentions_delta_tracking():
+    """v24：_apply_hover docstring 必明確提到「delta tracking」與「O(1)」
+
+    避免未來看 code 的人不知道為什麼要 _hover_iid dict
+    """
+    content = _read()
+    idx = content.find("def _apply_hover(self, tree, iid):")
+    assert idx != -1
+    start = content.find('"""', idx)
+    end = content.find('"""', start + 3)
+    docstring = content[start + 3:end]
+    assert "delta tracking" in docstring or "O(1)" in docstring, (
+        "v24 _apply_hover docstring 必提到「delta tracking」或「O(1)」\n"
+        "說明為什麼用 _hover_iid dict"
+    )

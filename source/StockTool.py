@@ -1,10 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v23 (2026-07-08 21:30) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v24 (2026-07-09 20:05) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v23
-最後更新: 2026-07-08 21:26 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v24
+最後更新: 2026-07-09 20:10 (Asia/Taipei)
 
 Python 版本: 3.8+
 
@@ -99,6 +99,58 @@ except Exception:
 - test_v23_on_tree_key_see_focus_single_apply_hover
 - test_v23_no_duplicate_on_select_tree_leave
 - test_v23_on_tree_key_see_focus_doc_says_no_move_cursor
+
+【v1.2.0 paper-trading-kb-focus-v24】2026-07-09 20:05 (_apply_hover delta tracking：修 key-nav 內 _apply_hover 慢 + up/down 後動 mouse 有 bar 殘留)
+【背景】William 2026-07-09 06:51 / 06:58 / 09:58 反映 v23 三個問題：
+  1. mouse 移動 hilight bar 比 up/down key 快很多 → 根本違背直覺
+  2. up/down key 移動 bar 後動 mouse → hilight bar 多一個在剛剛 key 移動的位置
+  3. 上面的 1 顛倒理解 William 一開始說法、但 William 確認「mouse 快、up/down 慢」
+
+【William 一開始的主訴（重要）】
+- 「v23 up/down key 移動 hilight bar 速度有快一些但明顯筆 mouse 移動 hilight bar 慢」
+  →「筆」是「比」的誤打、「mouse 移動 hilight bar 慢」是關鍵字
+  → 實際意思是「mouse 移動 hilight 比較慢」還是「mouse 比較快」文字上看不出來
+- [10:01] William 最終確認：「你理解錯了！是 mouse 移動 hilight 比 up/down 快很多！」
+
+【v23 兩個未修 bug 的 root cause】
+1. 慢（up/down 比 mouse 慢很多）：
+   - motion 路徑：mouse 事件 → motion handler → _apply_hover → 完成
+   - key-nav 路徑：KeyRelease → _on_tree_key_see_focus → _ensure_focus_visible → _apply_hover
+   - _ensure_focus_visible 內有多個 tree.update_idletasks() + 多個 yview_scroll → 累積 100-200ms
+   - 加上 _apply_hover 內 _clear_all_hover 掃 2362 筆、Tcl IPC overhead → 100+150ms
+2. 殘留（up/down 後動 mouse 兩個 hilight）：
+   - key-nav 設 9906 為 hover
+   - motion 到 2451 → _apply_hover(2451) 內 _clear_all_hover 掃 2362 筆找 9906 hover
+   - 在 race 條件下、可能漏清 9906 hover 但設定 2451 hover → 兩個都有
+
+【v24 解法】delta tracking
+1. 新增 self._hover_iid[tree.id()] = iid dict、追蹤每個 tree 當前 hover iid
+2. 新呼叫時：
+   - lazy init dict（用 hasattr 守衛、避免 __init__ 改動破壞向後相容）
+   - 取 prev_iid = self._hover_iid.get(id(tree))
+   - 檢查同 iid 重複呼叫 → early return no-op
+   - 驗證新 iid 在 tree.get_children()
+   - 清舊 hover：self._set_row_tag_normal(tree, prev_iid)（單筆 O(1)）
+   - edge case：prev_iid 不在 tree.get_children() → 跳過（rebuild 後的 stale iid）
+   - 設新 hover：tree.item(iid, tags=(hover_<kind>,))
+   - 更新 self._hover_iid[id(tree)] = iid
+
+【v24 不改的事】
+- _clear_all_hover 函式本身保留（其他用途：ETF rebuild tree、一些呼叫不依賴 _apply_hover）
+- _ensure_focus_visible 內多個 update_idletasks() 留給 v25 處理（避免一次改太多）
+- _move_cursor_to_row 留著（已不被任何 caller 呼叫、留着方便未來找回）
+
+【測試】tests/test_keyboard_space_toggle.py 新增 5 個 v24 test：
+- test_v24_apply_hover_no_longer_clears_all（守護 v24 不再呼叫 _clear_all_hover）
+- test_v24_apply_hover_uses_hover_iid_dict（守護 _hover_iid dict 機制）
+- test_v24_apply_hover_no_op_when_same_iid（守護 no-op 行為）
+- test_v24_apply_hover_handles_stale_prev_iid（守護 edge case）
+- test_v24_apply_hover_doc_mentions_delta_tracking（守護 docstring 提到 delta tracking / O(1)）
+
+【預期效果】
+- key-nav _apply_hover：從掃 2362 筆 100+ms → 單筆 O(1) <1ms
+- mouse 移動 _apply_hover：原 O(N) 全掃 → O(1)、mouse 連續觸發也只動一個 row
+- 殘留：delta tracking 不掃 tree、prev_iid 一定清乾淨
 
 【已知未解、另行處理】
 - hover_<price> 的 foreground 在 Linux ttk theme 下完全沒生效（hover 文字變黑）
@@ -5457,38 +5509,64 @@ class StrategyGUI(tk.Tk):
                     continue
 
     def _apply_hover(self, tree, iid):
-        """【V1.2.0-kb-focus-v12】把 iid 設成 hover_<price> tag
+        """【V1.2.0-kb-focus-v24】把 iid 設成 hover_<price> tag（delta tracking）
 
-        v12 設計：完全解耦 hover 跟 click 兩件事
+        v24 重設計：
+        1. 用 self._hover_iid[tree] 追蹤每個 tree 當前的 hover iid
+        2. 新呼叫時只清上一個 (prev_iid)、不掃整個 tree
+           → 從 O(N) 降到 O(1) — 2362 筆從 100ms → < 1ms
+        3. prev_iid 還在 tree 內 → 設回 (checked, price_x)
+        4. prev_iid 已經不在 (tree 重建) → 跳過、不 raise
 
-        設計：
-        - hover_<kind> 是個「視覺」tag、只負責 highlight bar 顏色
-        - click 是另一個「選股」動作、設 selection_set (excel output) 不動 hover
-        - hover 跟 click 互不千涉、避免 race condition
+        v23 之前問題：
+        1. 殘留：_clear_all_hover 在 _apply_hover 內呼叫、掃整個 tree
+           → 在 race 條件下可能漏清、導致 up/down 後 mouse 一動就兩個 hover bar
+        2. 慢：掃 2362 筆每個都 tree.item(child, "tags") 是 Tcl IPC 呼叫
+           → 累積 100-150ms → up/down 移動 hilight 感覺延遲
 
-        重要：
-        - tree.item(iid, tags=(hover_kind,)) 會清掉原有 (checked, price_x)
-          → mouse 移到 row 後 click handler 重設一次會清 hover
-          → v12 解法：mouse hover 後如果 click 換 row、會重新 _apply_hover
-          → 而且選股状態 (checked, price_x) 保留在 checked_dict、不依賴 tree.tags
+        v24 解法：
+        - 維持 _clear_all_hover 函式本身（其他地方會呼叫、例如 ETF rebuild tree）
+        - 但 _apply_hover 不再呼叫 _clear_all_hover、改用 delta tracking
+        - 設 prev_iid 用 _set_row_tag_normal（單一操作、不掃 tree）
+
+        仍保留 v12 解耦設計：
+        - hover_<kind> 是視覺 tag、只負責 highlight bar 顏色
+        - click 是另一個選股動作、不動 hover
+        - 狀態 (checked, price_x) 保留在 checked_dict、不依賴 tree.tags
 
         單一真相 = 唯一會動 hover_<price> tag 的地方
         - motion handler 呼叫：滑鼠移到新 row
-        - _on_tree_key_see_focus 呼叫：↑/↓ 鍵盤移動後
+        - _ensure_focus_visible 呼叫：↑/↓ 鍵盤移動後（間接經 _on_tree_key_see_focus）
         """
         if not tree or not tree.winfo_exists():
             return
+        # 1. 確保 _hover_iid dict 存在（lazy init 避免 __init__ 改動破壞向後相容）
+        if not hasattr(self, "_hover_iid") or not isinstance(getattr(self, "_hover_iid", None), dict):
+            self._hover_iid = {}
+        # 2. 取上一個 hover iid（可能 None 表示首次 hover）
+        prev_iid = self._hover_iid.get(id(tree))
+        # 3. early return: 同 row 重複呼叫 → no-op（避免多餘 IPC）
+        if prev_iid == iid:
+            return
+        # 4. 驗證新 iid 有效（tree 已被重建 / 還沒 insert）
         if not iid or iid not in tree.get_children():
             return
-        # 1. 清所有舊 hover
-        self._clear_all_hover(tree)
-        # 2. 設新 row 為 hover_<price>（單一 tag、簡單且必定 work）
+        # 5. 清舊 hover（單筆 O(1) 而非掃整個 tree）
+        #    edge case: prev_iid 不在 tree 內（rebuild） → 跳過、不嘗試清
+        if prev_iid and prev_iid in tree.get_children():
+            try:
+                self._set_row_tag_normal(tree, prev_iid)
+            except (tk.TclError, AttributeError, TypeError):
+                pass
+        # 6. 設新 row 為 hover_<price>
         price_tag = self._get_price_tag_for_tree(tree, iid)
         hover_kind = price_tag.replace("price_", "") if price_tag.startswith("price_") else "zero"
         try:
             tree.item(iid, tags=(f"hover_{hover_kind}",))
         except tk.TclError:
             pass
+        # 7. 更新追蹤 dict
+        self._hover_iid[id(tree)] = iid
 
     def _move_cursor_to_row(self, tree, iid):
         """【V1.2.0-kb-focus-v18】鍵盤 ↑/↓ 移動後、把 OS mouse cursor 移到該 row
