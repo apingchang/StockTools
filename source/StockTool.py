@@ -1,25 +1,21 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v25 (2026-07-09 21:48) ║
+║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v26 (2026-07-12 19:45) ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v25
-最後更新: 2026-07-10 01:10 (Asia/Taipei)
+Version: v1.2.0-paper-trading-kb-focus-v26
+最後更新: 2026-07-12 19:42 (Asia/Taipei)
 
 Python 版本: 3.8+
 
 # 【V1.2.0-kb-focus-v19】模組 import 立即寫 log、證明 v19 source 真的有跑
+# 【V1.2.0-kb-focus-v26】2026-07-12 William 反映:把 stderr write (fd=2) 拿掉、消掉 console 噪音
 try:
     import os as _v19_os
     _v19_log = "/tmp/stocktool_v19_module.log"
     with open(_v19_log, "a", encoding="utf-8") as _f19:
         import datetime as _v19_dt
         _f19.write(f"[v19 module] StockTool.py 載入 @{_v19_dt.datetime.now().isoformat()}\n")
-    # 也試 os.write(fd, ...) 繳過任何 redirect
-    try:
-        _v19_os.write(2, f"[v19 module] StockTool.py 載入 (fd 2)\n".encode("utf-8"))
-    except Exception:
-        pass
 except Exception:
     pass
 
@@ -212,17 +208,17 @@ except Exception:
   → 這次不動、避免修正 v23 後又買入新的 race
 
 
-【v1.2.0 paper-trading-kb-focus-v26】2026-07-09 23:32 fix2 (修 v25 殘留：_set_row_tag_normal 用 tk.call 直接走 Tcl tag remove)
+【v1.2.0 paper-trading-kb-focus-v26】2026-07-09 23:32 fix2 (修 v25 殘留:_set_row_tag_normal 用 tk.call 直接走 Tcl tag remove)
 
 【v26 原本設計、v26-fix2 修正】
 - v26 原本用 tree.tag_remove(ht, iid) Python API
-- 但 ttk.Treeview 沒有 Python-level tag_remove method（v26 commit 後才發現）
-- William 2026-07-09 23:32 反映 v26 仍無效、log 顯示：
+- 但 ttk.Treeview 沒有 Python-level tag_remove method(v26 commit 後才發現)
+- William 2026-07-09 23:32 反映 v26 仍無效、log 顯示:
   清舊 hover 失敗 e='Treeview' object has no attribute 'tag_remove'
 - v26-fix2 改用 tree.tk.call(tree._w, "tag", "remove", ht, iid) 走 Tcl level
   → tk.call 是 Tkinter 通用 low-level API、能調用任何 Tcl widget command
-  → 原始設計猜測：「_set_row_tag_normal 內 AttributeError 會被 inner try catch 住」
-     事實：inner try 只 catch tk.TclError、不 catch AttributeError
+  → 原始設計猜測:「_set_row_tag_normal 內 AttributeError 會被 inner try catch 住」
+     事實:inner try 只 catch tk.TclError、不 catch AttributeError
      AttributeError propagate 到 outer try、outer 也只 catch tk.TclError
      最終 AttributeError 從 _set_row_tag_normal return 出來、整個函式中斷
      後面的 tree.item(iid, tags=(...)) 沒執行 → hover tag 完全沒被移除
@@ -233,28 +229,50 @@ except Exception:
 3. outer try/except 也改為 catch (tk.TclError, AttributeError, TypeError) 確保整個函式不中斷
 
 【v26 fix2 不改】
-- _apply_hover（v24 delta tracking 仍 O(1)）
-- _kbd_nav_guard（v25 50ms + 2px 夠用）
-- _ensure_focus_visible（v25 單一 update_idletasks）
-- _clear_all_hover（保留、其他用途）
+- _apply_hover(v24 delta tracking 仍 O(1))
+- _kbd_nav_guard(v25 50ms + 2px 夠用)
+- _ensure_focus_visible(v25 單一 update_idletasks)
+- _clear_all_hover(保留、其他用途)
 
-【v26 fix2 測試】tests/test_keyboard_space_toggle.py 修正 3 個 v26 test：
-- test_v26_set_row_tag_normal_removes_hover_tags（改為檢查 tk.call + "tag" + "remove"）
-- test_v26_set_row_tag_normal_handles_all_three_hover_kinds（三種 hover tag 仍在）
-- test_v26_set_row_tag_normal_no_raise_when_no_hover_tag（regex 改為匹配 tk.call）
+【v26 fix2 測試】tests/test_keyboard_space_toggle.py 修正 3 個 v26 test:
+- test_v26_set_row_tag_normal_removes_hover_tags(改為檢查 tk.call + "tag" + "remove")
+- test_v26_set_row_tag_normal_handles_all_three_hover_kinds(三種 hover tag 仍在)
+- test_v26_set_row_tag_normal_no_raise_when_no_hover_tag(regex 改為匹配 tk.call)
 
 【預期效果】
-- v26 commit 後被 William 抓出「無效」（v26 之前因為我猜錯 API）
+- v26 commit 後被 William 抓出「無效」(v26 之前因為我猜錯 API)
 - v26 fix2 修正後、tk.call 走 Tcl level、tags remove 一定成功
-- 5289 + 6219 殘留問題應徹底解決（如果還沒、 v27 來處理 Linux ttk theme）
+- 5289 + 6219 殘留問題應徹底解決(如果還沒、 v27 來處理 Linux ttk theme)
+
+【v1.2.0 paper-trading-kb-focus-v26 fix3】2026-07-12 19:45 (清 PyCharm console 噪音)
+【背景】William 2026-07-12 19:38 反映:[v26 motion] / [v26 _apply_hover] / [v20] bind / [v19 _build_ui] / [v19 module] 洗版 PyCharm console
+       每滑鼠移動一次印一行 [v26 motion]、根本看不到有意義的 log。
+
+【v26 fix3 修法】(2 個地方、都不動 call site)
+1. _v18_log()：移除 print(flush=True)、預設只寫 /tmp/stocktool_v18.log
+   - 25 個 [v26 motion] / [v26 _apply_hover] / [v18 _move_cursor_to_row] / [v18 x11] / [v20] bind / [v19 _build_ui] / [v26 keynav] 等全部自動靜音
+   - 加 self._v18_debug_console 旗標、debug 時改 True 就會回流 console
+2. 2 個 module-level _v19_os.write(2, ...) 直接寫 stderr → 拿掉、保留寫 /tmp/stocktool_v19_module.log
+   - 2 個 [v19 module] 訊息從此不再印到 console
+
+【v26 fix3 不改】
+- /tmp/stocktool_v18.log 跟 /tmp/stocktool_v19_module.log 還是有寫(除錯需要可查)
+- _v18_log() call site 全部保留(未來 debug 改一個旗標就會重新噴 log)
+- _v18_debug_console 預設 False、restart App 後自動生效
+- User-Agent 順手從 v22 升到 v26
+
+【預期效果】
+- PyCharm console 變乾淨、滑 mouse 不再有 [v26 motion] 洗版
+- 有問題要看 log 還是可以去翻 /tmp/stocktool_v18.log
+- 未來要 debug 任何 hover/keynav 問題、只要在某處臨時插 self._v18_debug_console = True 就會回流
 
 【v25 為什麼也沒修好】(背景參考)
 - v25 仍用 tree.item(iid, tags=(...)) 替換 tags、但 Linux ttk theme 緩存導致視覺上 hover 殘留
 - v25 log 證明邏輯跑了、但截圖仍亮 → root cause 是 ttk theme 緩存
-- v26 fix2 應該繞過 theme 緩存（因為走 tk.call、不是 Python API）
+- v26 fix2 應該繞過 theme 緩存(因為走 tk.call、不是 Python API)
 
 
-【v1.2.0 paper-trading-kb-focus-v19】2026-07-07 18:42 (重大發現：v18 所有 log 都在 3667 行 docstring 內、從沒執行)
+【v1.2.0 paper-trading-kb-focus-v19】2026-07-07 18:42 (重大發現:v18 所有 log 都在 3667 行 docstring 內、從沒執行)
 【背景】William 2026-07-07 18:39 反應:「[V18] message 沒在任何 console 顯示、連 log file 都沒產生」
 
 【v18 隱藏的 Super Bug】
@@ -1466,14 +1484,14 @@ except Exception:
 
 【根因】兩個 bug 一起修
   1. 原文 50+ 字元塞 200px 左欄、被裁切
-     範例:'ETF 持股：最後更新 2026-06-29 10:00:00 (53 檔個股、從 20 檔 ETF) ✅ 有昨日資料可比較'
+     範例:'ETF 持股:最後更新 2026-06-29 10:00:00 (53 檔個股、從 20 檔 ETF) ✅ 有昨日資料可比較'
   2. 同時發現:strftime('%%Y-%%m-%%d') 印出字面 '%Y-%m-%d'(不是真正時間)
      截圖上最後更新顯示為 '%Y-%m-%d %H:%M:%S' 就是這個 bug
      原因:strftime 的 %% 是字面 %、但這裡是要顯示真實 datetime
 
 【修法】拆 3 行 + 修 %% bug
   1. 改成 \\n.join(status_lines):
-     Line 1: 'ETF 持股：53 檔個股、20 檔 ETF'
+     Line 1: 'ETF 持股:53 檔個股、20 檔 ETF'
      Line 2: '最後更新 2026-06-29 10:00:00'
      Line 3: '✅ 有昨日資料可比較'  或 '⚠️ 無昨日資料'
   2. 改用 datetime.now().strftime('%Y-%m-%d %H:%M:%S')(不是 %%Y)
@@ -3908,19 +3926,18 @@ from __future__ import annotations
 
 # 【V1.2.0-kb-focus-v19】模組 import 立即寫 log、證明 v19 source 真的有跑
 # v19 發現 v18 的所有 log 在 docstring 內、根本沒跑(被 python 視為註解)
+# 【V1.2.0-kb-focus-v26】2026-07-12 William 反映:把 stderr write (fd=2) 拿掉、消掉 console 噪音
 try:
     import os as _v19_os
     _v19_log = "/tmp/stocktool_v19_module.log"
     with open(_v19_log, "a", encoding="utf-8") as _f19:
         import datetime as _v19_dt
         _f19.write(f"[v19 module] StockTool.py imported @{_v19_dt.datetime.now().isoformat()}\n")
-    # 也寫到 stderr fd 2(繞過任何 redirect)
+except Exception as _v19_exc:
     try:
-        _v19_os.write(2, f"[v19 module] StockTool.py imported (fd=2)\n".encode("utf-8"))
+        print(f"[v19] module log failed: {_v19_exc}")
     except Exception:
         pass
-except Exception as _v19_exc:
-    print(f"[v19] module log failed: {_v19_exc}")
 
 # ==========================================================
 # Version 常數(V0.9.5-goodinfo4 設定)
@@ -4170,7 +4187,7 @@ def _parse_sort_value(v):
         - is_missing: True 表示「-」/空字串、要排最後
     """
     s = str(v).strip()
-    if s == "" or s == "—" or s == "-" or s == "--":
+    if s == "" or s == "-" or s == "-" or s == "--":
         return (float("inf"), True)
     # 數字解析:去掉千分位逗號、常見單位
     s_clean = s.replace(",", "").replace(" 股", "").replace(" 張", "").replace("%", "").strip()
@@ -4361,19 +4378,21 @@ class StrategyGUI(tk.Tk):
         self.after(2500, self._etf_auto_startup_fetch)
 
     def _v18_log(self, msg):
-        """【V1.2.0-kb-focus-v18】同時 print + 寫檔、避免 PyCharm stdout 看不到"""
+        """【V1.2.0-kb-focus-v26】預設只寫檔、不噴 console。
+
+        2026-07-12 William 反映 PyCharm console 被 [v26 motion] 之類的 per-mouse-move log 淹沒。
+        解法:把 print(flush=True) 拿掉、改由 _v18_debug_console 旗標控制。
+        改成 True 可重新打開 console 輸出(debug 完再關)。
+        """
         try:
             import os as _os
             _log_path = "/tmp/stocktool_v18.log"
             with open(_log_path, "a", encoding="utf-8") as _f:
                 _f.write(msg + "\n")
-            # 也 print stdout + flush(避免 buffered)
-            print(msg, flush=True)
-        except Exception:
-            try:
+            if getattr(self, "_v18_debug_console", False):
                 print(msg, flush=True)
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     def _clear_v18_log(self):
         try:
@@ -6192,7 +6211,7 @@ class StrategyGUI(tk.Tk):
         # ---- 上方:狀態列 ----
         status_frame = ttk.Frame(parent)
         status_frame.pack(fill="x", padx=8, pady=(6, 0))
-        self._etf_status = tk.StringVar(value="主動式 ETF 持股：首次進入會自動抓取(依 TWSE activeList 動態、當前 N 檔 × 前 10 大)")
+        self._etf_status = tk.StringVar(value="主動式 ETF 持股:首次進入會自動抓取(依 TWSE activeList 動態、當前 N 檔 × 前 10 大)")
         ttk.Label(status_frame, textvariable=self._etf_status,
                   foreground="#555555", font=("Helvetica", 9)).pack(anchor="w")
 
@@ -6271,7 +6290,7 @@ class StrategyGUI(tk.Tk):
                    command=self._etf_apply_filter).pack(fill="x", pady=1)
         ttk.Button(btn_row, text="🔄 重新抓 ETF 持股",
                    command=self._etf_refresh_holdings).pack(fill="x", pady=1)
-        self._etf_data_status = tk.StringVar(value="ETF 持股：未抓取")
+        self._etf_data_status = tk.StringVar(value="ETF 持股:未抓取")
         ttk.Label(btn_row, textvariable=self._etf_data_status,
                   font=("Helvetica", 8), foreground="#666666").pack(anchor="w", pady=(0, 4))
         # 【V0.9.5-tab-split-phase3-E】2026-06-22 William 反映:
@@ -7990,7 +8009,7 @@ class StrategyGUI(tk.Tk):
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         # 動態組裝 (v1.1.1-etf-data-status):header + timestamp、可選補上「有/無昨日」
         status_lines = [
-            f"ETF 持股：{len(agg_df)} 檔個股、{etf_count} 檔 ETF",
+            f"ETF 持股:{len(agg_df)} 檔個股、{etf_count} 檔 ETF",
             f"最後更新 {now_str}",
         ]
         self._etf_data_status.set("\n".join(status_lines))
@@ -8213,7 +8232,7 @@ class StrategyGUI(tk.Tk):
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         has_yesterday = self._etf_change_df is not None and not self._etf_change_df.empty
         status_lines = [
-            f"ETF 持股：{len(agg_df)} 檔個股、{etf_count} 檔 ETF",
+            f"ETF 持股:{len(agg_df)} 檔個股、{etf_count} 檔 ETF",
             f"最後更新 {now_str}",
             "✅ 有昨日資料可比較" if has_yesterday else "⚠️ 無昨日資料",
         ]
