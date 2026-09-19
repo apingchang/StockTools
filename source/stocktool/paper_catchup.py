@@ -171,9 +171,10 @@ def _get_historical_prices(
                     rs = gain / loss
                     rsi = round(100.0 - (100.0 / (1.0 + rs)), 1)
 
+            stock_name = pt.get_stock_name(code) or str(r.get("Name", code))
             out[code] = {
                 "code": code,
-                "name": str(r.get("Name", code)),
+                "name": stock_name,
                 "price": price,
                 "rsi": rsi,
                 "ma20_slope": ma20_slope,

@@ -1,10 +1,17 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.2-paper-rollback (2026-09-19 19:40:00)          ║
+║  台灣股市量化選股系統 v1.2.3-paper-stock-names (2026-09-19 20:15:00)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.2-paper-rollback
-最後更新: 2026-09-19 19:39 (Asia/Taipei)
+Version: v1.2.3-paper-stock-names
+最後更新: 2026-09-19 20:13 (Asia/Taipei)
+
+【v1.2.3-paper-stock-names 變更紀錄】2026-09-19 20:15:00
+1. 【模擬買賣股票中文名稱顯示修復】：
+   - 修正模擬買賣在持倉清單與買賣紀錄中，股票名稱錯誤顯示為代號數字（如 2344, 2408）之問題。
+   - 建立全域股票名稱對照機制（`get_stock_names_map` / `get_stock_name`），整合本地 2,390 檔股票快取（price.xlsx）與 etf_history.db。
+   - 在 `paper_catchup`、`paper_engine` 與 `tab_paper` 中全面注入中文名稱解析，並在 UI Treeview 顯示時提供自動 fallback 保障。
+   - 新增 `repair_paper_stock_names()`，於 App 啟動初始化時自動修復既有資料庫中被記錄成代號之歷史持倉與交易。
 
 【v1.2.2-paper-rollback 變更紀錄】2026-09-19 19:40:00
 1. 【模擬買賣回推一日與回推 N 日功能 (Backward Time Travel)】：

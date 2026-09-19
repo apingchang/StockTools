@@ -143,6 +143,10 @@ def init_paper_trading_db(db_path: Optional[str] = None):
     with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         conn.executescript(PAPER_TRADING_SCHEMA)
         conn.commit()
+    try:
+        repair_paper_stock_names(db_path)
+    except Exception:
+        pass
 
 
 # ==========================================================
@@ -539,6 +543,8 @@ def rollback_portfolio(
             action = r["action"]
             code = r["stock_code"]
             name = r["stock_name"]
+            if not name or name == code:
+                name = get_stock_name(code) or name or code
             shares = float(r["shares"] or 0)
             amount = float(r["amount"] or 0)
             fee = float(r["fee"] or 0)
@@ -623,3 +629,118 @@ def rollback_portfolio_by_days(
 
     del_trades, del_snaps = rollback_portfolio(db_path, portfolio_id, target_date)
     return target_date, del_trades, del_snaps
+
+
+# ==========================================================
+# 股票名稱對照表 (Stock Name Mapping)
+# ==========================================================
+
+_STOCK_NAMES_CACHE: Optional[Dict[str, str]] = None
+
+
+def get_stock_names_map() -> Dict[str, str]:
+    """
+    載入股票代號與名稱對照表（快取於記憶體）：
+    1. 優先從 price.xlsx 載入 (含 2,300+ 檔完整名稱)
+    2. 從 etf_history.db (etf_holding_history) 補齊
+    """
+    global _STOCK_NAMES_CACHE
+    if _STOCK_NAMES_CACHE is not None:
+        return _STOCK_NAMES_CACHE
+
+    res: Dict[str, str] = {}
+    import os
+    from stocktool.config import get_data_path
+
+    candidates = [
+        "source/cache/price.xlsx",
+        "cache/price.xlsx",
+        get_data_path("cache/price.xlsx"),
+        os.path.expanduser("~/.local/share/stocktool/cache/price.xlsx"),
+        "dist/cache/price.xlsx",
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            try:
+                df = pd.read_excel(p)
+                code_col = None
+                name_col = None
+                for c in df.columns:
+                    sc = str(c).strip()
+                    if sc in ("股票代號", "code", "stock_id", "證券代號"):
+                        code_col = c
+                    if sc in ("公司名稱_來源", "股票名稱", "名稱", "證券名稱", "name"):
+                        name_col = c
+                if code_col and name_col:
+                    for _, row in df.iterrows():
+                        raw_c = str(row[code_col]).strip()
+                        if raw_c.endswith(".0"):
+                            raw_c = raw_c[:-2]
+                        raw_n = str(row[name_col]).strip()
+                        if raw_c and raw_n and raw_n != "nan" and raw_n != raw_c:
+                            res[raw_c] = raw_n
+                if res:
+                    break
+            except Exception:
+                continue
+
+    etf_dbs = [
+        get_data_path("etf_history.db"),
+        "source/etf_history.db",
+        "etf_history.db",
+        os.path.expanduser("~/.local/share/stocktool/etf_history.db"),
+    ]
+    for db in etf_dbs:
+        if os.path.exists(db):
+            try:
+                with sqlite3.connect(db) as conn:
+                    rows = conn.execute(
+                        "SELECT DISTINCT stock_code, stock_name FROM etf_holding_history WHERE stock_name IS NOT NULL"
+                    ).fetchall()
+                    for code, name in rows:
+                        code_str = str(code).strip()
+                        name_str = str(name).strip()
+                        if code_str and name_str and code_str not in res and name_str != code_str:
+                            res[code_str] = name_str
+            except Exception:
+                continue
+
+    _STOCK_NAMES_CACHE = res
+    return _STOCK_NAMES_CACHE
+
+
+def get_stock_name(stock_code: str) -> Optional[str]:
+    """依股票代號取得中文簡稱，查無對照則回傳 None"""
+    if not stock_code:
+        return None
+    code_str = str(stock_code).strip()
+    if code_str.endswith(".0"):
+        code_str = code_str[:-2]
+    name_map = get_stock_names_map()
+    return name_map.get(code_str)
+
+
+def repair_paper_stock_names(db_path: Optional[str] = None) -> int:
+    """修復資料庫中 stock_name 為代號數字或為空的舊資料"""
+    name_map = get_stock_names_map()
+    if not name_map:
+        return 0
+
+    resolved_db = _resolve_db_path(db_path)
+    total_fixed = 0
+    with sqlite3.connect(resolved_db) as conn:
+        for code, name in name_map.items():
+            cur = conn.execute(
+                """UPDATE sim_holdings SET stock_name = ?
+                   WHERE stock_code = ? AND (stock_name = stock_code OR stock_name IS NULL OR stock_name = '')""",
+                (name, code)
+            )
+            total_fixed += cur.rowcount
+            cur2 = conn.execute(
+                """UPDATE sim_trades SET stock_name = ?
+                   WHERE stock_code = ? AND (stock_name = stock_code OR stock_name IS NULL OR stock_name = '')""",
+                (name, code)
+            )
+            total_fixed += cur2.rowcount
+        conn.commit()
+    return total_fixed

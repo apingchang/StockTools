@@ -541,8 +541,11 @@ class PaperTradingTab:
             value = h.shares * latest_price
             profit_pct = (latest_price - h.avg_cost) / h.avg_cost * 100 if h.avg_cost else 0
             days = (datetime.now() - datetime.strptime(h.entry_date, "%Y-%m-%d")).days
+            stock_name = h.stock_name
+            if not stock_name or stock_name == h.stock_code:
+                stock_name = pt.get_stock_name(h.stock_code) or stock_name or "-"
             self.holdings_tree.insert("", "end", values=(
-                h.stock_code, h.stock_name or "-",
+                h.stock_code, stock_name,
                 f"{h.shares:,.0f}", f"{h.avg_cost:.2f}", f"{latest_price:.2f}",
                 f"{value:,.0f}", f"{profit_pct:+.1f}%",
                 days, h.entry_reason or "-"
@@ -557,8 +560,11 @@ class PaperTradingTab:
         for t in trades:
             action_icon = "🟢 買" if t.action == "BUY" else "🔴 賣"
             score = f"{t.signal_score:.0f}" if t.signal_score is not None else "-"
+            stock_name = t.stock_name
+            if not stock_name or stock_name == t.stock_code:
+                stock_name = pt.get_stock_name(t.stock_code) or stock_name or "-"
             self.trades_tree.insert("", "end", values=(
-                t.trade_date, action_icon, t.stock_code, t.stock_name or "-",
+                t.trade_date, action_icon, t.stock_code, stock_name,
                 f"{t.shares:,.0f}", f"{t.price:.2f}", f"{t.amount:,.0f}",
                 f"{t.fee:.0f}", f"{t.tax:.0f}", score,
                 (t.reasoning or "-")[:80]
@@ -869,9 +875,12 @@ class PaperTradingTab:
                 price = float(r.get("close") or r.get("price") or 0)
                 if price <= 0:
                     continue
+                raw_name = str(r.get("name") or "").strip()
+                if not raw_name or raw_name == code:
+                    raw_name = pt.get_stock_name(code) or code
                 out[code] = {
                     "code": code,
-                    "name": str(r.get("name", code)),
+                    "name": raw_name,
                     "price": price,
                     "pe": r.get("pe"),
                     "eps": r.get("eps"),

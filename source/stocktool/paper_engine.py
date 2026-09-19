@@ -33,7 +33,7 @@ from .paper_trading import (
     PaperPortfolio, SimHolding, SimTrade,
     get_portfolio, list_holdings, upsert_holding, delete_holding,
     insert_trade, list_trades, upsert_daily_snapshot, get_current_cash,
-    calc_buy_cost, calc_sell_cost
+    calc_buy_cost, calc_sell_cost, get_stock_name
 )
 
 
@@ -71,7 +71,11 @@ def calc_simple_signal(stock_info: Dict[str, Any], p: PaperPortfolio) -> StockSi
 
     回傳 StockSignal（score 0~100）
     """
-    sig = StockSignal(code=stock_info.get("code", ""), name=stock_info.get("name", ""))
+    code = stock_info.get("code", "")
+    name = stock_info.get("name", "")
+    if not name or name == code:
+        name = get_stock_name(code) or code
+    sig = StockSignal(code=code, name=name)
     sig.price = float(stock_info.get("price") or 0)
     sig.pe = stock_info.get("pe")
     sig.eps = stock_info.get("eps")
@@ -331,12 +335,15 @@ def evaluate_portfolio_one_day(
             cash_after = cash - amount - total_cost
             reasoning_parts = sig.reasoning_parts or []
             reasoning = f"訊號 {sig.score:.0f} >= {p.buy_score_threshold}; " + "; ".join(reasoning_parts)
+            t_name = sig.name or info.get("name", "")
+            if not t_name or t_name == sig.code:
+                t_name = get_stock_name(sig.code) or sig.code
             trade = SimTrade(
                 portfolio_id=portfolio_id,
                 trade_date=trade_date,
                 action="BUY",
                 stock_code=sig.code,
-                stock_name=sig.name or info.get("name", ""),
+                stock_name=t_name,
                 shares=shares,
                 price=price,
                 fee=fee, tax=tax,
@@ -639,12 +646,15 @@ def evaluate_ai_portfolio_one_day(
                 continue
             cash_after = cash - amount - total_cost
 
+            t_name = info.get("name", "")
+            if not t_name or t_name == code:
+                t_name = get_stock_name(code) or code
             trade = SimTrade(
                 portfolio_id=portfolio_id,
                 trade_date=trade_date,
                 action="BUY",
                 stock_code=code,
-                stock_name=info.get("name", ""),
+                stock_name=t_name,
                 shares=shares,
                 price=price,
                 fee=fee, tax=tax,
