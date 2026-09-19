@@ -281,3 +281,109 @@ class PortfolioEditorDialog:
         """Modal 顯示、回傳 PaperPortfolio 或 None"""
         self.win.wait_window()
         return self.result
+
+
+class RollbackDaysDialog:
+    """回推 N 日 / 指定日期對話框"""
+
+    def __init__(self, parent, portfolio_name: str, simulated_dates: list[str]):
+        self.parent = parent
+        self.portfolio_name = portfolio_name
+        self.dates = simulated_dates  # 由小到大排列
+        self.result: Optional[Tuple[Optional[str], int]] = None  # (target_date, days)
+
+        self.win = tk.Toplevel(parent)
+        self.win.title(f"⏪ 回推交易日 — {portfolio_name}")
+        self.win.geometry("450x330")
+        self.win.transient(parent)
+        self.win.grab_set()
+
+        self._build()
+
+    def _build(self):
+        pad = 10
+        frame = ttk.Frame(self.win, padding=pad)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(frame, text=f"組合：{self.portfolio_name}", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 4))
+
+        info_text = f"目前已模擬：{len(self.dates)} 個交易日 ({self.dates[0]} ~ {self.dates[-1]})"
+        ttk.Label(frame, text=info_text, foreground="gray").pack(anchor="w", pady=(0, 10))
+
+        # 選項框架
+        opt_frame = ttk.LabelFrame(frame, text="設定回退目標", padding=10)
+        opt_frame.pack(fill="x", pady=(0, 10))
+
+        ttk.Label(opt_frame, text="回推至日期：").grid(row=0, column=0, sticky="w", pady=6)
+
+        # 產生選單項目 (倒序排列，預設回退 1 日)
+        self.options = []
+        for i in range(1, len(self.dates)):
+            target = self.dates[-(i + 1)]
+            self.options.append((f"{target}（回推 {i} 日）", target, i))
+        self.options.append(("重設為初始狀態（回推全部）", None, len(self.dates)))
+
+        combo_labels = [opt[0] for opt in self.options]
+        self.combo_var = tk.StringVar(value=combo_labels[0])
+        self.combo = ttk.Combobox(opt_frame, textvariable=self.combo_var, values=combo_labels, state="readonly", width=28)
+        self.combo.grid(row=0, column=1, sticky="ew", pady=6, padx=4)
+        self.combo.bind("<<ComboboxSelected>>", self._on_combo_change)
+
+        ttk.Label(opt_frame, text="或回推天數：").grid(row=1, column=0, sticky="w", pady=6)
+        self.days_var = tk.IntVar(value=1)
+        self.spin_days = ttk.Spinbox(opt_frame, from_=1, to=len(self.dates), textvariable=self.days_var, width=8, command=self._on_days_change)
+        self.spin_days.grid(row=1, column=1, sticky="w", pady=6, padx=4)
+        self.spin_days.bind("<KeyRelease>", lambda e: self._on_days_change())
+
+        opt_frame.columnconfigure(1, weight=1)
+
+        # 警告說明
+        warn_lbl = ttk.Label(
+            frame,
+            text="⚠️ 注意：回推後，目標日期之後的交易紀錄與快照\n將會永久清除，並將持倉與現金還原至該日狀態。",
+            foreground="#b22222", font=("Segoe UI", 9)
+        )
+        warn_lbl.pack(fill="x", pady=(0, 12))
+
+        # 按鈕列
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill="x", side="bottom")
+        ttk.Button(btn_frame, text="❌ 取消", command=self.win.destroy).pack(side="right", padx=4)
+        ttk.Button(btn_frame, text="✅ 確定回推", command=self._on_confirm).pack(side="right", padx=4)
+
+    def _on_combo_change(self, event=None):
+        idx = self.combo.current()
+        if 0 <= idx < len(self.options):
+            days = self.options[idx][2]
+            self.days_var.set(days)
+
+    def _on_days_change(self):
+        try:
+            d = self.days_var.get()
+            d = max(1, min(len(self.dates), d))
+            for opt in self.options:
+                if opt[2] == d:
+                    self.combo_var.set(opt[0])
+                    break
+        except Exception:
+            pass
+
+    def _on_confirm(self):
+        try:
+            d = self.days_var.get()
+            d = max(1, min(len(self.dates), d))
+        except Exception:
+            d = 1
+
+        target_date = None
+        for opt in self.options:
+            if opt[2] == d:
+                target_date = opt[1]
+                break
+
+        self.result = (target_date, d)
+        self.win.destroy()
+
+    def show(self) -> Optional[Tuple[Optional[str], int]]:
+        self.win.wait_window()
+        return self.result

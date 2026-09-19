@@ -469,3 +469,157 @@ def calc_sell_cost(shares: float, price: float) -> Tuple[float, float, float]:
     fee = max(20.0, shares * price * FEE_RATE * BROKER_DISCOUNT)
     tax = shares * price * TAX_RATE_SELL
     return fee, tax, fee + tax
+
+
+# ==========================================================
+# 時間回推 (Rollback)
+# ==========================================================
+
+def get_portfolio_simulated_dates(db_path: Optional[str], portfolio_id: int) -> List[str]:
+    """取得該組合所有已模擬交易日（按日期由小到大排序）"""
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
+        rows = conn.execute(
+            """SELECT DISTINCT trade_date FROM (
+                   SELECT trade_date FROM sim_daily_snapshot WHERE portfolio_id = ?
+                   UNION
+                   SELECT trade_date FROM sim_trades WHERE portfolio_id = ?
+               ) ORDER BY trade_date ASC""",
+            (portfolio_id, portfolio_id)
+        ).fetchall()
+        return [r[0] for r in rows if r[0]]
+
+
+def rollback_portfolio(
+    db_path: Optional[str],
+    portfolio_id: int,
+    target_date: Optional[str],
+) -> Tuple[int, int]:
+    """
+    將投資組合回推至 target_date (含當日)。
+    - 若 target_date 為 None：完全重置組合回初始狀態（清除所有交易、快照、持倉，last_run_date 設為 None）。
+    - 若 target_date 為指定日期字串 (YYYY-MM-DD)：
+      1. 刪除 trade_date > target_date 的 sim_trades。
+      2. 刪除 trade_date > target_date 的 sim_daily_snapshot。
+      3. 依據所有 trade_date <= target_date 的交易紀錄重播重建 sim_holdings。
+      4. 更新 sim_portfolios.last_run_date = target_date。
+    回傳：(deleted_trades_count, deleted_snapshots_count)
+    """
+    resolved_db = _resolve_db_path(db_path)
+    with sqlite3.connect(resolved_db) as conn:
+        if target_date is None:
+            del_trades = conn.execute("DELETE FROM sim_trades WHERE portfolio_id = ?", (portfolio_id,)).rowcount
+            del_snaps = conn.execute("DELETE FROM sim_daily_snapshot WHERE portfolio_id = ?", (portfolio_id,)).rowcount
+            conn.execute("DELETE FROM sim_holdings WHERE portfolio_id = ?", (portfolio_id,))
+            conn.execute("UPDATE sim_portfolios SET last_run_date = NULL WHERE id = ?", (portfolio_id,))
+            conn.commit()
+            return del_trades, del_snaps
+
+        # 1. 刪除 target_date 之後的紀錄
+        del_trades = conn.execute(
+            "DELETE FROM sim_trades WHERE portfolio_id = ? AND trade_date > ?",
+            (portfolio_id, target_date)
+        ).rowcount
+        del_snaps = conn.execute(
+            "DELETE FROM sim_daily_snapshot WHERE portfolio_id = ? AND trade_date > ?",
+            (portfolio_id, target_date)
+        ).rowcount
+
+        # 2. 查詢保留下來的所有歷史交易 (<= target_date)
+        conn.row_factory = sqlite3.Row
+        trades_rows = conn.execute(
+            """SELECT * FROM sim_trades
+               WHERE portfolio_id = ? AND trade_date <= ?
+               ORDER BY trade_date ASC, id ASC""",
+            (portfolio_id, target_date)
+        ).fetchall()
+
+        # 3. 重播重建持倉
+        holdings: Dict[str, SimHolding] = {}
+        for r in trades_rows:
+            action = r["action"]
+            code = r["stock_code"]
+            name = r["stock_name"]
+            shares = float(r["shares"] or 0)
+            amount = float(r["amount"] or 0)
+            fee = float(r["fee"] or 0)
+            tax = float(r["tax"] or 0)
+            trade_date = r["trade_date"]
+            reasoning = r["reasoning"]
+            signal_score = r["signal_score"]
+
+            if action == "BUY":
+                total_cost = amount + fee + tax
+                if code not in holdings:
+                    holdings[code] = SimHolding(
+                        portfolio_id=portfolio_id,
+                        stock_code=code,
+                        stock_name=name,
+                        shares=shares,
+                        avg_cost=total_cost / shares if shares > 0 else 0.0,
+                        entry_date=trade_date,
+                        entry_reason=reasoning,
+                        entry_score=signal_score,
+                        last_buy_date=trade_date,
+                        add_count=0,
+                    )
+                else:
+                    h = holdings[code]
+                    old_cost = h.shares * h.avg_cost
+                    new_shares = h.shares + shares
+                    new_avg = (old_cost + total_cost) / new_shares if new_shares > 0 else 0.0
+                    h.shares = new_shares
+                    h.avg_cost = new_avg
+                    h.last_buy_date = trade_date
+                    h.add_count += 1
+            elif action == "SELL":
+                if code in holdings:
+                    h = holdings[code]
+                    if shares >= h.shares:
+                        del holdings[code]
+                    else:
+                        h.shares -= shares
+
+        # 4. 更新持倉資料表
+        conn.execute("DELETE FROM sim_holdings WHERE portfolio_id = ?", (portfolio_id,))
+        for h in holdings.values():
+            conn.execute(
+                """INSERT INTO sim_holdings
+                   (portfolio_id, stock_code, stock_name, shares, avg_cost,
+                    entry_date, entry_reason, entry_score, last_buy_date, add_count)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (h.portfolio_id, h.stock_code, h.stock_name, h.shares, h.avg_cost,
+                 h.entry_date, h.entry_reason, h.entry_score, h.last_buy_date, h.add_count)
+            )
+
+        # 5. 更新 last_run_date
+        conn.execute(
+            "UPDATE sim_portfolios SET last_run_date = ? WHERE id = ?",
+            (target_date, portfolio_id)
+        )
+        conn.commit()
+
+        return del_trades, del_snaps
+
+
+def rollback_portfolio_by_days(
+    db_path: Optional[str],
+    portfolio_id: int,
+    days: int = 1,
+) -> Tuple[Optional[str], int, int]:
+    """
+    依據已模擬的交易天數回推：
+    - days=1: 回退 1 個交易日（target_date 為倒數第 2 個模擬日）
+    - days>=len(dates): 全部重置（target_date 為 None）
+    回傳：(target_date, deleted_trades_count, deleted_snapshots_count)
+    """
+    dates = get_portfolio_simulated_dates(db_path, portfolio_id)
+    if not dates:
+        return None, 0, 0
+
+    if days >= len(dates):
+        target_date = None
+    else:
+        target_date = dates[-(days + 1)]
+
+    del_trades, del_snaps = rollback_portfolio(db_path, portfolio_id, target_date)
+    return target_date, del_trades, del_snaps

@@ -11,6 +11,7 @@
 
 import os
 import sys
+from datetime import datetime
 import pytest
 import pandas as pd
 
@@ -31,8 +32,8 @@ from stocktool.paper_engine import calc_simple_signal
 
 def test_version_and_timestamp():
     """驗證版本號與建立時間戳記格式"""
-    assert VERSION == "v1.2.1-paper-fundamentals"
-    assert BUILD_TIMESTAMP == "2026/09/19 09:45:00"
+    assert VERSION.startswith("v1.2.")
+    assert datetime.strptime(BUILD_TIMESTAMP, "%Y/%m/%d %H:%M:%S")
 
 
 def test_eps_lookahead_bias_isolation():

@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
 import pandas as pd
@@ -23,7 +23,7 @@ import pandas as pd
 from .. import paper_trading as pt
 from .. import paper_excel
 from .. import paper_engine as pe
-from .dialog_paper import PortfolioEditorDialog
+from .dialog_paper import PortfolioEditorDialog, RollbackDaysDialog
 
 
 class PaperTradingTab:
@@ -238,15 +238,20 @@ class PaperTradingTab:
 
         btn_frame = ttk.Frame(parent)
         btn_frame.pack(fill="x", pady=4)
-        # === 2026-08-20: 2x2 grid 排列 (避免按鈕擠 1 行太寬) ===
         btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
         # Row 0: 資料相關 (refresh + export)
         ttk.Button(btn_frame, text="🔄 重新整理", command=self._refresh_trades).grid(row=0, column=0, padx=4, pady=2, sticky="ew")
         ttk.Button(btn_frame, text="💾 匯出 Excel", command=self._export_trades_excel).grid(row=0, column=1, padx=4, pady=2, sticky="ew")
-        # Row 1: 執行控制 (補跑) - 從左邊搬來 (左邊 session area 太窄)
+        # Row 1: 執行控制 (推進 / 補跑)
         ttk.Button(btn_frame, text="▶ 推進一天", command=self._on_advance_one_day).grid(row=1, column=0, padx=4, pady=2, sticky="ew")
         ttk.Button(btn_frame, text="⏩ 補跑到今天", command=self._on_catch_up_to_today).grid(row=1, column=1, padx=4, pady=2, sticky="ew")
+        # Row 2: 時間回推 (回推一日 / 回推多日)
+        ttk.Button(btn_frame, text="◀ 回推一日", command=self._on_rollback_one_day).grid(row=2, column=0, padx=4, pady=2, sticky="ew")
+        ttk.Button(btn_frame, text="⏪ 回推 N 日...", command=self._on_rollback_n_days).grid(row=2, column=1, padx=4, pady=2, sticky="ew")
+
+        # 右鍵選單：回推至指定交易日
+        self._build_trades_context_menu()
 
     def _build_chart_tab(self, parent):
         """權益曲線（matplotlib）"""
@@ -612,8 +617,129 @@ class PaperTradingTab:
         self._log("🗑 已刪除組合")
 
     # ==========================================================
-    # 執行（推進一天、補跑）
+    # 執行（推進一天、補跑、回推）
     # ==========================================================
+
+    def _build_trades_context_menu(self):
+        self._trades_menu = tk.Menu(self.trades_tree, tearoff=0)
+        self._trades_menu.add_command(label="⏪ 回推至此交易日", command=self._on_rollback_to_selected_trade)
+        self.trades_tree.bind("<Button-3>", self._on_trades_right_click)
+        self.trades_tree.bind("<Button-2>", self._on_trades_right_click)
+
+    def _on_trades_right_click(self, event):
+        item = self.trades_tree.identify_row(event.y)
+        if item:
+            self.trades_tree.selection_set(item)
+            try:
+                self._trades_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                self._trades_menu.grab_release()
+
+    def _on_rollback_to_selected_trade(self):
+        if not self.selected_portfolio_id:
+            return
+        sel = self.trades_tree.selection()
+        if not sel:
+            return
+        vals = self.trades_tree.item(sel[0], "values")
+        if not vals:
+            return
+        target_date = vals[0]
+        self._confirm_and_rollback_to_date(target_date)
+
+    def _confirm_and_rollback_to_date(self, target_date: str):
+        if not self.selected_portfolio_id:
+            return
+        dates = pt.get_portfolio_simulated_dates(self.db_path, self.selected_portfolio_id)
+        if not dates:
+            messagebox.showinfo("提醒", "目前沒有可回推的模擬紀錄")
+            return
+        if target_date >= dates[-1]:
+            messagebox.showinfo("提醒", f"交易日 {target_date} 已是最新模擬日，無需回推。")
+            return
+
+        p = pt.get_portfolio(self.db_path, self.selected_portfolio_id)
+        name = p.name if p else f"組合 {self.selected_portfolio_id}"
+        msg = (
+            f"確定要將組合「{name}」回推至交易日 {target_date} 嗎？\n\n"
+            f"• 目前最新模擬日：{dates[-1]}\n"
+            f"• 回推後最新日期：{target_date}\n\n"
+            f"⚠️ 該日期之後的所有買賣紀錄與資產快照將被清除，持倉與現金將還原至該日狀態。"
+        )
+        if not messagebox.askyesno("確認回推交易日", msg):
+            return
+
+        del_trades, del_snaps = pt.rollback_portfolio(self.db_path, self.selected_portfolio_id, target_date)
+        self._log(f"⏪ 已成功回推至 {target_date}（清除 {del_trades} 筆交易、{del_snaps} 筆快照）")
+        self._refresh_portfolio_list()
+        self._refresh_detail()
+
+    def _on_rollback_one_day(self):
+        if not self.selected_portfolio_id:
+            messagebox.showinfo("提醒", "請先選一個組合")
+            return
+        dates = pt.get_portfolio_simulated_dates(self.db_path, self.selected_portfolio_id)
+        if not dates:
+            messagebox.showinfo("提醒", "目前沒有可回推的模擬紀錄")
+            return
+
+        p = pt.get_portfolio(self.db_path, self.selected_portfolio_id)
+        name = p.name if p else f"組合 {self.selected_portfolio_id}"
+
+        if len(dates) == 1:
+            target_date = None
+            target_str = "重設為初始狀態（清除首日模擬紀錄）"
+        else:
+            target_date = dates[-2]
+            target_str = target_date
+
+        msg = (
+            f"確定要將組合「{name}」回推 1 個交易日嗎？\n\n"
+            f"• 目前最新模擬日：{dates[-1]}\n"
+            f"• 回推後最新日期：{target_str}\n\n"
+            f"⚠️ 該日期之後的所有買賣紀錄與資產快照將被清除，持倉與現金將還原至該日狀態。"
+        )
+        if not messagebox.askyesno("確認回推一日", msg):
+            return
+
+        del_trades, del_snaps = pt.rollback_portfolio(self.db_path, self.selected_portfolio_id, target_date)
+        self._log(f"⏪ 已成功回推 1 日至 {target_str}（清除 {del_trades} 筆交易、{del_snaps} 筆快照）")
+        self._refresh_portfolio_list()
+        self._refresh_detail()
+
+    def _on_rollback_n_days(self):
+        if not self.selected_portfolio_id:
+            messagebox.showinfo("提醒", "請先選一個組合")
+            return
+        dates = pt.get_portfolio_simulated_dates(self.db_path, self.selected_portfolio_id)
+        if not dates:
+            messagebox.showinfo("提醒", "目前沒有可回推的模擬紀錄")
+            return
+
+        p = pt.get_portfolio(self.db_path, self.selected_portfolio_id)
+        name = p.name if p else f"組合 {self.selected_portfolio_id}"
+
+        dlg = RollbackDaysDialog(self.frame, name, dates)
+        res = dlg.show()
+        if res is None:
+            return
+
+        target_date, days = res
+        target_str = target_date if target_date else "初始狀態"
+
+        msg = (
+            f"確定要將組合「{name}」回推 {days} 個交易日嗎？\n\n"
+            f"• 目前最新模擬日：{dates[-1]}\n"
+            f"• 回推後最新日期：{target_str}\n\n"
+            f"⚠️ 該日期之後的所有買賣紀錄與資產快照將被清除，持倉與現金將還原至該日狀態。"
+        )
+        if not messagebox.askyesno("確認回推", msg):
+            return
+
+        del_trades, del_snaps = pt.rollback_portfolio(self.db_path, self.selected_portfolio_id, target_date)
+        self._log(f"⏪ 已成功回推 {days} 日至 {target_str}（清除 {del_trades} 筆交易、{del_snaps} 筆快照）")
+        self._refresh_portfolio_list()
+        self._refresh_detail()
 
     def _on_advance_one_day(self):
         if not self.selected_portfolio_id:
@@ -641,13 +767,44 @@ class PaperTradingTab:
             messagebox.showerror("補跑失敗", str(e))
 
     def _advance_one_day_for(self, portfolio_id: int):
-        """對一個組合推進一天（用「當前可得價」模擬）"""
+        """對一個組合推進一天（支援歷史日 K 推進與當日即時報價模擬）"""
         p = pt.get_portfolio(self.db_path, portfolio_id)
         if not p or p.status != "active":
             self._log(f"⏭ 組合 {portfolio_id} 狀態為 {p.status if p else 'N/A'}、跳過")
             return
 
         today = datetime.now().strftime("%Y-%m-%d")
+        last_date = p.last_run_date
+        if last_date and " " in last_date:
+            last_date = last_date.split(" ")[0]
+
+        # 若最後執行日小於今天，嘗試推進至下一個歷史交易日
+        if last_date and last_date < today:
+            from ..paper_catchup import _list_trade_dates, catch_up_portfolio
+            start_dt = datetime.strptime(last_date, "%Y-%m-%d") + timedelta(days=1)
+            start_str = start_dt.strftime("%Y-%m-%d")
+            upcoming_dates = _list_trade_dates(start_str, today)
+            if upcoming_dates:
+                next_date = upcoming_dates[0]
+                if next_date < today:
+                    self._log(f"▶ 推進一天：{next_date} (歷史推進)...")
+                    session = getattr(self.app, "session", None)
+                    cfg = getattr(self.app, "cfg", None)
+                    try:
+                        result = catch_up_portfolio(
+                            self.db_path, portfolio_id, end_date=next_date,
+                            session=session, cfg=cfg, logger=self._logger()
+                        )
+                        self._log(f"✅ 推進至 {next_date}：BUY {result.total_buys} / SELL {result.total_sells}")
+                        self._refresh_detail()
+                        return
+                    except Exception as e:
+                        self._log(f"❌ 歷史推進失敗: {e}")
+                        messagebox.showerror("推進失敗", str(e))
+                        return
+        elif last_date and last_date >= today:
+            if not messagebox.askyesno("今日已執行", f"組合「{p.name}」今日 ({today}) 已經執行過模擬。\n是否要重新以最新報價評估當日決策？"):
+                return
 
         # 抓股票池 + 持股的價格（用既有 fetch_market 邏輯）
         all_codes = list(set((p.stock_pool or []) + [h.stock_code for h in pt.list_holdings(self.db_path, portfolio_id)]))
@@ -660,7 +817,7 @@ class PaperTradingTab:
         # 觸發引擎
         if p.strategy_mode == "ai_meta":
             # AI 模式：用 regime + AI 決策
-            regime = pe.detect_market_regime(None)  # 暫不傳歷史、給 sideways
+            regime = pe.detect_market_regime(None)
             self._log(f"[AI] 盤勢判定: {regime.description}")
             result = pe.evaluate_ai_portfolio_one_day(
                 self.db_path, portfolio_id, today, stock_data, regime, logger=self._logger(),
