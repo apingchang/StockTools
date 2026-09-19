@@ -36,7 +36,10 @@ class PaperScheduler:
 
     def __init__(self, app):
         self.app = app
-        self.db_path = "portfolio.db"
+        # 2026-08-19 改: 用 config.get_data_path() 統一 (跨 pycharm + .bin 一致)
+        # seed 已移到 StockTool.py _seed_data_files()
+        from stocktool.config import get_data_path
+        self.db_path = get_data_path("portfolio.db")
         self._job_id: Optional[str] = None
         self._last_auto_date: Optional[str] = None
 

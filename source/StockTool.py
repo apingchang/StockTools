@@ -1,10 +1,23 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  台灣股市量化選股系統 v1.2.0-paper-trading-kb-focus-v26 (2026-07-12 19:45) ║
+║  台灣股市量化選股系統 v1.2.1-paper-fundamentals (2026-09-19 09:45:00)       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 【版本資訊】
-Version: v1.2.0-paper-trading-kb-focus-v26
-最後更新: 2026-07-12 19:42 (Asia/Taipei)
+Version: v1.2.1-paper-fundamentals
+最後更新: 2026-09-19 19:13 (Asia/Taipei)
+
+【v1.2.1-paper-fundamentals 變更紀錄】2026-09-19 09:45:00
+1. 【模擬買賣基本面與技術面完整串接】：
+   - 解決模擬買賣在歷史補跑與日常推進時，因缺乏基本面數據導致評分卡在 50 分、無法突破 70 分買入門檻之問題。
+   - 歷史回測與補跑（paper_catchup._get_historical_prices）：
+     - 串接本地 2.7 萬筆 eps_history.db，依財報公告法規日防範未來資訊偏誤（Look-ahead bias），計算最新年化 EPS 與動態 PE。
+     - 串接本地 2 萬筆 dividend_history.db，計算當期現金股利與動態殖利率。
+     - 串接 cache/revenue.xlsx 注入當期營收 YoY (%)。
+     - 自 60 個月歷史日 K 線動態計算 14 日 RSI 與 MA20 斜率技術指標。
+   - 介面推進（tab_paper._fetch_stock_data）：同步呼叫 enrich_stock_fundamentals 注入當期完整基本面。
+2. 【視窗標題簡化 (Window Title)】：
+   - 簡化為乾淨且能直接辨識版本的修改時間格式：`StockTools - yyyy/mm/dd hh:mm:ss`（例如：`StockTools - 2026/09/19 09:45:00`）。
+3. 【版本紀錄規則】：每次修改版本時同步更新 StockTool.py 檔案標頭 Log 與時間戳記。
 
 Python 版本: 3.8+
 
@@ -3999,6 +4012,7 @@ from stocktool.config import (
     find_col,
     _is_market_hours,
     VERSION,
+    BUILD_TIMESTAMP,
     COLOR_PROFIT_POS,
     COLOR_PROFIT_NEG,
     COLOR_PROFIT_ZERO,
@@ -4315,9 +4329,38 @@ def _make_treeview_click_sort(tree, cols, skip_col=None, skip_cols=None):
 
 
 class StrategyGUI(tk.Tk):
+    def _seed_data_files(self):
+        """2026-08-19 新增: 第一次跑時把 .bin PYZ 內的 data files seed 到 user home.
+        後續都用 user home 內的 db, 跨 pycharm + .bin 一致.
+        """
+        import sys, os, shutil
+        mei = getattr(sys, "_MEIPASS", None)
+        if not mei:
+            return  # 開發模式 (pycharm), 用 source/ 的 db
+        from stocktool.config import get_data_dir
+        data_dir = get_data_dir()
+        seed_files = [
+            "dividend_history.db",
+            "eps_history.db",
+            "etf_history.db",
+            "portfolio.db",
+            "stocktool_config.json",
+        ]
+        for fname in seed_files:
+            src = os.path.join(mei, fname)
+            dst = os.path.join(data_dir, fname)
+            if os.path.exists(src) and not os.path.exists(dst):
+                try:
+                    shutil.copy2(src, dst)
+                except Exception as e:
+                    pass  # 不要讓 seed 失敗擋掉 GUI
+
+
     def __init__(self):
         super().__init__()
-        self.title(f"StockTool {VERSION} (Multi-Factor + Top10 Backtest + Portfolio + ETF + Paper Trading + goodinfo)")
+        # 2026-08-19: seed data files from .bin PYZ to user home (僅 .bin 第一次跑有效)
+        self._seed_data_files()
+        self.title(f"StockTools - {BUILD_TIMESTAMP}")
 
         self.log_queue = queue.Queue()
         self.logger = GuiLogger(self.log_queue)

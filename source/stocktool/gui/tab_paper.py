@@ -32,7 +32,8 @@ class PaperTradingTab:
     def __init__(self, parent_app, parent_frame):
         self.app = parent_app
         self.frame = parent_frame
-        self.db_path = "portfolio.db"
+        from stocktool.config import get_data_path
+        self.db_path = get_data_path("portfolio.db")
         self.selected_portfolio_id: Optional[int] = None
 
         # UI 元件參考
@@ -135,14 +136,8 @@ class PaperTradingTab:
         ttk.Button(op_frame, text="🗑 刪除", width=7, command=self._on_delete).pack(side="left", padx=1)
         ttk.Button(op_frame, text="🔄 重新整理", width=9, command=self._refresh_portfolio_list).pack(side="left", padx=1)
 
-        # === 執行控制 ===
-        exec_frame = ttk.LabelFrame(parent, text="▶ 執行控制", padding=6)
-        exec_frame.pack(fill="x", pady=(0, 6))
-
-        ttk.Button(exec_frame, text="▶ 推進一天（手動）",
-                   command=self._on_advance_one_day).pack(fill="x", pady=2)
-        ttk.Button(exec_frame, text="⏩ 補跑到今天",
-                   command=self._on_catch_up_to_today).pack(fill="x", pady=2)
+        # 2026-08-20: 執行控制按鈕已搬到右邊 trades tab btn_frame
+        # (左邊 session area 太窄、按鈕顯示不出來)
 
         # 狀態列
         self.status_label = ttk.Label(parent, text="就緒", foreground="gray",
@@ -243,8 +238,15 @@ class PaperTradingTab:
 
         btn_frame = ttk.Frame(parent)
         btn_frame.pack(fill="x", pady=4)
-        ttk.Button(btn_frame, text="🔄 重新整理", command=self._refresh_trades).pack(side="left", padx=4)
-        ttk.Button(btn_frame, text="💾 匯出 Excel", command=self._export_trades_excel).pack(side="left", padx=4)
+        # === 2026-08-20: 2x2 grid 排列 (避免按鈕擠 1 行太寬) ===
+        btn_frame.columnconfigure(0, weight=1)
+        btn_frame.columnconfigure(1, weight=1)
+        # Row 0: 資料相關 (refresh + export)
+        ttk.Button(btn_frame, text="🔄 重新整理", command=self._refresh_trades).grid(row=0, column=0, padx=4, pady=2, sticky="ew")
+        ttk.Button(btn_frame, text="💾 匯出 Excel", command=self._export_trades_excel).grid(row=0, column=1, padx=4, pady=2, sticky="ew")
+        # Row 1: 執行控制 (補跑) - 從左邊搬來 (左邊 session area 太窄)
+        ttk.Button(btn_frame, text="▶ 推進一天", command=self._on_advance_one_day).grid(row=1, column=0, padx=4, pady=2, sticky="ew")
+        ttk.Button(btn_frame, text="⏩ 補跑到今天", command=self._on_catch_up_to_today).grid(row=1, column=1, padx=4, pady=2, sticky="ew")
 
     def _build_chart_tab(self, parent):
         """權益曲線（matplotlib）"""
@@ -719,6 +721,12 @@ class PaperTradingTab:
                     "rev_yoy": r.get("rev_yoy"),
                     "yield_pct": r.get("yield_pct"),
                 }
+
+            if out:
+                from ..paper_catchup import enrich_stock_fundamentals
+                today = datetime.now().strftime("%Y-%m-%d")
+                eps_db = getattr(cfg, "eps_history_db", None) if cfg else None
+                out = enrich_stock_fundamentals(out, today, eps_db=eps_db)
         except Exception as e:
             self._log(f"⚠️ 抓股價失敗: {e}")
         return out

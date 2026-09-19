@@ -522,3 +522,166 @@ def _eps_history_stats(db_path: str) -> dict:
         "periods": periods,
         "latest": f"{latest[0]}Q{latest[1]} ({latest[2]}筆)" if latest else None,
     }
+
+
+def _resolve_eps_db_path(db_path: Optional[str] = None) -> str:
+    if db_path and os.path.exists(db_path):
+        return db_path
+    from .config import get_data_path
+    candidate = get_data_path("eps_history.db")
+    if os.path.exists(candidate):
+        return candidate
+    source_candidate = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "eps_history.db")
+    if os.path.exists(source_candidate):
+        return source_candidate
+    return db_path or candidate
+
+
+def _resolve_div_db_path(db_path: Optional[str] = None) -> str:
+    if db_path and os.path.exists(db_path):
+        return db_path
+    from .config import get_data_path
+    candidate = get_data_path("dividend_history.db")
+    if os.path.exists(candidate):
+        return candidate
+    source_candidate = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dividend_history.db")
+    if os.path.exists(source_candidate):
+        return source_candidate
+    return db_path or candidate
+
+
+def _query_latest_eps_for_date(
+    db_path: Optional[str],
+    codes: List[str],
+    as_of_date: str,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    查詢截至 as_of_date 當天市場公開可得之最新季報 EPS，並計算年化 EPS（TTM EPS）。
+    防未來資訊（Look-ahead bias）規則：
+      - 5/15 之後公開 Q1
+      - 8/15 之後公開 Q2
+      - 11/15 之後公開 Q3
+      - 3/31 之後公開前一年 Q4
+    回傳: {code: {"eps": float, "annualized_eps": float, "year": int, "quarter": int}}
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    if not codes or not as_of_date:
+        return out
+
+    path = _resolve_eps_db_path(db_path)
+    if not os.path.exists(path):
+        return out
+
+    try:
+        dt = datetime.strptime(as_of_date.split(" ")[0], "%Y-%m-%d")
+    except Exception:
+        return out
+
+    y, m, d = dt.year, dt.month, dt.day
+    if (m == 11 and d >= 15) or m > 11:
+        max_p = (y, 3)
+    elif (m == 8 and d >= 15) or m > 8:
+        max_p = (y, 2)
+    elif (m == 5 and d >= 15) or m > 5:
+        max_p = (y, 1)
+    elif (m == 3 and d >= 31) or m > 3:
+        max_p = (y - 1, 4)
+    else:
+        max_p = (y - 1, 3)
+    max_key = max_p[0] * 10 + max_p[1]
+
+    clean_codes = [str(c).strip() for c in codes if str(c).strip()]
+    if not clean_codes:
+        return out
+
+    with sqlite3.connect(path) as conn:
+        placeholders = ",".join("?" * len(clean_codes))
+        q = f"""
+            SELECT stock_id, year, quarter, eps
+            FROM eps_history
+            WHERE stock_id IN ({placeholders})
+              AND year >= 1900
+              AND (year * 10 + quarter) <= ?
+              AND eps IS NOT NULL
+            ORDER BY stock_id, year DESC, quarter DESC
+        """
+        rows = conn.execute(q, clean_codes + [max_key]).fetchall()
+
+    for stock_id, yr, qtr, eps in rows:
+        code = str(stock_id).strip()
+        if code in out:
+            continue
+        eps_val = float(eps)
+        if qtr == 4:
+            ann_eps = eps_val
+        elif qtr == 1:
+            ann_eps = round(eps_val * 4, 2)
+        elif qtr == 2:
+            ann_eps = round(eps_val * 2, 2)
+        elif qtr == 3:
+            ann_eps = round(eps_val * 4 / 3, 2)
+        else:
+            ann_eps = eps_val
+
+        out[code] = {
+            "eps": eps_val,
+            "annualized_eps": ann_eps,
+            "year": int(yr),
+            "quarter": int(qtr),
+        }
+    return out
+
+
+def _query_latest_div_for_date(
+    db_path: Optional[str],
+    codes: List[str],
+    as_of_date: str,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    查詢截至 as_of_date 當天市場公開可得之最新現金股利與殖利率。
+    回傳: {code: {"cash": float, "stock": float, "cash_yield_pct": float, "year": int}}
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    if not codes or not as_of_date:
+        return out
+
+    path = _resolve_div_db_path(db_path)
+    if not os.path.exists(path):
+        return out
+
+    try:
+        dt = datetime.strptime(as_of_date.split(" ")[0], "%Y-%m-%d")
+    except Exception:
+        return out
+
+    y = dt.year
+    clean_codes = [str(c).strip() for c in codes if str(c).strip()]
+    if not clean_codes:
+        return out
+
+    with sqlite3.connect(path) as conn:
+        placeholders = ",".join("?" * len(clean_codes))
+        q = f"""
+            SELECT stock_id, year, cash, stock, cash_yield_pct
+            FROM dividend_history
+            WHERE stock_id IN ({placeholders})
+              AND year <= ?
+            ORDER BY stock_id, year DESC
+        """
+        rows = conn.execute(q, clean_codes + [y]).fetchall()
+
+    for stock_id, yr, cash, stk, cash_yld in rows:
+        code = str(stock_id).strip()
+        if code in out:
+            continue
+        c_val = float(cash or 0.0)
+        s_val = float(stk or 0.0)
+        y_val = float(cash_yld) if cash_yld is not None else 0.0
+        if c_val > 0 or y_val > 0:
+            out[code] = {
+                "cash": c_val,
+                "stock": s_val,
+                "cash_yield_pct": y_val,
+                "year": int(yr),
+            }
+    return out

@@ -42,3 +42,16 @@ source/eps_history.db-journal
 
 # Test artifacts
 .pytest_cache/
+
+# Build & Dist artifacts
+build/
+dist/
+.tmp/
+
+# Excel exports & backups
+*.xlsx
+*.bak_*
+*.b4_*
+*.db.bak_*
+etf_history.db
+source/etf_history.db

@@ -37,6 +37,16 @@ import pandas as pd
 # Schema
 # ==========================================================
 
+
+
+def _resolve_db_path(db_path: Optional[str]) -> str:
+    """統一 portfolio.db 路徑解析 - 跨 pycharm + .bin 一致"""
+    if db_path:
+        return db_path
+    from stocktool.config import get_data_path
+    return get_data_path("portfolio.db")
+
+
 PAPER_TRADING_SCHEMA = """
 -- 模擬帳戶（每組投資組合一筆）
 CREATE TABLE IF NOT EXISTS sim_portfolios (
@@ -128,9 +138,9 @@ CREATE INDEX IF NOT EXISTS idx_sim_snapshot_portfolio_date ON sim_daily_snapshot
 """
 
 
-def init_paper_trading_db(db_path: str = "portfolio.db"):
+def init_paper_trading_db(db_path: Optional[str] = None):
     """【V1.2.0】初始化模擬買賣的 4 張表（冪等、可重複執行）"""
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         conn.executescript(PAPER_TRADING_SCHEMA)
         conn.commit()
 
@@ -209,8 +219,8 @@ class SimTrade:
 # DB CRUD
 # ==========================================================
 
-def list_portfolios(db_path: str = "portfolio.db", status: Optional[str] = None) -> List[PaperPortfolio]:
-    with sqlite3.connect(db_path) as conn:
+def list_portfolios(db_path: Optional[str] = None, status: Optional[str] = None) -> List[PaperPortfolio]:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         if status:
             rows = conn.execute(
@@ -235,7 +245,7 @@ def list_portfolios(db_path: str = "portfolio.db", status: Optional[str] = None)
 
 
 def get_portfolio(db_path: str, portfolio_id: int) -> Optional[PaperPortfolio]:
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM sim_portfolios WHERE id = ?", (portfolio_id,)).fetchone()
         if not row:
@@ -254,7 +264,7 @@ def get_portfolio(db_path: str, portfolio_id: int) -> Optional[PaperPortfolio]:
 
 def create_portfolio(db_path: str, p: PaperPortfolio) -> int:
     p.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         cur = conn.execute(
             """INSERT INTO sim_portfolios
                (name, excel_file, stock_pool, initial_cash, max_holdings,
@@ -276,7 +286,7 @@ def create_portfolio(db_path: str, p: PaperPortfolio) -> int:
 
 
 def update_portfolio(db_path: str, p: PaperPortfolio):
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         conn.execute(
             """UPDATE sim_portfolios SET
                name=?, excel_file=?, stock_pool=?, initial_cash=?, max_holdings=?,
@@ -297,25 +307,25 @@ def update_portfolio(db_path: str, p: PaperPortfolio):
 
 
 def update_portfolio_status(db_path: str, portfolio_id: int, status: str):
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         conn.execute("UPDATE sim_portfolios SET status = ? WHERE id = ?", (status, portfolio_id))
         conn.commit()
 
 
 def update_portfolio_last_run(db_path: str, portfolio_id: int, trade_date: str):
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         conn.execute("UPDATE sim_portfolios SET last_run_date = ? WHERE id = ?", (trade_date, portfolio_id))
         conn.commit()
 
 
 def delete_portfolio(db_path: str, portfolio_id: int):
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         conn.execute("DELETE FROM sim_portfolios WHERE id = ?", (portfolio_id,))
         conn.commit()
 
 
 def list_holdings(db_path: str, portfolio_id: int) -> List[SimHolding]:
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT * FROM sim_holdings WHERE portfolio_id = ? ORDER BY entry_date",
@@ -326,7 +336,7 @@ def list_holdings(db_path: str, portfolio_id: int) -> List[SimHolding]:
 
 def upsert_holding(db_path: str, h: SimHolding):
     """新增或更新一筆持倉（同 portfolio_id+stock_code 只保留一筆）"""
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         existing = conn.execute(
             "SELECT id FROM sim_holdings WHERE portfolio_id = ? AND stock_code = ?",
             (h.portfolio_id, h.stock_code)
@@ -350,7 +360,7 @@ def upsert_holding(db_path: str, h: SimHolding):
 
 
 def delete_holding(db_path: str, portfolio_id: int, stock_code: str):
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         conn.execute(
             "DELETE FROM sim_holdings WHERE portfolio_id = ? AND stock_code = ?",
             (portfolio_id, stock_code)
@@ -359,7 +369,7 @@ def delete_holding(db_path: str, portfolio_id: int, stock_code: str):
 
 
 def insert_trade(db_path: str, t: SimTrade) -> int:
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         cur = conn.execute(
             """INSERT INTO sim_trades
                (portfolio_id, trade_date, action, stock_code, stock_name,
@@ -375,7 +385,7 @@ def insert_trade(db_path: str, t: SimTrade) -> int:
 
 
 def list_trades(db_path: str, portfolio_id: int, limit: int = 500) -> List[SimTrade]:
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT * FROM sim_trades WHERE portfolio_id = ? ORDER BY trade_date DESC, id DESC LIMIT ?",
@@ -389,7 +399,7 @@ def upsert_daily_snapshot(db_path: str, portfolio_id: int, trade_date: str,
                           holdings_count: int, cum_return_pct: Optional[float] = None,
                           bench_return_pct: Optional[float] = None,
                           twse_close: Optional[float] = None):
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         conn.execute(
             """INSERT INTO sim_daily_snapshot
                (portfolio_id, trade_date, cash, holdings_value, total_value,
@@ -410,7 +420,7 @@ def upsert_daily_snapshot(db_path: str, portfolio_id: int, trade_date: str,
 
 
 def list_snapshots(db_path: str, portfolio_id: int) -> pd.DataFrame:
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         return pd.read_sql_query(
             "SELECT * FROM sim_daily_snapshot WHERE portfolio_id = ? ORDER BY trade_date",
             conn, params=(portfolio_id,)
@@ -419,7 +429,7 @@ def list_snapshots(db_path: str, portfolio_id: int) -> pd.DataFrame:
 
 def get_current_cash(db_path: str, portfolio_id: int, initial_cash: float) -> float:
     """從交易紀錄推算當前現金"""
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_resolve_db_path(db_path)) as conn:
         rows = conn.execute(
             """SELECT action, amount, fee, tax FROM sim_trades
                WHERE portfolio_id = ? ORDER BY id""",

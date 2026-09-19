@@ -29,6 +29,7 @@ from .config import (
     CONFIG_FILE,
     HISTORY_DIR,
     VERSION,
+    BUILD_TIMESTAMP,
     _HALF_DAY_DATES,
     _HOLIDAY_DATES,
     load_config,
@@ -99,6 +100,8 @@ from .database import (
     _upsert_eps_history,
     _query_eps_history,
     _eps_history_stats,
+    _query_latest_eps_for_date,
+    _query_latest_div_for_date,
 )
 from .scoring import (
     _run_manual_selection,

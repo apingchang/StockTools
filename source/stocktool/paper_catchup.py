@@ -71,41 +71,221 @@ def _get_historical_prices(
     from .export_excel import get_history_file
     from .cache import load_cache
 
+    # 2026-08-20 bug fix：cache 實際放的是 cfg.history_months (預設 60)
+    # 之前寫死 12 → *_12m.xlsx 不存在 → 整個 stock_data 空 → 28 天全部 skip
+    # 修法：依序嘗試 cfg.history_months / 60 / 12 (相容舊 cache)
+    months_to_try = []
+    if cfg is not None and hasattr(cfg, 'history_months') and cfg.history_months:
+        months_to_try.append(int(cfg.history_months))
+    for m in (60, 12):
+        if m not in months_to_try:
+            months_to_try.append(m)
+
+    import os as _os
+    from .export_excel import get_stock_history  # 2026-08-20: 過舊 cache auto-refresh
+
     for code in codes:
         try:
-            # 12 個月歷史足夠抓到半年內任何一天
-            fp = get_history_file(code, 12)
-            import os
-            if not os.path.exists(fp):
-                continue
-            df, _, _ = load_cache(fp)
+            fp = None
+            used_months = None
+            for m in months_to_try:
+                cand = get_history_file(code, m)
+                if _os.path.exists(cand):
+                    fp = cand
+                    used_months = m
+                    break
+
+            df = None
+            cache_max_str = ""
+            if fp is not None:
+                df, _, _ = load_cache(fp)
+                if df is not None and not df.empty and "Date" in df.columns:
+                    try:
+                        cache_max_str = pd.to_datetime(df["Date"]).max().strftime("%Y-%m-%d")
+                    except Exception:
+                        cache_max_str = ""
+
+            # === 2026-08-20 新增：cache 過舊時 auto-refresh ===
+            # 條件：fp 不存在 OR cache_max < trade_date
+            # 沒 session 就 graceful skip (test / PyCharm 開發模式也支援)
+            need_refresh = (
+                fp is None or  # 完全沒 cache
+                (cache_max_str and cache_max_str < trade_date)  # cache 過舊
+            )
+            if need_refresh:
+                if session is None:
+                    # 沒 session → graceful skip
+                    if logger:
+                        logger.warning(
+                            f"[catchup] {code} cache 過舊 (max={cache_max_str}) "
+                            f"且無 session、跳過 {trade_date}"
+                        )
+                    continue
+                # 決定 refresh 用幾幾個月 (used_months from existing cache, else cfg, else default 60)
+                refresh_months = used_months
+                if refresh_months is None:
+                    if cfg is not None and hasattr(cfg, "history_months") and cfg.history_months:
+                        refresh_months = int(cfg.history_months)
+                    else:
+                        refresh_months = 60
+                try:
+                    # get_stock_history: load → update_stock_history (or init if no cache) → save_cache → return df
+                    df = get_stock_history(session, cfg, code, logger, refresh_months)
+                except Exception as e:
+                    if logger:
+                        logger.warning(f"[catchup] {code} refresh 失敗: {e}")
+                    continue
+
             if df is None or df.empty:
                 continue
             # 找對應日期
-            if "Date" in df.columns:
-                df["Date"] = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d")
-                row = df[df["Date"] == trade_date]
-            elif "date" in df.columns:
-                df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
-                row = df[df["date"] == trade_date]
-            else:
+            date_col = "Date" if "Date" in df.columns else ("date" if "date" in df.columns else None)
+            if not date_col:
                 continue
+            df[date_col] = pd.to_datetime(df[date_col]).dt.strftime("%Y-%m-%d")
+            row = df[df[date_col] == trade_date]
             if row.empty:
                 continue
             r = row.iloc[0]
-            price = float(r.get("Close") or r.get("close") or 0)
+            close_col = "Close" if "Close" in df.columns else ("close" if "close" in df.columns else None)
+            price = float(r.get(close_col) or 0) if close_col else 0.0
             if price <= 0:
                 continue
+
+            # 技術指標（以 trade_date 及之前的歷史日 K 計算）
+            rsi = None
+            ma20_slope = None
+            sub_df = df[df[date_col] <= trade_date].sort_values(date_col)
+            if len(sub_df) >= 20:
+                ma20_curr = float(sub_df[close_col].tail(20).mean())
+                prev_len = min(25, len(sub_df))
+                ma20_prev = float(sub_df[close_col].iloc[-prev_len:-5].mean()) if prev_len > 5 else ma20_curr
+                ma20_slope = round(ma20_curr - ma20_prev, 4)
+            if len(sub_df) >= 15:
+                delta = sub_df[close_col].diff()
+                gain = float(delta.clip(lower=0).tail(14).mean())
+                loss = float((-delta.clip(upper=0)).tail(14).mean())
+                if loss == 0 or pd.isna(loss):
+                    rsi = 100.0 if gain > 0 else 50.0
+                else:
+                    rs = gain / loss
+                    rsi = round(100.0 - (100.0 / (1.0 + rs)), 1)
+
             out[code] = {
                 "code": code,
                 "name": str(r.get("Name", code)),
                 "price": price,
+                "rsi": rsi,
+                "ma20_slope": ma20_slope,
             }
         except Exception as e:
             if logger:
                 logger.warning(f"[catchup] {code} @ {trade_date} 抓取失敗: {e}")
 
+    # 注入基本面數據（EPS、動態 PE、股利、動態殖利率、營收 YoY）
+    eps_db = getattr(cfg, "eps_history_db", None) if cfg else None
+    out = enrich_stock_fundamentals(out, trade_date, eps_db=eps_db)
+
     return out
+
+
+_REVENUE_CACHE: Optional[Dict[str, float]] = None
+
+
+def _get_revenue_yoy_map() -> Dict[str, float]:
+    global _REVENUE_CACHE
+    if _REVENUE_CACHE is not None:
+        return _REVENUE_CACHE
+
+    import os as _os
+    candidates = [
+        "cache/revenue.xlsx",
+        "source/cache/revenue.xlsx",
+        _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "cache", "revenue.xlsx"),
+        _os.path.expanduser("~/.local/share/stocktool/cache/revenue.xlsx"),
+        "dist/cache/revenue.xlsx",
+    ]
+    res: Dict[str, float] = {}
+    for p in candidates:
+        if _os.path.exists(p):
+            try:
+                df = pd.read_excel(p)
+                code_col = None
+                yoy_col = None
+                for c in df.columns:
+                    sc = str(c).strip()
+                    if sc in ("股票代號", "code", "stock_id"):
+                        code_col = c
+                    if "營收YoY" in sc or "累計營收YoY" in sc:
+                        yoy_col = c
+                if code_col and yoy_col:
+                    for _, r in df.iterrows():
+                        raw_c = str(r[code_col]).strip()
+                        if raw_c.endswith(".0"):
+                            raw_c = raw_c[:-2]
+                        val = r[yoy_col]
+                        if pd.notna(val):
+                            try:
+                                res[raw_c] = float(val)
+                            except Exception:
+                                pass
+                    if res:
+                        _REVENUE_CACHE = res
+                        return res
+            except Exception:
+                continue
+    _REVENUE_CACHE = res
+    return res
+
+
+def enrich_stock_fundamentals(
+    stock_data: Dict[str, Dict[str, Any]],
+    as_of_date: str,
+    eps_db: Optional[str] = None,
+    div_db: Optional[str] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    為 stock_data 注入歷史公開之 EPS、動態本益比 (PE)、股利與動態殖利率 (Yield %)、營收 YoY (%)。
+    若欄位原本已存在且有效，則保留。
+    """
+    if not stock_data or not as_of_date:
+        return stock_data
+
+    from .database import _query_latest_eps_for_date, _query_latest_div_for_date
+
+    codes = list(stock_data.keys())
+    eps_map = _query_latest_eps_for_date(eps_db, codes, as_of_date)
+    div_map = _query_latest_div_for_date(div_db, codes, as_of_date)
+    rev_map = _get_revenue_yoy_map()
+
+    for code, info in stock_data.items():
+        price = float(info.get("price") or 0.0)
+
+        # 1. EPS & PE
+        if info.get("eps") is None and code in eps_map:
+            eps_info = eps_map[code]
+            info["eps"] = eps_info.get("eps")
+            ann_eps = eps_info.get("annualized_eps")
+            if info.get("pe") is None and ann_eps and ann_eps > 0 and price > 0:
+                info["pe"] = round(price / ann_eps, 2)
+        elif info.get("pe") is None and info.get("eps") and float(info["eps"]) > 0 and price > 0:
+            info["pe"] = round(price / float(info["eps"]), 2)
+
+        # 2. 股利 & 殖利率
+        if info.get("yield_pct") is None and code in div_map:
+            d_info = div_map[code]
+            cash = d_info.get("cash", 0.0)
+            cash_yld = d_info.get("cash_yield_pct", 0.0)
+            if cash > 0 and price > 0:
+                info["yield_pct"] = round((cash / price) * 100, 2)
+            elif cash_yld > 0:
+                info["yield_pct"] = cash_yld
+
+        # 3. 營收 YoY
+        if info.get("rev_yoy") is None and code in rev_map:
+            info["rev_yoy"] = rev_map[code]
+
+    return stock_data
 
 
 # ==========================================================

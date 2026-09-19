@@ -111,7 +111,7 @@ MIGRATION_SQL = [
     "ALTER TABLE transactions ADD COLUMN tax REAL NOT NULL DEFAULT 0",
 ]
 
-DEFAULT_PORTFOLIO_DB = "portfolio.db"
+DEFAULT_PORTFOLIO_DB = None  # 2026-08-19 改: PortfolioDB(None) 內部用 get_data_path() 統一
 
 # ==========================================================
 # V0.9.4 phase2.3: 費用 default（台股規定值，可經策略參數覆寫）
@@ -407,8 +407,12 @@ class PortfolioSummary:
 # ==========================================================
 class PortfolioDB:
     def __init__(self,
-                 db_path: str = DEFAULT_PORTFOLIO_DB,
+                 db_path: Optional[str] = DEFAULT_PORTFOLIO_DB,
                  broker_discount: float = DEFAULT_BROKER_DISCOUNT):
+        # 2026-08-19 改: db_path=None → 用 config.get_data_path() 統一
+        if db_path is None:
+            from stocktool.config import get_data_path
+            db_path = get_data_path("portfolio.db")
         self.db_path = db_path
         self.broker_discount = broker_discount
         self._init_schema()
@@ -881,7 +885,7 @@ class PortfolioDB:
 # ==========================================================
 # 便利函式
 # ==========================================================
-def make_portfolio(db_path: str = DEFAULT_PORTFOLIO_DB,
+def make_portfolio(db_path: Optional[str] = DEFAULT_PORTFOLIO_DB,
                    broker_discount: float = DEFAULT_BROKER_DISCOUNT) -> PortfolioDB:
     return PortfolioDB(db_path=db_path, broker_discount=broker_discount)
 

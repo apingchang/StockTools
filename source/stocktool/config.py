@@ -28,7 +28,8 @@ warnings.filterwarnings("ignore")
 # ==========================================================
 # 版本常數（v1.0 中央管理）
 # ==========================================================
-VERSION = "v1.2.0-paper-trading-kb-focus-v26"
+VERSION = "v1.2.1-paper-fundamentals"
+BUILD_TIMESTAMP = "2026/09/19 09:45:00"
 
 
 # ==========================================================
@@ -70,7 +71,35 @@ COLOR_PROFIT_ZERO = "#222222"  # 零 = 深灰（不特別高/低）
 # Config 檔案路徑與預設設定
 # ==========================================================
 
-CONFIG_FILE = "stocktool_config.json"
+# ==========================================================
+# Data dir helpers (2026-08-19 改: 統一 user home, 跨 pycharm + .bin 一致)
+# ==========================================================
+from pathlib import Path as _Path
+
+def get_data_dir():
+    """User home 內的 data dir.
+    pycharm 跑 → ~/.local/share/stocktool/
+    .bin 跑 → 同上 (不再用 cwd 相對路徑, 也不再用 _MEIPASS)
+    第一次跑時 seed from .bin PYZ (見 StockTool.py _seed_data_files)
+    """
+    d = _Path.home() / ".local" / "share" / "stocktool"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def get_data_path(filename: str) -> str:
+    """取得 data file 的絕對路徑"""
+    return str(get_data_dir() / filename)
+
+def get_data_dir_path(subdir: str) -> str:
+    """User home data dir 內的子目錄絕對路徑 (e.g., 'cache/history')
+    自動 mkdir、跨 pycharm + .bin 一致
+    """
+    d = get_data_dir() / subdir
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d)
+
+
+CONFIG_FILE = get_data_path("stocktool_config.json")
 
 DEFAULT_CONFIG = {
     "top_n_for_tech": 60,
@@ -96,7 +125,7 @@ DEFAULT_CONFIG = {
     "simple_min_eps_yoy": -999.0,
     "simple_min_eps": -999.0,
     "simple_max_pe": 999.0,
-    "eps_history_db": "eps_history.db",
+    "eps_history_db": get_data_path("eps_history.db"),
     "use_mtf_confirmation": True,
     "use_divergence_detection": True,
     "volume_surge_multiplier": 2.0,
@@ -175,7 +204,9 @@ def save_config(config: dict):
 # StrategyConfig
 # ==========================================================
 
-HISTORY_DIR = "cache/history"
+# 2026-08-20 改：HISTORY_DIR 統一到 user home (跟 db 一致)
+# 跨 pycharm + .bin 都讀 ~/.local/share/stocktool/cache/history/
+HISTORY_DIR = get_data_dir_path("cache/history")
 
 
 @dataclass

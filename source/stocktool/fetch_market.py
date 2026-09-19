@@ -207,7 +207,8 @@ def _fetch_market_stock_list(logger: GuiLogger = None) -> pd.DataFrame:
     """
     import sqlite3
     # 優先用 eps_history.db 湊出名單（已有股票代號，快速）
-    db_path = "eps_history.db"
+    from stocktool.config import get_data_path
+    db_path = get_data_path("eps_history.db")
     if os.path.exists(db_path):
         try:
             conn = sqlite3.connect(db_path)
@@ -317,6 +318,11 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
     _MS_PROGRESS["stage"] = "TWSE即時股價"
     _MS_PROGRESS["total"] = total
 
+    # 【V0.9.5-goodinfo4+6 (log-summary) 修】2026-08-23 09:56 William 反映
+    # 原本每批失敗都印「⚠️ TWSE tse 整批失敗」→ 開盤後幾分鐘 MIS API 暖機、
+    # 8 批 = 8 條 log 洗版。改成 batch loop 結束後只印 1 行 summary。
+    n_batches_fully_failed = 0
+
     for batch_idx in range(n_batches):
         batch_codes = codes[
             batch_idx * _TWSE_REALTIME_BATCH_SIZE:
@@ -411,7 +417,9 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
                         msg_otc = []
         elif missing_codes:
             # tse 整批失敗（missing > 90%）→ 不打 otc（otc 也會被擋）
-            _log_print(logger, f"⚠️ TWSE tse 整批失敗（{len(missing_codes)}/{len(batch_codes)}）→ 跳過 otc fallback")
+            # 【V0.9.5-goodinfo4+6 (log-summary) 修】2026-08-23 09:56 William
+            # 不再 per-batch warning、只計數、loop 結束後印 1 行 summary
+            n_batches_fully_failed += 1
 
         all_msg = msg_tse + msg_otc
 
@@ -483,6 +491,15 @@ def _fetch_twse_realtime_batch(stock_ids: List[str],
         # 輕微延遲，避免對 TWSE 伺服器造成壓力
         if batch_idx < n_batches - 1:
             time.sleep(0.5)  # 【V0.9.5-info3】原本 0.1s 太短、連打 30 批被 rate limit
+
+    # 【V0.9.5-goodinfo4+6 (log-summary) 修】batch loop 結束、印 summary
+    if n_batches_fully_failed > 0:
+        success_batches = n_batches - n_batches_fully_failed
+        _log_print(
+            logger,
+            f"ℹ️ TWSE 即時股價: {success_batches}/{n_batches} 批成功、"
+            f"{n_batches_fully_failed} 批 fallback (MIS 開盤後限流、由 STOCK_DAY_ALL/TPEx 接手)"
+        )
 
     df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["股票代號", "現價", "漲跌", "成交量_張", "data_date_raw"])
     df["股票代號"] = df["股票代號"].astype(str).str.strip()
